@@ -31,10 +31,20 @@ async def run_automation_workflow(username, sso_token):
             await page.goto(URL_BCKD)
             await page.wait_for_load_state('networkidle')
 
-            # Điền thông tin đăng nhập
-            await page.fill('input[name="username"]', username) # Giả định selector, cần kiểm tra lại
-            await page.fill('input[name="password"]', sso_token) # Giả định selector, cần kiểm tra lại
-            await page.click('button[type="submit"]') # Giả định selector, cần kiểm tra lại
+            # --- BẮT ĐẦU THAY THẾ TỪ ĐÂY ---
+
+# Điền Tên đăng nhập
+await page.fill("#txtUsername", username)
+
+# Điền mã SSO vào từng ô nhỏ
+for index, digit in enumerate(sso_token):
+    selector = f"#digitnumber{index + 1}"
+    await page.fill(selector, digit)
+
+# Bấm nút đăng nhập cuối cùng
+await page.click(".button-submit") 
+
+# --- KẾT THÚC THAY THẾ TẠI ĐÂY ---
 
             # Chờ đăng nhập thành công và tải lại trang BI
             await page.wait_for_load_state('networkidle')
@@ -48,12 +58,8 @@ async def run_automation_workflow(username, sso_token):
             await page.goto(URL_DASHBOARD)
             await page.wait_for_load_state('networkidle')
 
-            # Dán thông minh (thực chất là điền dữ liệu vào textarea)
-            # Giả định có một textarea với id='bckd-input', cần kiểm tra lại
-            await page.fill('#bckd-input', bckd_data)
-            # Giả định có một nút với id='paste-bckd-button', cần kiểm tra lại
-            await page.click('#paste-bckd-button')
-            print("Đã dán dữ liệu Báo cáo Kinh doanh.")
+            # Bấm nút dán tương ứng
+            await page.click('button[data-target="mainDataInput"]')
 
 
             # === BƯỚC 3: Xử lý Dữ liệu Thi đua ===
@@ -68,29 +74,29 @@ async def run_automation_workflow(username, sso_token):
             await page.goto(URL_DASHBOARD)
             await page.wait_for_load_state('networkidle')
 
-            # Dán thông minh
-            await page.fill('#thidua-input', thidua_data)
-            await page.click('#paste-thidua-button')
-            print("Đã dán dữ liệu Thi đua.")
+            # Bấm nút dán tương ứng
+            await page.click('button[data-target="contestDataInput"]')
 
             # === BƯỚC 4: Tạo Dashboard, chụp ảnh và lấy nhận xét ===
             print("Đang tạo Dashboard và chụp ảnh...")
-            # Bấm nút tạo dashboard
-            await page.click('#create-dashboard-button') # Giả định selector
+            
+            # Bấm nút tạo dashboard - THAY THẾ DÒNG NÀY
+            await page.click('#analyzeBtn') 
             await page.wait_for_timeout(5000) # Chờ 5s để dashboard render
 
             # Bắt sự kiện download và bấm nút chụp ảnh
             async with page.expect_download() as download_info:
-                await page.click('#capture-report-button') # Giả định selector
-
+            # THAY THẾ SELECTOR TRONG DÒNG NÀY
+            await page.click('#captureBtdLuyKe')
+        
             download = await download_info.value
-            image_path = f"/tmp/{download.suggested_filename}" # Lưu ảnh vào thư mục tạm
+            image_path = f"/tmp/{download.suggested_filename}"
             await download.save_as(image_path)
             print(f"Ảnh đã được tải về tại: {image_path}")
 
-            # Bấm nút sao chép nhận xét
-            await page.click('#copy-comment-button') # Giả định selector
-
+            # Bấm nút sao chép nhận xét - THAY THẾ DÒNG NÀY
+            await page.click('.copySummaryBtn')
+            
             # Lấy nội dung từ clipboard của trình duyệt ảo
             comment_text = await page.evaluate("() => navigator.clipboard.readText()")
             print(f"Đã sao chép nhận xét: {comment_text}")
