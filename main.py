@@ -84,6 +84,7 @@ async def run_automation_workflow(username, sso_token):
 
             # Chờ và bắt sự kiện download file ảnh
             async with page.expect_download() as download_info:
+                # DÒNG NÀY ĐÃ ĐƯỢC SỬA LỖI THỤT ĐẦU DÒNG
                 await page.click('#captureBtdLuyKe')
 
             download = await download_info.value
