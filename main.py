@@ -33,18 +33,18 @@ async def run_automation_workflow(username, sso_token):
 
             # --- BẮT ĐẦU THAY THẾ TỪ ĐÂY ---
 
-# Điền Tên đăng nhập
-await page.fill("#txtUsername", username)
-
-# Điền mã SSO vào từng ô nhỏ
-for index, digit in enumerate(sso_token):
-    selector = f"#digitnumber{index + 1}"
-    await page.fill(selector, digit)
-
-# Bấm nút đăng nhập cuối cùng
-await page.click(".button-submit") 
-
-# --- KẾT THÚC THAY THẾ TẠI ĐÂY ---
+            # Điền Tên đăng nhập
+            await page.fill("#txtUsername", username)
+            
+            # Điền mã SSO vào từng ô nhỏ
+            for index, digit in enumerate(sso_token):
+                selector = f"#digitnumber{index + 1}"
+                await page.fill(selector, digit)
+            
+            # Bấm nút đăng nhập cuối cùng
+            await page.click(".button-submit") 
+            
+            # --- KẾT THÚC THAY THẾ TẠI ĐÂY ---
 
             # Chờ đăng nhập thành công và tải lại trang BI
             await page.wait_for_load_state('networkidle')
