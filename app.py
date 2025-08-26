@@ -96,19 +96,35 @@ def handle_message(event):
     try:
         sheet = CLIENT.open(SHEET_NAME).worksheet(WORKSHEET_NAME)
         all_data = sheet.get_all_values()
+
         header_row = all_data[0]
         found_row = None
+
         for row in all_data[1:]:
+            # Cột Siêu Thị là cột C, index 2
             if row and len(row) > 2 and row[2] and row[2].strip().startswith(user_message):
                 found_row = row
                 break
+
         if found_row:
+            # Phân tích dữ liệu thi đua từ các cột G trở đi
             competition_results = parse_competition_data(header_row, found_row)
+
+            # Tạo Flex Message
             flex_message_data = create_flex_message(found_row, competition_results)
-            reply_message = FlexSendMessage(alt_text='Báo cáo Realtime', contents=flex_message_data['contents'])
+            reply_message = FlexSendMessage(
+                alt_text='Báo cáo Realtime',
+                contents=flex_message_data['contents']
+            )
         else:
             reply_message = TextSendMessage(text=f'Không tìm thấy dữ liệu cho mã siêu thị: {user_message}')
+
     except Exception as e:
         print(f"Lỗi: {e}")
         reply_message = TextSendMessage(text='Đã có lỗi xảy ra khi truy vấn dữ liệu.')
-    line_bot_api.reply_message(event.reply
+
+    # Dòng này đã được sửa lại cho đúng cú pháp
+    line_bot_api.reply_message(
+        event.reply_token,
+        reply_message
+    )
