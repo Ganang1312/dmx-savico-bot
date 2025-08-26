@@ -22,7 +22,7 @@ GOOGLE_CREDS_JSON = os.environ.get('GOOGLE_CREDENTIALS_JSON')
 if not all([CHANNEL_ACCESS_TOKEN, CHANNEL_SECRET, GOOGLE_CREDS_JSON]):
     raise ValueError("Lỗi: Hãy kiểm tra lại các biến môi trường trên Render.")
 
-# --- CẤU HÌNH GOOGLE SHEETS TỪ BIẾN MÔI TRƯỜDNG ---
+# --- CẤU HÌNH GOOGLE SHEETS TỪ BIẾN MÔI TRƯỜNG ---
 SCOPE = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
 # Chuyển chuỗi JSON từ biến môi trường thành dictionary để xác thực
 google_creds_dict = json.loads(GOOGLE_CREDS_JSON)
@@ -31,9 +31,9 @@ CLIENT = gspread.authorize(CREDS)
 
 # !!! QUAN TRỌNG: Đảm bảo 2 dòng dưới đây khớp 100% với file Google Sheet của bạn
 # Tên của cả file Google Sheet
-SHEET_NAME = 'chi_tiet_cum' 
+SHEET_NAME = 'chi_tiet_cum'
 # Tên của trang tính (tab) bên trong file đó
-WORKSHEET_NAME = 'chi_tiet_cum' 
+WORKSHEET_NAME = 'chi_tiet_cum'
 
 # --- KHỞI TẠO ỨNG DỤNG ---
 app = Flask(__name__)
@@ -64,9 +64,9 @@ def parse_competition_data(header_row, data_row):
                 except (ValueError, TypeError):
                     percent_ht_formatted = "0.00%"
                 results.append({
-                    "name": category_name, 
-                    "realtime": realtime_val, 
-                    "target": target_val, 
+                    "name": category_name,
+                    "realtime": realtime_val,
+                    "target": target_val,
                     "percent_ht": percent_ht_formatted
                 })
             except IndexError:
@@ -78,7 +78,7 @@ def create_flex_message(store_data, competition_results):
     Hàm này tạo cấu trúc JSON cho Flex Message dựa trên dữ liệu đầu vào.
     """
     sieu_thi_full = store_data[2]
-    ma_sieu_thi = sieu_thi_full.split(' - ')[0]
+    ma_sieu_thi = sieu_thi_full.split(' ')[0] # Lấy mã số bằng cách tách chuỗi
     ten_sieu_thi = " - ".join(sieu_thi_full.split(' - ')[1:])
     target = store_data[3]
     realtime = store_data[4]
@@ -139,37 +139,40 @@ def callback():
         abort(400)
     return 'OK'
 
-# --- HÀM XỬ LÝ TIN NHẮN CHÍNH (CÓ LOG CHI TIẾT ĐỂ GỠ LỖI) ---
+# --- HÀM XỬ LÝ TIN NHẮN CHÍNH (LOGIC TÌM KIẾM NÂNG CẤP) ---
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
     user_message = event.message.text.strip()
     print(f"--- Bắt đầu xử lý cho tin nhắn: '{user_message}' ---")
     try:
-        # Bước 1: Mở file Google Sheet
         print("Bước 1: Đang mở file Google Sheet...")
         sheet = CLIENT.open(SHEET_NAME).worksheet(WORKSHEET_NAME)
         print("=> Bước 1 THÀNH CÔNG: Đã mở file và trang tính.")
 
-        # Bước 2: Lấy tất cả dữ liệu
         print("Bước 2: Đang lấy tất cả dữ liệu từ trang tính...")
         all_data = sheet.get_all_values()
         print(f"=> Bước 2 THÀNH CÔNG: Đã lấy được {len(all_data)} dòng dữ liệu.")
 
-        # Bước 3: Tìm kiếm dòng tương ứng
         print(f"Bước 3: Đang tìm kiếm mã '{user_message}' trong dữ liệu...")
         header_row = all_data[0]
         found_row = None
         for i, row in enumerate(all_data[1:]):
             # Giả sử cột Siêu Thị là cột C (index 2)
-            if row and len(row) > 2 and row[2] and row[2].strip().startswith(user_message):
-                found_row = row
-                print(f"=> Bước 3 THÀNH CÔNG: Tìm thấy dữ liệu ở dòng {i+2}.")
-                break
+            if row and len(row) > 2 and row[2]:
+                # --- LOGIC TÌM KIẾM NÂNG CẤP ---
+                # Tách chuỗi trong ô bằng khoảng trắng và lấy phần tử đầu tiên
+                cell_content = row[2].strip()
+                supermarket_code = cell_content.split(' ')[0]
+                
+                # So sánh mã số đã tách với tin nhắn người dùng
+                if supermarket_code == user_message:
+                    found_row = row
+                    print(f"=> Bước 3 THÀNH CÔNG: Tìm thấy dữ liệu ở dòng {i+2}.")
+                    break
         
         if not found_row:
             print("=> Bước 3 CẢNH BÁO: Không tìm thấy dòng nào khớp.")
 
-        # Bước 4: Tạo tin nhắn trả lời
         print("Bước 4: Đang tạo tin nhắn trả lời...")
         if found_row:
             competition_results = parse_competition_data(header_row, found_row)
@@ -183,11 +186,9 @@ def handle_message(event):
         print("=> Bước 4 THÀNH CÔNG: Đã tạo xong tin nhắn.")
 
     except Exception as e:
-        # In ra lỗi chi tiết để gỡ lỗi
         print(f"!!! GẶP LỖI NGHIÊM TRỌNG: {repr(e)}")
         reply_message = TextSendMessage(text='Đã có lỗi xảy ra khi truy vấn dữ liệu.')
 
-    # Bước 5: Gửi tin nhắn về LINE
     print("Bước 5: Đang gửi tin nhắn trả lời về LINE...")
     line_bot_api.reply_message(
         event.reply_token,
