@@ -12,6 +12,7 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import collections
 from datetime import datetime
+import pytz
 
 # --- PHẦN CẤU HÌNH: ĐỌC TỪ BIẾN MÔI TRƯỜNG ---
 CHANNEL_ACCESS_TOKEN = os.environ.get('CHANNEL_ACCESS_TOKEN')
@@ -37,37 +38,50 @@ line_bot_api = LineBotApi(CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(CHANNEL_SECRET)
 
 # --- ĐỊNH NGHĨA CÁC HÀM XỬ LÝ ---
+
 def parse_competition_data(header_row, data_row):
-    start_column_index = 6
+    """
+    Hàm này xử lý logic phức tạp để trích xuất dữ liệu thi đua.
+    1st occurrence = %HT, 2nd = Realtime, 3rd = Target.
+    """
+    start_column_index = 6  # Cột G là index 6
     category_indices = collections.defaultdict(list)
     for i, header in enumerate(header_row[start_column_index:], start=start_column_index):
-        if header: category_indices[header].append(i)
+        if header:
+            category_indices[header].append(i)
+
     results = []
     for category_name, indices in category_indices.items():
         if len(indices) == 3:
             try:
-                percent_ht_val, realtime_val, target_val = data_row[indices[0]], data_row[indices[1]], data_row[indices[2]]
+                # Lấy dữ liệu theo đúng thứ tự: %HT, Realtime, Target
+                percent_ht_val = data_row[indices[0]]
+                realtime_val = data_row[indices[1]]
+                target_val = data_row[indices[2]]
                 
-                # Chuyển đổi và làm tròn %HT
                 percent_float = 0.0
                 try:
                     percent_float = float(percent_ht_val)
                 except (ValueError, TypeError):
-                    pass # Giữ giá trị là 0.0
+                    pass 
 
                 percent_ht_formatted = f"{round(percent_float * 100)}%"
                 
                 results.append({
-                    "name": category_name, 
-                    "realtime": realtime_val, 
-                    "target": target_val, 
+                    "name": category_name,
+                    "realtime": realtime_val,
+                    "target": target_val,
                     "percent_ht": percent_ht_formatted,
                     "percent_val": percent_float
                 })
-            except (ValueError, TypeError, IndexError): continue
+            except (ValueError, TypeError, IndexError):
+                continue
+    # Sắp xếp các ngành hàng theo %HT giảm dần
+    results.sort(key=lambda x: x['percent_val'], reverse=True)
     return results
 
 def format_currency(value_str):
+    """Hàm định dạng số thành chuỗi tiền tệ (Tr, Tỷ)."""
     try:
         value = float(value_str)
         if value >= 1000:
@@ -79,33 +93,37 @@ def format_currency(value_str):
         return "N/A"
 
 def create_flex_message(store_data, competition_results):
+    """Hàm tạo giao diện Flex Message mới."""
     # --- Trích xuất và chuẩn bị dữ liệu ---
-    cum = store_data[0]
-    sieu_thi_full = store_data[2]
+    cum = store_data[0] # Cột A
+    sieu_thi_full = store_data[2] # Cột C
     ten_sieu_thi_parts = sieu_thi_full.split(' - ')
     ten_sieu_thi = " - ".join(ten_sieu_thi_parts[1:]) if len(ten_sieu_thi_parts) > 1 else sieu_thi_full
 
-    realtime_tong = format_currency(store_data[4])
-    target_tong = format_currency(store_data[3])
-    
+    # Lấy dữ liệu từ đúng các cột D, E, F
+    realtime_tong = format_currency(store_data[4]) # Cột E
+    target_tong = format_currency(store_data[3])   # Cột D
     try:
-        percent_ht_tong = f"{round(float(store_data[5]) * 100)}%"
+        percent_ht_tong = f"{round(float(store_data[5]) * 100)}%" # Cột F
     except (ValueError, TypeError):
         percent_ht_tong = "0%"
 
-    now = datetime.now()
+    # Lấy thời gian thực tế theo múi giờ Việt Nam
+    tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
+    now = datetime.now(tz_vietnam)
     thoi_gian = f"{now.hour}h Ngày {now.day}/{now.month}"
 
     nh_thi_dua_dat = sum(1 for item in competition_results if item.get("percent_val", 0) >= 1)
 
     # --- Xây dựng các thành phần giao diện ---
     competition_components = []
+    # Bỏ 2 dòng separator đầu tiên để không có đường kẻ trắng
     for item in competition_results:
         percent_val = item.get("percent_val", 0)
         color = "#4CFF42" if percent_val >= 1 else ("#FFD142" if percent_val > 0.7 else "#FF4242")
 
         component = {
-            "type": "box", "layout": "horizontal", "margin": "md",
+            "type": "box", "layout": "horizontal", "margin": "md", "paddingTop": "sm", "paddingBottom": "sm",
             "contents": [
                 {"type": "text", "text": item["name"], "wrap": True, "size": "sm", "color": "#FFFFFF", "flex": 4, "gravity": "center"},
                 {"type": "text", "text": str(item["realtime"]), "size": "sm", "color": "#FFFFFF", "align": "center", "flex": 2, "gravity": "center"},
@@ -124,6 +142,7 @@ def create_flex_message(store_data, competition_results):
       "altText": f"Báo cáo tổng hợp cho {ten_sieu_thi}",
       "contents": {
         "type": "bubble",
+        "size": "giga",
         "backgroundColor": "#2E2E2E",
         "body": {
           "type": "box",
@@ -136,9 +155,9 @@ def create_flex_message(store_data, competition_results):
               "paddingAll": "20px",
               "backgroundColor": "#006c83",
               "contents": [
-                {"type": "text", "text": "BÁO CÁO TỔNG HỢP", "color": "#FFFFFF", "size": "lg", "align": "center"},
+                {"type": "text", "text": "BÁO CÁO TỔNG HỢP", "color": "#FFFFFF", "size": "lg", "align": "center", "weight": "bold"},
                 {"type": "text", "text": ten_sieu_thi.upper(), "color": "#FFFFFF", "weight": "bold", "size": "xl", "align": "center", "margin": "md", "wrap": True},
-                {"type": "box", "layout": "vertical", "margin": "lg", "contents": [
+                {"type": "box", "layout": "vertical", "margin": "lg", "spacing": "sm", "contents": [
                     {"type": "text", "text": f"⭐ Cụm: {cum}", "color": "#FFFFFF", "size": "sm"},
                     {"type": "text", "text": f"⭐ Thời gian: {thoi_gian}", "color": "#FFFFFF", "size": "sm"},
                     {"type": "text", "text": f"⭐ NH Thi Đua Đạt: {nh_thi_dua_dat}", "color": "#FFFFFF", "size": "sm"}
@@ -166,6 +185,12 @@ def create_flex_message(store_data, competition_results):
                 },
                 {"type": "text", "text": "% HOÀN THÀNH", "color": "#C0C0C0", "size": "md", "align": "center", "margin": "xl"},
                 {"type": "text", "text": percent_ht_tong, "color": "#4CFF42", "size": "4xl", "weight": "bold", "align": "center"},
+                {"type": "box", "layout": "horizontal", "margin": "xl", "contents": [
+                    {"type": "text", "text": "XH D.Thu ĐMX", "size": "sm", "color": "#C0C0C0", "align": "center", "flex": 1},
+                ]},
+                {"type": "box", "layout": "horizontal", "contents": [
+                    {"type": "text", "text": f"{store_data[30]}/{store_data[31]}", "weight": "bold", "size": "lg", "color": "#FFFFFF", "align": "center", "flex": 1},
+                ]},
                 {"type": "separator", "margin": "xl", "color": "#4A4A4A"},
                 {
                   "type": "box",
@@ -194,6 +219,7 @@ def create_flex_message(store_data, competition_results):
       }
     }
     return flex_json
+
 
 # --- ĐIỂM TIẾP NHẬN WEBHOOK TỪ LINE ---
 @app.route("/callback", methods=['POST'])
