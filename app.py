@@ -11,6 +11,7 @@ from linebot.models import (
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import collections
+from datetime import datetime
 
 # --- PHẦN CẤU HÌNH: ĐỌC TỪ BIẾN MÔI TRƯỜNG ---
 CHANNEL_ACCESS_TOKEN = os.environ.get('CHANNEL_ACCESS_TOKEN')
@@ -27,9 +28,7 @@ CREDS = ServiceAccountCredentials.from_json_keyfile_dict(google_creds_dict, SCOP
 CLIENT = gspread.authorize(CREDS)
 
 # Tên file và trang tính cần đọc
-# SỬA LẠI TÊN FILE CHO KHỚP VỚI FILE MÀ BOT THẤY ĐƯỢC
 SHEET_NAME = 'DATA REATIME'
-# QUAN TRỌNG: Hãy chắc chắn tên trang tính (tab) bên trong file 'DATA REATIME' cũng đúng
 WORKSHEET_NAME = 'chi_tiet_cum'
 
 # --- KHỞI TẠO ỨNG DỤNG ---
@@ -48,27 +47,152 @@ def parse_competition_data(header_row, data_row):
         if len(indices) == 3:
             try:
                 percent_ht_val, realtime_val, target_val = data_row[indices[0]], data_row[indices[1]], data_row[indices[2]]
-                percent_ht_formatted = "{:.2%}".format(float(percent_ht_val)) if percent_ht_val else "0.00%"
-                results.append({"name": category_name, "realtime": realtime_val, "target": target_val, "percent_ht": percent_ht_formatted})
+                
+                # Chuyển đổi và làm tròn %HT
+                percent_float = 0.0
+                try:
+                    percent_float = float(percent_ht_val)
+                except (ValueError, TypeError):
+                    pass # Giữ giá trị là 0.0
+
+                percent_ht_formatted = f"{round(percent_float * 100)}%"
+                
+                results.append({
+                    "name": category_name, 
+                    "realtime": realtime_val, 
+                    "target": target_val, 
+                    "percent_ht": percent_ht_formatted,
+                    "percent_val": percent_float
+                })
             except (ValueError, TypeError, IndexError): continue
     return results
 
+def format_currency(value_str):
+    try:
+        value = float(value_str)
+        if value >= 1000:
+            return f"{round(value / 1000, 2)} Tỷ"
+        if value > 0:
+            return f"{round(value, 2)} Tr"
+        return "0 Tr"
+    except (ValueError, TypeError):
+        return "N/A"
+
 def create_flex_message(store_data, competition_results):
+    # --- Trích xuất và chuẩn bị dữ liệu ---
+    cum = store_data[0]
     sieu_thi_full = store_data[2]
-    ma_sieu_thi = sieu_thi_full.split(' ')[0]
-    ten_sieu_thi = " - ".join(sieu_thi_full.split(' - ')[1:])
-    target, realtime = store_data[3], store_data[4]
-    try: percent_ht_tong = "{:.2%}".format(float(store_data[5]))
-    except (ValueError, TypeError): percent_ht_tong = "0.00%"
+    ten_sieu_thi_parts = sieu_thi_full.split(' - ')
+    ten_sieu_thi = " - ".join(ten_sieu_thi_parts[1:]) if len(ten_sieu_thi_parts) > 1 else sieu_thi_full
+
+    realtime_tong = format_currency(store_data[4])
+    target_tong = format_currency(store_data[3])
+    
+    try:
+        percent_ht_tong = f"{round(float(store_data[5]) * 100)}%"
+    except (ValueError, TypeError):
+        percent_ht_tong = "0%"
+
+    now = datetime.now()
+    thoi_gian = f"{now.hour}h Ngày {now.day}/{now.month}"
+
+    nh_thi_dua_dat = sum(1 for item in competition_results if item.get("percent_val", 0) >= 1)
+
+    # --- Xây dựng các thành phần giao diện ---
     competition_components = []
-    if competition_results:
-        competition_components.append({"type": "separator", "margin": "xxl"})
-        title_box = {"type": "box", "layout": "horizontal", "margin": "md", "contents": [{"type": "text", "text": "Ngành hàng", "weight": "bold", "size": "sm", "color": "#555555", "flex": 4}, {"type": "text", "text": "Realtime", "weight": "bold", "size": "sm", "color": "#555555", "align": "center", "flex": 2}, {"type": "text", "text": "Target", "weight": "bold", "size": "sm", "color": "#555555", "align": "center", "flex": 2}, {"type": "text", "text": "%HT", "weight": "bold", "size": "sm", "color": "#555555", "align": "end", "flex": 2}]}
-        competition_components.append(title_box)
-        for item in competition_results:
-            component = {"type": "box", "layout": "horizontal", "margin": "md", "contents": [{"type": "text", "text": item["name"], "wrap": True, "size": "xs", "color": "#111111", "flex": 4}, {"type": "text", "text": str(item["realtime"]), "size": "xs", "color": "#111111", "align": "center", "flex": 2}, {"type": "text", "text": str(item["target"]), "size": "xs", "color": "#111111", "align": "center", "flex": 2}, {"type": "text", "text": item["percent_ht"], "size": "xs", "color": "#111111", "align": "end", "flex": 2, "weight": "bold"}]}
-            competition_components.append(component)
-    flex_json = {"type": "flex", "altText": f"Báo cáo Realtime cho siêu thị {ma_sieu_thi}", "contents": {"type": "bubble", "size": "giga", "header": {"type": "box", "layout": "vertical", "contents": [{"type": "text", "text": "BÁO CÁO REALTIME", "weight": "bold", "size": "xl", "color": "#FFFFFF", "align": "center"}], "backgroundColor": "#006c83", "paddingAll": "20px"}, "body": {"type": "box", "layout": "vertical", "contents": [{"type": "box", "layout": "vertical", "margin": "lg", "spacing": "sm", "contents": [{"type": "text", "text": ten_sieu_thi, "wrap": True, "weight": "bold", "size": "md"}, {"type": "text", "text": f"Mã siêu thị: {ma_sieu_thi}", "size": "sm", "color": "#555555"}]}, {"type": "separator", "margin": "xxl"}, {"type": "box", "layout": "vertical", "margin": "xxl", "spacing": "sm", "contents": [{"type": "box", "layout": "horizontal", "contents": [{"type": "text", "text": "Target Tổng:", "size": "sm", "color": "#555555"}, {"type": "text", "text": str(target), "size": "sm", "color": "#111111", "align": "end"}]}, {"type": "box", "layout": "horizontal", "contents": [{"type": "text", "text": "Realtime Tổng:", "size": "sm", "color": "#555555"}, {"type": "text", "text": str(realtime), "size": "sm", "color": "#111111", "align": "end"}]}, {"type": "box", "layout": "horizontal", "contents": [{"type": "text", "text": "%HT Tổng:", "size": "sm", "color": "#555555"}, {"type": "text", "text": percent_ht_tong, "size": "sm", "color": "#111111", "align": "end", "weight": "bold"}]}]}, *competition_components]}}}
+    for item in competition_results:
+        percent_val = item.get("percent_val", 0)
+        color = "#4CFF42" if percent_val >= 1 else ("#FFD142" if percent_val > 0.7 else "#FF4242")
+
+        component = {
+            "type": "box", "layout": "horizontal", "margin": "md",
+            "contents": [
+                {"type": "text", "text": item["name"], "wrap": True, "size": "sm", "color": "#FFFFFF", "flex": 4, "gravity": "center"},
+                {"type": "text", "text": str(item["realtime"]), "size": "sm", "color": "#FFFFFF", "align": "center", "flex": 2, "gravity": "center"},
+                {"type": "text", "text": str(item["target"]), "size": "sm", "color": "#FFFFFF", "align": "center", "flex": 2, "gravity": "center"},
+                {"type": "box", "layout": "vertical", "flex": 2, "contents": [
+                    {"type": "text", "text": item["percent_ht"], "size": "sm", "color": color, "align": "end", "weight": "bold", "gravity": "center"}
+                ]}
+            ]
+        }
+        competition_components.append(component)
+        competition_components.append({"type": "separator", "margin": "md", "color": "#4A4A4A"})
+
+    # --- Cấu trúc Flex Message hoàn chỉnh ---
+    flex_json = {
+      "type": "flex",
+      "altText": f"Báo cáo tổng hợp cho {ten_sieu_thi}",
+      "contents": {
+        "type": "bubble",
+        "backgroundColor": "#2E2E2E",
+        "body": {
+          "type": "box",
+          "layout": "vertical",
+          "paddingAll": "0px",
+          "contents": [
+            {
+              "type": "box",
+              "layout": "vertical",
+              "paddingAll": "20px",
+              "backgroundColor": "#006c83",
+              "contents": [
+                {"type": "text", "text": "BÁO CÁO TỔNG HỢP", "color": "#FFFFFF", "size": "lg", "align": "center"},
+                {"type": "text", "text": ten_sieu_thi.upper(), "color": "#FFFFFF", "weight": "bold", "size": "xl", "align": "center", "margin": "md", "wrap": True},
+                {"type": "box", "layout": "vertical", "margin": "lg", "contents": [
+                    {"type": "text", "text": f"⭐ Cụm: {cum}", "color": "#FFFFFF", "size": "sm"},
+                    {"type": "text", "text": f"⭐ Thời gian: {thoi_gian}", "color": "#FFFFFF", "size": "sm"},
+                    {"type": "text", "text": f"⭐ NH Thi Đua Đạt: {nh_thi_dua_dat}", "color": "#FFFFFF", "size": "sm"}
+                ]}
+              ]
+            },
+            {
+              "type": "box",
+              "layout": "vertical",
+              "paddingAll": "20px",
+              "contents": [
+                {
+                  "type": "box",
+                  "layout": "horizontal",
+                  "contents": [
+                    {"type": "box", "layout": "vertical", "flex": 1, "contents": [
+                        {"type": "text", "text": "DOANH THU", "color": "#C0C0C0", "size": "md", "align": "center"},
+                        {"type": "text", "text": realtime_tong, "color": "#FFFFFF", "size": "xxl", "weight": "bold", "align": "center", "margin": "sm"}
+                    ]},
+                    {"type": "box", "layout": "vertical", "flex": 1, "contents": [
+                        {"type": "text", "text": "TARGET", "color": "#C0C0C0", "size": "md", "align": "center"},
+                        {"type": "text", "text": target_tong, "color": "#FFFFFF", "size": "xxl", "weight": "bold", "align": "center", "margin": "sm"}
+                    ]}
+                  ]
+                },
+                {"type": "text", "text": "% HOÀN THÀNH", "color": "#C0C0C0", "size": "md", "align": "center", "margin": "xl"},
+                {"type": "text", "text": percent_ht_tong, "color": "#4CFF42", "size": "4xl", "weight": "bold", "align": "center"},
+                {"type": "separator", "margin": "xl", "color": "#4A4A4A"},
+                {
+                  "type": "box",
+                  "layout": "horizontal",
+                  "margin": "md",
+                  "contents": [
+                    {"type": "text", "text": "Ngành Hàng", "color": "#C0C0C0", "size": "sm", "flex": 4, "weight": "bold"},
+                    {"type": "text", "text": "Realtime", "color": "#C0C0C0", "size": "sm", "flex": 2, "align": "center", "weight": "bold"},
+                    {"type": "text", "text": "Target", "color": "#C0C0C0", "size": "sm", "flex": 2, "align": "center", "weight": "bold"},
+                    {"type": "text", "text": "%HT", "color": "#C0C0C0", "size": "sm", "flex": 2, "align": "end", "weight": "bold"}
+                  ]
+                },
+                {"type": "separator", "margin": "md", "color": "#4A4A4A"},
+                *competition_components
+              ]
+            }
+          ]
+        },
+        "footer": {
+            "type": "box",
+            "layout": "vertical",
+            "contents": [
+                {"type": "text", "text": "Created By 28374®", "color": "#888888", "size": "xs", "align": "center"}
+            ]
+        }
+      }
+    }
     return flex_json
 
 # --- ĐIỂM TIẾP NHẬN WEBHOOK TỪ LINE ---
