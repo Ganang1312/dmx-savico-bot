@@ -114,8 +114,101 @@ def create_flex_message(store_data, competition_results):
             competition_components.append(component)
             competition_components.append({"type": "separator", "margin": "md", "color": "#4A4A4A"})
     
-    # Sửa lỗi cú pháp: Xóa 1 dấu '}' bị thừa ở cuối
-    flex_json = {"type": "flex", "altText": f"Báo cáo tổng hợp cho {ten_sieu_thi}", "contents": {"type": "bubble", "size": "giga", "backgroundColor": "#2E2E2E", "body": {"type": "box", "layout": "vertical", "paddingAll": "0px", "contents": [{"type": "box", "layout": "vertical", "paddingAll": "20px", "backgroundColor": "#006c83", "contents": [{"type": "text", "text": "BÁO CÁO TỔNG HỢP", "color": "#FFFFFF", "size": "lg", "align": "center", "weight": "bold"}, {"type": "text", "text": ten_sieu_thi.upper(), "color": "#FFFFFF", "weight": "bold", "size": "xl", "align": "center", "margin": "md", "wrap": True}, {"type": "box", "layout": "vertical", "margin": "lg", "spacing": "sm", "contents": [{"type": "text", "text": f"⭐ Cụm: {cum}", "color": "#FFFFFF", "size": "sm"}, {"type": "text", "text": f"⭐ Thời gian: {thoi_gian}", "color": "#FFFFFF", "size": "sm"}, {"type": "text", "text": f"⭐ NH Thi Đua Đạt: {nh_thi_dua_dat}", "color": "#FFFFFF", "size": "sm"}]}]}, {"type": "box", "layout": "vertical", "paddingAll": "20px", "contents": [{"type": "box", "layout": "horizontal", "contents": [{"type": "box", "layout": "vertical", "flex": 1, "contents": [{"type": "text", "text": "DOANH THU", "color": "#C0C0C0", "size": "md", "align": "center"}, {"type": "text", "text": realtime_tong, "color": "#FFFFFF", "size": "xxl", "weight": "bold", "align": "center", "margin": "sm"}]}, {"type": "box", "layout": "vertical", "flex": 1, "contents": [{"type": "text", "text": "TARGET", "color": "#C0C0C0", "size": "md", "align": "center"}, {"type": "text", "text": target_tong, "color": "#FFFFFF", "size": "xxl", "weight": "bold", "align": "center", "margin": "sm"}]}]}, {"type": "text", "text": "% HOÀN THÀNH", "color": "#C0C0C0", "size": "md", "align": "center", "margin": "xl"}, {"type": "text", "text": percent_ht_tong, "color": "#4CFF42", "size": "4xl", "weight": "bold", "align": "center"}, {"type": "box", "layout": "horizontal", "margin": "xl", "contents": [{"type": "text", "text": "XH D.Thu ĐMX", "size": "sm", "color": "#C0C0C0", "align": "center", "flex": 1}]}, {"type": "box", "layout": "horizontal", "contents": [{"type": "text", "text": xh_dthu, "weight": "bold", "size": "lg", "color": "#FFFFFF", "align": "center", "flex": 1}]}, {"type": "separator", "margin": "xl", "color": "#4A4A4A"}, {"type": "box", "layout": "horizontal", "margin": "md", "contents": [{"type": "text", "text": "Ngành Hàng", "color": "#C0C0C0", "size": "sm", "flex": 4, "weight": "bold"}, {"type": "text", "text": "Realtime", "color": "#C0C0C0", "size": "sm", "flex": 2, "align": "center", "weight": "bold"}, {"type": "text", "text": "Target", "color": "#C0C0C0", "size": "sm", "flex": 2, "align": "center", "weight": "bold"}, {"type": "text", "text": "%HT", "color": "#C0C0C0", "size": "sm", "flex": 2, "align": "end", "weight": "bold"}]}, {"type": "separator", "margin": "md", "color": "#4A4A4A"}, *competition_components]}]}, "footer": {"type": "box", "layout": "vertical", "contents": [{"type": "text", "text": "Created By 32859-NH Dương", "color": "#888888", "size": "xs", "align": "center"}]}}}}
+    flex_json = {
+        "type": "flex",
+        "altText": f"Báo cáo tổng hợp cho {ten_sieu_thi}",
+        "contents": {
+            "type": "bubble",
+            "size": "giga",
+            "backgroundColor": "#2E2E2E",
+            "body": {
+                "type": "box",
+                "layout": "vertical",
+                "paddingAll": "0px",
+                "contents": [
+                    {
+                        "type": "box",
+                        "layout": "vertical",
+                        "paddingAll": "20px",
+                        "backgroundColor": "#006c83",
+                        "contents": [
+                            {"type": "text", "text": "BÁO CÁO TỔNG HỢP", "color": "#FFFFFF", "size": "lg", "align": "center", "weight": "bold"},
+                            {"type": "text", "text": ten_sieu_thi.upper(), "color": "#FFFFFF", "weight": "bold", "size": "xl", "align": "center", "margin": "md", "wrap": True},
+                            {
+                                "type": "box",
+                                "layout": "vertical",
+                                "margin": "lg",
+                                "spacing": "sm",
+                                "contents": [
+                                    {"type": "text", "text": f"⭐ Cụm: {cum}", "color": "#FFFFFF", "size": "sm"},
+                                    {"type": "text", "text": f"⭐ Thời gian: {thoi_gian}", "color": "#FFFFFF", "size": "sm"},
+                                    {"type": "text", "text": f"⭐ NH Thi Đua Đạt: {nh_thi_dua_dat}", "color": "#FFFFFF", "size": "sm"}
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        "type": "box",
+                        "layout": "vertical",
+                        "paddingAll": "20px",
+                        # SỬA LỖI: Thêm màu nền cho phần thân báo cáo
+                        "backgroundColor": "#2E2E2E",
+                        "contents": [
+                            {
+                                "type": "box",
+                                "layout": "horizontal",
+                                "contents": [
+                                    {
+                                        "type": "box",
+                                        "layout": "vertical",
+                                        "flex": 1,
+                                        "contents": [
+                                            {"type": "text", "text": "DOANH THU", "color": "#C0C0C0", "size": "md", "align": "center"},
+                                            {"type": "text", "text": realtime_tong, "color": "#FFFFFF", "size": "xxl", "weight": "bold", "align": "center", "margin": "sm"}
+                                        ]
+                                    },
+                                    {
+                                        "type": "box",
+                                        "layout": "vertical",
+                                        "flex": 1,
+                                        "contents": [
+                                            {"type": "text", "text": "TARGET", "color": "#C0C0C0", "size": "md", "align": "center"},
+                                            {"type": "text", "text": target_tong, "color": "#FFFFFF", "size": "xxl", "weight": "bold", "align": "center", "margin": "sm"}
+                                        ]
+                                    }
+                                ]
+                            },
+                            {"type": "text", "text": "% HOÀN THÀNH", "color": "#C0C0C0", "size": "md", "align": "center", "margin": "xl"},
+                            {"type": "text", "text": percent_ht_tong, "color": "#4CFF42", "size": "4xl", "weight": "bold", "align": "center"},
+                            {"type": "box", "layout": "horizontal", "margin": "xl", "contents": [{"type": "text", "text": "XH D.Thu ĐMX", "size": "sm", "color": "#C0C0C0", "align": "center", "flex": 1}]},
+                            {"type": "box", "layout": "horizontal", "contents": [{"type": "text", "text": xh_dthu, "weight": "bold", "size": "lg", "color": "#FFFFFF", "align": "center", "flex": 1}]},
+                            {"type": "separator", "margin": "xl", "color": "#4A4A4A"},
+                            {
+                                "type": "box",
+                                "layout": "horizontal",
+                                "margin": "md",
+                                "contents": [
+                                    {"type": "text", "text": "Ngành Hàng", "color": "#C0C0C0", "size": "sm", "flex": 4, "weight": "bold"},
+                                    {"type": "text", "text": "Realtime", "color": "#C0C0C0", "size": "sm", "flex": 2, "align": "center", "weight": "bold"},
+                                    {"type": "text", "text": "Target", "color": "#C0C0C0", "size": "sm", "flex": 2, "align": "center", "weight": "bold"},
+                                    {"type": "text", "text": "%HT", "color": "#C0C0C0", "size": "sm", "flex": 2, "align": "end", "weight": "bold"}
+                                ]
+                            },
+                            {"type": "separator", "margin": "md", "color": "#4A4A4A"},
+                            *competition_components
+                        ]
+                    }
+                ]
+            },
+            "footer": {
+                "type": "box",
+                "layout": "vertical",
+                "contents": [
+                    {"type": "text", "text": "Created By 32859-NH Dương", "color": "#888888", "size": "xs", "align": "center"}
+                ]
+            }
+        }
+    }
     return flex_json
 
 # --- ĐIỂM TIẾP NHẬN WEBHOOK TỪ LINE ---
