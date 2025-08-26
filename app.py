@@ -27,7 +27,9 @@ CREDS = ServiceAccountCredentials.from_json_keyfile_dict(google_creds_dict, SCOP
 CLIENT = gspread.authorize(CREDS)
 
 # Tên file và trang tính cần đọc
-SHEET_NAME = 'chi_tiet_cum'
+# SỬA LẠI TÊN FILE CHO KHỚP VỚI FILE MÀ BOT THẤY ĐƯỢC
+SHEET_NAME = 'DATA REATIME'
+# QUAN TRỌNG: Hãy chắc chắn tên trang tính (tab) bên trong file 'DATA REATIME' cũng đúng
 WORKSHEET_NAME = 'chi_tiet_cum'
 
 # --- KHỞI TẠO ỨNG DỤNG ---
@@ -80,60 +82,31 @@ def callback():
         abort(400)
     return 'OK'
 
-# --- HÀM XỬ LÝ TIN NHẮN CHÍNH (CÓ BƯỚC GỠ LỖI ĐẶC BIỆT) ---
+# --- HÀM XỬ LÝ TIN NHẮN CHÍNH ---
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
     user_message = event.message.text.strip()
-    print(f"--- Bắt đầu xử lý cho tin nhắn: '{user_message}' ---")
     try:
-        # --- BƯỚC GỠ LỖI ĐẶC BIỆT ---
-        print("Bước gỡ lỗi: Đang liệt kê tất cả các bảng tính mà bot có thể thấy...")
-        # Sửa lại tên hàm cho đúng với phiên bản gspread mới
-        accessible_spreadsheets = CLIENT.openall()
-        spreadsheet_titles = [s.title for s in accessible_spreadsheets]
-        print(f"=> Bot có thể thấy các file sau: {spreadsheet_titles}")
-
-        if SHEET_NAME not in spreadsheet_titles:
-            print(f"!!! LỖI QUYỀN TRUY CẬP: File '{SHEET_NAME}' không nằm trong danh sách các file có thể truy cập.")
-            raise gspread.SpreadsheetNotFound(f"Không thể tìm thấy file '{SHEET_NAME}' trong danh sách được chia sẻ.")
-        # --- KẾT THÚC BƯỚC GỠ LỖI ---
-
-        print("Bước 1: Đang mở file Google Sheet...")
         sheet = CLIENT.open(SHEET_NAME).worksheet(WORKSHEET_NAME)
-        print("=> Bước 1 THÀNH CÔNG: Đã mở file và trang tính.")
-
-        print("Bước 2: Đang lấy tất cả dữ liệu từ trang tính...")
         all_data = sheet.get_all_values()
-        print(f"=> Bước 2 THÀNH CÔNG: Đã lấy được {len(all_data)} dòng dữ liệu.")
-
-        print(f"Bước 3: Đang tìm kiếm mã '{user_message}' trong dữ liệu...")
         header_row, found_row = all_data[0], None
-        for i, row in enumerate(all_data[1:]):
+        for row in all_data[1:]:
             if row and len(row) > 2 and row[2]:
                 cell_content = row[2].strip()
                 supermarket_code = cell_content.split(' ')[0]
                 if supermarket_code == user_message:
                     found_row = row
-                    print(f"=> Bước 3 THÀNH CÔNG: Tìm thấy dữ liệu ở dòng {i+2}.")
                     break
-        if not found_row: print("=> Bước 3 CẢNH BÁO: Không tìm thấy dòng nào khớp.")
-
-        print("Bước 4: Đang tạo tin nhắn trả lời...")
         if found_row:
             competition_results = parse_competition_data(header_row, found_row)
             flex_message_data = create_flex_message(found_row, competition_results)
             reply_message = FlexSendMessage(alt_text='Báo cáo Realtime', contents=flex_message_data['contents'])
         else:
             reply_message = TextSendMessage(text=f'Không tìm thấy dữ liệu cho mã siêu thị: {user_message}')
-        print("=> Bước 4 THÀNH CÔNG: Đã tạo xong tin nhắn.")
-
     except Exception as e:
         print(f"!!! GẶP LỖI NGHIÊM TRỌNG: {repr(e)}")
         reply_message = TextSendMessage(text='Đã có lỗi xảy ra khi truy vấn dữ liệu.')
-
-    print("Bước 5: Đang gửi tin nhắn trả lời về LINE...")
     line_bot_api.reply_message(event.reply_token, reply_message)
-    print("--- Xử lý hoàn tất ---")
 
 # --- CHẠY ỨNG DỤNG ---
 if __name__ == "__main__":
