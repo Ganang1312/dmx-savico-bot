@@ -54,10 +54,9 @@ def parse_competition_data(header_row, data_row):
     for category_name, indices in category_indices.items():
         if len(indices) == 3:
             try:
-                # Lấy dữ liệu theo đúng thứ tự: %HT, Realtime, Target
                 percent_ht_val = data_row[indices[0]]
-                realtime_val = data_row[indices[1]]
-                target_val = data_row[indices[2]]
+                realtime_val = data_row[indices[1]] if data_row[indices[1]] and data_row[indices[1]].strip() != '-' else "0"
+                target_val = data_row[indices[2]] if data_row[indices[2]] and data_row[indices[2]].strip() != '-' else "0"
                 
                 percent_float = 0.0
                 try:
@@ -76,31 +75,29 @@ def parse_competition_data(header_row, data_row):
                 })
             except (ValueError, TypeError, IndexError):
                 continue
-    # Sắp xếp các ngành hàng theo %HT giảm dần
     results.sort(key=lambda x: x['percent_val'], reverse=True)
     return results
 
 def format_currency(value_str):
-    """Hàm định dạng số thành chuỗi tiền tệ (Tr, Tỷ)."""
+    """Hàm định dạng số thành chuỗi tiền tệ (Tr, Tỷ), trả về '-' nếu trống."""
+    if not value_str or value_str.strip() == '-':
+        return "-"
     try:
         value = float(value_str)
         if value >= 1000:
             return f"{round(value / 1000, 2)} Tỷ"
-        if value > 0:
-            return f"{round(value, 2)} Tr"
-        return "0 Tr"
+        return f"{round(value, 2)} Tr"
     except (ValueError, TypeError):
-        return "N/A"
+        return "-"
 
 def create_flex_message(store_data, competition_results):
-    """Hàm tạo giao diện Flex Message mới."""
+    """Hàm tạo giao diện Flex Message mới, xử lý dữ liệu trống."""
     # --- Trích xuất và chuẩn bị dữ liệu ---
-    cum = store_data[0] # Cột A
-    sieu_thi_full = store_data[2] # Cột C
+    cum = store_data[0] or "-"
+    sieu_thi_full = store_data[2] or "Không có tên"
     ten_sieu_thi_parts = sieu_thi_full.split(' - ')
     ten_sieu_thi = " - ".join(ten_sieu_thi_parts[1:]) if len(ten_sieu_thi_parts) > 1 else sieu_thi_full
 
-    # Lấy dữ liệu từ đúng các cột D, E, F
     realtime_tong = format_currency(store_data[4]) # Cột E
     target_tong = format_currency(store_data[3])   # Cột D
     try:
@@ -108,52 +105,61 @@ def create_flex_message(store_data, competition_results):
     except (ValueError, TypeError):
         percent_ht_tong = "0%"
 
-    # Lấy thời gian thực tế theo múi giờ Việt Nam
     tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
     now = datetime.now(tz_vietnam)
     thoi_gian = f"{now.hour}h Ngày {now.day}/{now.month}"
 
     nh_thi_dua_dat = sum(1 for item in competition_results if item.get("percent_val", 0) >= 1)
 
+    # Xử lý dữ liệu xếp hạng
+    xh_dthu = "-"
+    try:
+        # Cột AE là index 30, AF là index 31
+        if store_data[30] and store_data[31] and store_data[30].strip() != '-' and store_data[31].strip() != '-':
+            xh_dthu = f"{store_data[30]}/{store_data[31]}"
+    except IndexError:
+        pass # Giữ giá trị mặc định là "-" nếu cột không tồn tại
+
     # --- Xây dựng các thành phần giao diện ---
     competition_components = []
-    # Bỏ 2 dòng separator đầu tiên để không có đường kẻ trắng
-    for item in competition_results:
-        percent_val = item.get("percent_val", 0)
-        color = "#4CFF42" if percent_val >= 1 else ("#FFD142" if percent_val > 0.7 else "#FF4242")
-
-        component = {
-            "type": "box", "layout": "horizontal", "margin": "md", "paddingTop": "sm", "paddingBottom": "sm",
-            "contents": [
-                {"type": "text", "text": item["name"], "wrap": True, "size": "sm", "color": "#FFFFFF", "flex": 4, "gravity": "center"},
-                {"type": "text", "text": str(item["realtime"]), "size": "sm", "color": "#FFFFFF", "align": "center", "flex": 2, "gravity": "center"},
-                {"type": "text", "text": str(item["target"]), "size": "sm", "color": "#FFFFFF", "align": "center", "flex": 2, "gravity": "center"},
-                {"type": "box", "layout": "vertical", "flex": 2, "contents": [
-                    {"type": "text", "text": item["percent_ht"], "size": "sm", "color": color, "align": "end", "weight": "bold", "gravity": "center"}
-                ]}
-            ]
-        }
-        competition_components.append(component)
-        competition_components.append({"type": "separator", "margin": "md", "color": "#4A4A4A"})
+    if not competition_results:
+        competition_components.append({
+            "type": "text",
+            "text": "Không có dữ liệu thi đua.",
+            "color": "#C0C0C0",
+            "size": "sm",
+            "align": "center",
+            "margin": "md"
+        })
+    else:
+        for item in competition_results:
+            percent_val = item.get("percent_val", 0)
+            color = "#4CFF42" if percent_val >= 1 else ("#FFD142" if percent_val > 0.7 else "#FF4242")
+            component = {
+                "type": "box", "layout": "horizontal", "margin": "md", "paddingTop": "sm", "paddingBottom": "sm",
+                "contents": [
+                    {"type": "text", "text": item["name"], "wrap": True, "size": "sm", "color": "#FFFFFF", "flex": 4, "gravity": "center"},
+                    {"type": "text", "text": str(item["realtime"]), "size": "sm", "color": "#FFFFFF", "align": "center", "flex": 2, "gravity": "center"},
+                    {"type": "text", "text": str(item["target"]), "size": "sm", "color": "#FFFFFF", "align": "center", "flex": 2, "gravity": "center"},
+                    {"type": "box", "layout": "vertical", "flex": 2, "contents": [
+                        {"type": "text", "text": item["percent_ht"], "size": "sm", "color": color, "align": "end", "weight": "bold", "gravity": "center"}
+                    ]}
+                ]
+            }
+            competition_components.append(component)
+            competition_components.append({"type": "separator", "margin": "md", "color": "#4A4A4A"})
 
     # --- Cấu trúc Flex Message hoàn chỉnh ---
     flex_json = {
       "type": "flex",
       "altText": f"Báo cáo tổng hợp cho {ten_sieu_thi}",
       "contents": {
-        "type": "bubble",
-        "size": "giga",
-        "backgroundColor": "#2E2E2E",
+        "type": "bubble", "size": "giga", "backgroundColor": "#2E2E2E",
         "body": {
-          "type": "box",
-          "layout": "vertical",
-          "paddingAll": "0px",
+          "type": "box", "layout": "vertical", "paddingAll": "0px",
           "contents": [
             {
-              "type": "box",
-              "layout": "vertical",
-              "paddingAll": "20px",
-              "backgroundColor": "#006c83",
+              "type": "box", "layout": "vertical", "paddingAll": "20px", "backgroundColor": "#006c83",
               "contents": [
                 {"type": "text", "text": "BÁO CÁO TỔNG HỢP", "color": "#FFFFFF", "size": "lg", "align": "center", "weight": "bold"},
                 {"type": "text", "text": ten_sieu_thi.upper(), "color": "#FFFFFF", "weight": "bold", "size": "xl", "align": "center", "margin": "md", "wrap": True},
@@ -165,13 +171,10 @@ def create_flex_message(store_data, competition_results):
               ]
             },
             {
-              "type": "box",
-              "layout": "vertical",
-              "paddingAll": "20px",
+              "type": "box", "layout": "vertical", "paddingAll": "20px",
               "contents": [
                 {
-                  "type": "box",
-                  "layout": "horizontal",
+                  "type": "box", "layout": "horizontal",
                   "contents": [
                     {"type": "box", "layout": "vertical", "flex": 1, "contents": [
                         {"type": "text", "text": "DOANH THU", "color": "#C0C0C0", "size": "md", "align": "center"},
@@ -189,13 +192,11 @@ def create_flex_message(store_data, competition_results):
                     {"type": "text", "text": "XH D.Thu ĐMX", "size": "sm", "color": "#C0C0C0", "align": "center", "flex": 1},
                 ]},
                 {"type": "box", "layout": "horizontal", "contents": [
-                    {"type": "text", "text": f"{store_data[30]}/{store_data[31]}", "weight": "bold", "size": "lg", "color": "#FFFFFF", "align": "center", "flex": 1},
+                    {"type": "text", "text": xh_dthu, "weight": "bold", "size": "lg", "color": "#FFFFFF", "align": "center", "flex": 1},
                 ]},
                 {"type": "separator", "margin": "xl", "color": "#4A4A4A"},
                 {
-                  "type": "box",
-                  "layout": "horizontal",
-                  "margin": "md",
+                  "type": "box", "layout": "horizontal", "margin": "md",
                   "contents": [
                     {"type": "text", "text": "Ngành Hàng", "color": "#C0C0C0", "size": "sm", "flex": 4, "weight": "bold"},
                     {"type": "text", "text": "Realtime", "color": "#C0C0C0", "size": "sm", "flex": 2, "align": "center", "weight": "bold"},
@@ -210,16 +211,14 @@ def create_flex_message(store_data, competition_results):
           ]
         },
         "footer": {
-            "type": "box",
-            "layout": "vertical",
+            "type": "box", "layout": "vertical",
             "contents": [
-                {"type": "text", "text": "Created By 28374®", "color": "#888888", "size": "xs", "align": "center"}
+                {"type": "text", "text": "Created By 32859-NH Dương", "color": "#888888", "size": "xs", "align": "center"}
             ]
         }
       }
     }
     return flex_json
-
 
 # --- ĐIỂM TIẾP NHẬN WEBHOOK TỪ LINE ---
 @app.route("/callback", methods=['POST'])
