@@ -39,17 +39,34 @@ handler = WebhookHandler(CHANNEL_SECRET)
 
 # --- ĐỊNH NGHĨA CÁC HÀM XỬ LÝ ---
 
+def handle_percentage_string(percent_str):
+    """Hàm xử lý chuỗi phần trăm, trả về (float_value, formatted_string)."""
+    if not percent_str:
+        return 0.0, "0%"
+    
+    clean_str = str(percent_str).strip()
+    
+    if '%' in clean_str:
+        try:
+            # Xử lý chuỗi "56%" -> float 0.56
+            value = float(clean_str.replace('%', '')) / 100
+            return value, clean_str
+        except (ValueError, TypeError):
+            return 0.0, "0%"
+    else:
+        try:
+            # Xử lý chuỗi "0.56" -> float 0.56
+            value = float(clean_str)
+            return value, f"{round(value * 100)}%"
+        except (ValueError, TypeError):
+            return 0.0, "0%"
+
 def parse_competition_data(header_row, data_row):
-    """
-    Hàm này xử lý logic phức tạp để trích xuất dữ liệu thi đua.
-    1st occurrence = %HT, 2nd = Realtime, 3rd = Target.
-    """
-    start_column_index = 6  # Cột G là index 6
+    """Hàm này xử lý logic phức tạp để trích xuất dữ liệu thi đua."""
+    start_column_index = 6
     category_indices = collections.defaultdict(list)
     for i, header in enumerate(header_row[start_column_index:], start=start_column_index):
-        if header:
-            category_indices[header].append(i)
-
+        if header: category_indices[header].append(i)
     results = []
     for category_name, indices in category_indices.items():
         if len(indices) == 3:
@@ -58,166 +75,56 @@ def parse_competition_data(header_row, data_row):
                 realtime_val = data_row[indices[1]] if data_row[indices[1]] and data_row[indices[1]].strip() != '-' else "0"
                 target_val = data_row[indices[2]] if data_row[indices[2]] and data_row[indices[2]].strip() != '-' else "0"
                 
-                percent_float = 0.0
-                try:
-                    percent_float = float(percent_ht_val)
-                except (ValueError, TypeError):
-                    pass 
-
-                percent_ht_formatted = f"{round(percent_float * 100)}%"
+                percent_float, percent_ht_formatted = handle_percentage_string(percent_ht_val)
                 
                 results.append({
-                    "name": category_name,
-                    "realtime": realtime_val,
-                    "target": target_val,
-                    "percent_ht": percent_ht_formatted,
-                    "percent_val": percent_float
+                    "name": category_name, "realtime": realtime_val, "target": target_val,
+                    "percent_ht": percent_ht_formatted, "percent_val": percent_float
                 })
-            except (ValueError, TypeError, IndexError):
-                continue
+            except (ValueError, TypeError, IndexError): continue
     results.sort(key=lambda x: x['percent_val'], reverse=True)
     return results
 
 def format_currency(value_str):
-    """Hàm định dạng số thành chuỗi tiền tệ (Tr, Tỷ), trả về '-' nếu trống."""
-    if not value_str or value_str.strip() == '-':
-        return "-"
+    """Hàm định dạng số thành chuỗi tiền tệ (Tr, Tỷ)."""
+    if not value_str or str(value_str).strip() == '-': return "-"
     try:
         value = float(value_str)
-        if value >= 1000:
-            return f"{round(value / 1000, 2)} Tỷ"
+        if value >= 1000: return f"{round(value / 1000, 2)} Tỷ"
         return f"{round(value, 2)} Tr"
-    except (ValueError, TypeError):
-        return "-"
+    except (ValueError, TypeError): return "-"
 
 def create_flex_message(store_data, competition_results):
-    """Hàm tạo giao diện Flex Message mới, xử lý dữ liệu trống."""
-    # --- Trích xuất và chuẩn bị dữ liệu ---
+    """Hàm tạo giao diện Flex Message."""
     cum = store_data[0] or "-"
     sieu_thi_full = store_data[2] or "Không có tên"
     ten_sieu_thi_parts = sieu_thi_full.split(' - ')
     ten_sieu_thi = " - ".join(ten_sieu_thi_parts[1:]) if len(ten_sieu_thi_parts) > 1 else sieu_thi_full
-
-    realtime_tong = format_currency(store_data[4]) # Cột E
-    target_tong = format_currency(store_data[3])   # Cột D
-    try:
-        percent_ht_tong = f"{round(float(store_data[5]) * 100)}%" # Cột F
-    except (ValueError, TypeError):
-        percent_ht_tong = "0%"
+    realtime_tong = format_currency(store_data[4])
+    target_tong = format_currency(store_data[3])
+    
+    _, percent_ht_tong = handle_percentage_string(store_data[5])
 
     tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
     now = datetime.now(tz_vietnam)
     thoi_gian = f"{now.hour}h Ngày {now.day}/{now.month}"
-
     nh_thi_dua_dat = sum(1 for item in competition_results if item.get("percent_val", 0) >= 1)
-
-    # Xử lý dữ liệu xếp hạng
     xh_dthu = "-"
     try:
-        # Cột AE là index 30, AF là index 31
         if store_data[30] and store_data[31] and store_data[30].strip() != '-' and store_data[31].strip() != '-':
             xh_dthu = f"{store_data[30]}/{store_data[31]}"
-    except IndexError:
-        pass # Giữ giá trị mặc định là "-" nếu cột không tồn tại
-
-    # --- Xây dựng các thành phần giao diện ---
+    except IndexError: pass
     competition_components = []
     if not competition_results:
-        competition_components.append({
-            "type": "text",
-            "text": "Không có dữ liệu thi đua.",
-            "color": "#C0C0C0",
-            "size": "sm",
-            "align": "center",
-            "margin": "md"
-        })
+        competition_components.append({"type": "text", "text": "Không có dữ liệu thi đua.", "color": "#C0C0C0", "size": "sm", "align": "center", "margin": "md"})
     else:
         for item in competition_results:
             percent_val = item.get("percent_val", 0)
             color = "#4CFF42" if percent_val >= 1 else ("#FFD142" if percent_val > 0.7 else "#FF4242")
-            component = {
-                "type": "box", "layout": "horizontal", "margin": "md", "paddingTop": "sm", "paddingBottom": "sm",
-                "contents": [
-                    {"type": "text", "text": item["name"], "wrap": True, "size": "sm", "color": "#FFFFFF", "flex": 4, "gravity": "center"},
-                    {"type": "text", "text": str(item["realtime"]), "size": "sm", "color": "#FFFFFF", "align": "center", "flex": 2, "gravity": "center"},
-                    {"type": "text", "text": str(item["target"]), "size": "sm", "color": "#FFFFFF", "align": "center", "flex": 2, "gravity": "center"},
-                    {"type": "box", "layout": "vertical", "flex": 2, "contents": [
-                        {"type": "text", "text": item["percent_ht"], "size": "sm", "color": color, "align": "end", "weight": "bold", "gravity": "center"}
-                    ]}
-                ]
-            }
+            component = {"type": "box", "layout": "horizontal", "margin": "md", "paddingTop": "sm", "paddingBottom": "sm", "contents": [{"type": "text", "text": item["name"], "wrap": True, "size": "sm", "color": "#FFFFFF", "flex": 4, "gravity": "center"}, {"type": "text", "text": str(item["realtime"]), "size": "sm", "color": "#FFFFFF", "align": "center", "flex": 2, "gravity": "center"}, {"type": "text", "text": str(item["target"]), "size": "sm", "color": "#FFFFFF", "align": "center", "flex": 2, "gravity": "center"}, {"type": "box", "layout": "vertical", "flex": 2, "contents": [{"type": "text", "text": item["percent_ht"], "size": "sm", "color": color, "align": "end", "weight": "bold", "gravity": "center"}]}]}
             competition_components.append(component)
             competition_components.append({"type": "separator", "margin": "md", "color": "#4A4A4A"})
-
-    # --- Cấu trúc Flex Message hoàn chỉnh ---
-    flex_json = {
-      "type": "flex",
-      "altText": f"Báo cáo tổng hợp cho {ten_sieu_thi}",
-      "contents": {
-        "type": "bubble", "size": "giga", "backgroundColor": "#2E2E2E",
-        "body": {
-          "type": "box", "layout": "vertical", "paddingAll": "0px",
-          "contents": [
-            {
-              "type": "box", "layout": "vertical", "paddingAll": "20px", "backgroundColor": "#006c83",
-              "contents": [
-                {"type": "text", "text": "BÁO CÁO TỔNG HỢP", "color": "#FFFFFF", "size": "lg", "align": "center", "weight": "bold"},
-                {"type": "text", "text": ten_sieu_thi.upper(), "color": "#FFFFFF", "weight": "bold", "size": "xl", "align": "center", "margin": "md", "wrap": True},
-                {"type": "box", "layout": "vertical", "margin": "lg", "spacing": "sm", "contents": [
-                    {"type": "text", "text": f"⭐ Cụm: {cum}", "color": "#FFFFFF", "size": "sm"},
-                    {"type": "text", "text": f"⭐ Thời gian: {thoi_gian}", "color": "#FFFFFF", "size": "sm"},
-                    {"type": "text", "text": f"⭐ NH Thi Đua Đạt: {nh_thi_dua_dat}", "color": "#FFFFFF", "size": "sm"}
-                ]}
-              ]
-            },
-            {
-              "type": "box", "layout": "vertical", "paddingAll": "20px",
-              "contents": [
-                {
-                  "type": "box", "layout": "horizontal",
-                  "contents": [
-                    {"type": "box", "layout": "vertical", "flex": 1, "contents": [
-                        {"type": "text", "text": "DOANH THU", "color": "#C0C0C0", "size": "md", "align": "center"},
-                        {"type": "text", "text": realtime_tong, "color": "#FFFFFF", "size": "xxl", "weight": "bold", "align": "center", "margin": "sm"}
-                    ]},
-                    {"type": "box", "layout": "vertical", "flex": 1, "contents": [
-                        {"type": "text", "text": "TARGET", "color": "#C0C0C0", "size": "md", "align": "center"},
-                        {"type": "text", "text": target_tong, "color": "#FFFFFF", "size": "xxl", "weight": "bold", "align": "center", "margin": "sm"}
-                    ]}
-                  ]
-                },
-                {"type": "text", "text": "% HOÀN THÀNH", "color": "#C0C0C0", "size": "md", "align": "center", "margin": "xl"},
-                {"type": "text", "text": percent_ht_tong, "color": "#4CFF42", "size": "4xl", "weight": "bold", "align": "center"},
-                {"type": "box", "layout": "horizontal", "margin": "xl", "contents": [
-                    {"type": "text", "text": "XH D.Thu ĐMX", "size": "sm", "color": "#C0C0C0", "align": "center", "flex": 1},
-                ]},
-                {"type": "box", "layout": "horizontal", "contents": [
-                    {"type": "text", "text": xh_dthu, "weight": "bold", "size": "lg", "color": "#FFFFFF", "align": "center", "flex": 1},
-                ]},
-                {"type": "separator", "margin": "xl", "color": "#4A4A4A"},
-                {
-                  "type": "box", "layout": "horizontal", "margin": "md",
-                  "contents": [
-                    {"type": "text", "text": "Ngành Hàng", "color": "#C0C0C0", "size": "sm", "flex": 4, "weight": "bold"},
-                    {"type": "text", "text": "Realtime", "color": "#C0C0C0", "size": "sm", "flex": 2, "align": "center", "weight": "bold"},
-                    {"type": "text", "text": "Target", "color": "#C0C0C0", "size": "sm", "flex": 2, "align": "center", "weight": "bold"},
-                    {"type": "text", "text": "%HT", "color": "#C0C0C0", "size": "sm", "flex": 2, "align": "end", "weight": "bold"}
-                  ]
-                },
-                {"type": "separator", "margin": "md", "color": "#4A4A4A"},
-                *competition_components
-              ]
-            }
-          ]
-        },
-        "footer": {
-            "type": "box", "layout": "vertical",
-            "contents": [
-                {"type": "text", "text": "Created By 32859-NH Dương", "color": "#888888", "size": "xs", "align": "center"}
-            ]
-        }
-      }
-    }
+    flex_json = {"type": "flex", "altText": f"Báo cáo tổng hợp cho {ten_sieu_thi}", "contents": {"type": "bubble", "size": "giga", "backgroundColor": "#2E2E2E", "body": {"type": "box", "layout": "vertical", "paddingAll": "0px", "contents": [{"type": "box", "layout": "vertical", "paddingAll": "20px", "backgroundColor": "#006c83", "contents": [{"type": "text", "text": "BÁO CÁO TỔNG HỢP", "color": "#FFFFFF", "size": "lg", "align": "center", "weight": "bold"}, {"type": "text", "text": ten_sieu_thi.upper(), "color": "#FFFFFF", "weight": "bold", "size": "xl", "align": "center", "margin": "md", "wrap": True}, {"type": "box", "layout": "vertical", "margin": "lg", "spacing": "sm", "contents": [{"type": "text", "text": f"⭐ Cụm: {cum}", "color": "#FFFFFF", "size": "sm"}, {"type": "text", "text": f"⭐ Thời gian: {thoi_gian}", "color": "#FFFFFF", "size": "sm"}, {"type": "text", "text": f"⭐ NH Thi Đua Đạt: {nh_thi_dua_dat}", "color": "#FFFFFF", "size": "sm"}]}]}, {"type": "box", "layout": "vertical", "paddingAll": "20px", "contents": [{"type": "box", "layout": "horizontal", "contents": [{"type": "box", "layout": "vertical", "flex": 1, "contents": [{"type": "text", "text": "DOANH THU", "color": "#C0C0C0", "size": "md", "align": "center"}, {"type": "text", "text": realtime_tong, "color": "#FFFFFF", "size": "xxl", "weight": "bold", "align": "center", "margin": "sm"}]}, {"type": "box", "layout": "vertical", "flex": 1, "contents": [{"type": "text", "text": "TARGET", "color": "#C0C0C0", "size": "md", "align": "center"}, {"type": "text", "text": target_tong, "color": "#FFFFFF", "size": "xxl", "weight": "bold", "align": "center", "margin": "sm"}]}]}, {"type": "text", "text": "% HOÀN THÀNH", "color": "#C0C0C0", "size": "md", "align": "center", "margin": "xl"}, {"type": "text", "text": percent_ht_tong, "color": "#4CFF42", "size": "4xl", "weight": "bold", "align": "center"}, {"type": "box", "layout": "horizontal", "margin": "xl", "contents": [{"type": "text", "text": "XH D.Thu ĐMX", "size": "sm", "color": "#C0C0C0", "align": "center", "flex": 1}]}, {"type": "box", "layout": "horizontal", "contents": [{"type": "text", "text": xh_dthu, "weight": "bold", "size": "lg", "color": "#FFFFFF", "align": "center", "flex": 1}]}, {"type": "separator", "margin": "xl", "color": "#4A4A4A"}, {"type": "box", "layout": "horizontal", "margin": "md", "contents": [{"type": "text", "text": "Ngành Hàng", "color": "#C0C0C0", "size": "sm", "flex": 4, "weight": "bold"}, {"type": "text", "text": "Realtime", "color": "#C0C0C0", "size": "sm", "flex": 2, "align": "center", "weight": "bold"}, {"type": "text", "text": "Target", "color": "#C0C0C0", "size": "sm", "flex": 2, "align": "center", "weight": "bold"}, {"type": "text", "text": "%HT", "color": "#C0C0C0", "size": "sm", "flex": 2, "align": "end", "weight": "bold"}]}, {"type": "separator", "margin": "md", "color": "#4A4A4A"}, *competition_components]}]}, "footer": {"type": "box", "layout": "vertical", "contents": [{"type": "text", "text": "Created By 32859-NH Dương", "color": "#888888", "size": "xs", "align": "center"}]}}}}
     return flex_json
 
 # --- ĐIỂM TIẾP NHẬN WEBHOOK TỪ LINE ---
