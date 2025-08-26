@@ -35,7 +35,7 @@ app = Flask(__name__)
 line_bot_api = LineBotApi(CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(CHANNEL_SECRET)
 
-# --- ĐỊNH NGHĨA CÁC HÀM XỬ LÝ (Không thay đổi) ---
+# --- ĐỊNH NGHĨA CÁC HÀM XỬ LÝ ---
 def parse_competition_data(header_row, data_row):
     start_column_index = 6
     category_indices = collections.defaultdict(list)
@@ -88,13 +88,13 @@ def handle_message(event):
     try:
         # --- BƯỚC GỠ LỖI ĐẶC BIỆT ---
         print("Bước gỡ lỗi: Đang liệt kê tất cả các bảng tính mà bot có thể thấy...")
-        accessible_spreadsheets = CLIENT.list_spreadsheets()
-        spreadsheet_titles = [s['name'] for s in accessible_spreadsheets]
+        # Sửa lại tên hàm cho đúng với phiên bản gspread mới
+        accessible_spreadsheets = CLIENT.openall()
+        spreadsheet_titles = [s.title for s in accessible_spreadsheets]
         print(f"=> Bot có thể thấy các file sau: {spreadsheet_titles}")
 
         if SHEET_NAME not in spreadsheet_titles:
             print(f"!!! LỖI QUYỀN TRUY CẬP: File '{SHEET_NAME}' không nằm trong danh sách các file có thể truy cập.")
-            # Ném ra một lỗi rõ ràng hơn
             raise gspread.SpreadsheetNotFound(f"Không thể tìm thấy file '{SHEET_NAME}' trong danh sách được chia sẻ.")
         # --- KẾT THÚC BƯỚC GỠ LỖI ---
 
