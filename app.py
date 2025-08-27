@@ -4,7 +4,7 @@ from flask import Flask, request, abort
 from linebot import (
     LineBotApi, WebhookHandler
 )
-from linebot.exceptions import InvalidSignatureError, LineBotApiError
+from linebot.exceptions import InvalidSignatureError
 from linebot.models import (
     MessageEvent, TextMessage, TextSendMessage, FlexSendMessage
 )
@@ -81,23 +81,19 @@ def format_currency(value_str, remove_decimal=False):
         value = float(str(value_str).replace(',', ''))
         if remove_decimal:
             if value >= 1000: return f"{math.floor(value / 1000)} Tỷ"
-            return f"{math.floor(value)} Triệu" # Đổi Tr thành Triệu cho rõ ràng
+            return f"{math.floor(value)} Tr"
         else:
             if value >= 1000: return f"{round(value / 1000, 2)} Tỷ"
-            return f"{round(value, 2)} Triệu" # Đổi Tr thành Triệu cho rõ ràng
+            return f"{round(value, 2)} Tr"
     except (ValueError, TypeError): return "-"
 
 def calculate_ranking(all_data, current_row):
     try:
         current_channel = current_row[1]
-        # Đảm bảo index 4 tồn tại và không rỗng
-        if len(current_row) <= 4 or not current_row[4]:
-            return "-/-"
         current_revenue = float(str(current_row[4]).replace(',', ''))
-        
         channel_stores = []
         for row in all_data[1:]:
-            if len(row) > 4 and row[1] == current_channel and row[4]: # Kiểm tra thêm row[4] không rỗng
+            if len(row) > 4 and row[1] == current_channel:
                 try:
                     revenue = float(str(row[4]).replace(',', ''))
                     channel_stores.append({'revenue': revenue, 'full_row': row})
@@ -116,12 +112,9 @@ def create_flex_message(store_data, competition_results, ranking):
     cum = store_data[0] or "-"
     kenh = store_data[1] or ""
     sieu_thi_full = store_data[2] or "Không có tên"
-    
-    # Lấy phần tên siêu thị rút gọn (sau dấu gạch ngang)
     ten_sieu_thi_parts = sieu_thi_full.split(' - ')
     short_name_part = ten_sieu_thi_parts[-1] if len(ten_sieu_thi_parts) > 1 else sieu_thi_full
     ten_sieu_thi_rut_gon = f"{kenh} {short_name_part}"
-    
     realtime_tong = format_currency(store_data[4], remove_decimal=True)
     target_tong = format_currency(store_data[3], remove_decimal=True)
     percent_float, percent_ht_tong = handle_percentage_string(store_data[5])
@@ -133,34 +126,22 @@ def create_flex_message(store_data, competition_results, ranking):
     nh_thi_dua_dat = sum(1 for item in sold_items if item.get("percent_val", 0) >= 1)
     
     channel_styles = {
-        "ĐML": {"bg": "#1E88E5", "text": "#FFFFFF"}, # Xanh dương đậm
-        "ĐMM": {"bg": "#43A047", "text": "#FFFFFF"}, # Xanh lá đậm
-        "TGD": {"bg": "#FDD835", "text": "#000000"}, # Vàng đậm
-        "AAR": {"bg": "#212121", "text": "#FFFFFF"}  # Xám đen
+        "ĐML": {"bg": "#1E88E5", "text": "#FFFFFF"}, "ĐMM": {"bg": "#43A047", "text": "#FFFFFF"},
+        "TGD": {"bg": "#FDD835", "text": "#000000"}, "AAR": {"bg": "#212121", "text": "#FFFFFF"}
     }
-    style = channel_styles.get(kenh, {"bg": "#006c83", "text": "#FFFFFF"}) # Mặc định nếu không tìm thấy kênh
-
+    style = channel_styles.get(kenh, {"bg": "#006c83", "text": "#FFFFFF"})
+    
     sold_components = []
     for i, item in enumerate(sold_items):
         percent_val = item.get("percent_val", 0)
         color = "#4CFF42" if percent_val >= 1 else ("#FFD142" if percent_val > 0.7 else "#FF4242")
-        component = {"type": "box", "layout": "horizontal", "margin": "md", "paddingTop": "sm", "paddingBottom": "sm", "contents": [
-            {"type": "text", "text": str(i+1), "color": "#C0C0C0", "flex": 0, "margin": "sm", "size": "sm", "gravity": "center"},
-            {"type": "text", "text": item["name"], "wrap": True, "size": "sm", "color": "#FFFFFF", "flex": 4, "gravity": "center"},
-            {"type": "text", "text": str(round(item["realtime"], 2)), "size": "sm", "color": "#FFFFFF", "align": "center", "flex": 2, "gravity": "center"},
-            {"type": "text", "text": str(item["target"]), "size": "sm", "color": "#FFFFFF", "align": "center", "flex": 2, "gravity": "center"},
-            {"type": "box", "layout": "vertical", "flex": 2, "contents": [{"type": "text", "text": item["percent_ht"], "size": "sm", "color": color, "align": "end", "weight": "bold", "gravity": "center"}]}
-        ]}
+        component = {"type": "box", "layout": "horizontal", "margin": "md", "paddingTop": "sm", "paddingBottom": "sm", "contents": [{"type": "text", "text": str(i+1), "color": "#C0C0C0", "flex": 0, "margin": "sm", "size": "sm", "gravity": "center"}, {"type": "text", "text": item["name"], "wrap": True, "size": "sm", "color": "#FFFFFF", "flex": 4, "gravity": "center"}, {"type": "text", "text": str(round(item["realtime"], 2)), "size": "sm", "color": "#FFFFFF", "align": "center", "flex": 2, "gravity": "center"}, {"type": "text", "text": str(item["target"]), "size": "sm", "color": "#FFFFFF", "align": "center", "flex": 2, "gravity": "center"}, {"type": "box", "layout": "vertical", "flex": 2, "contents": [{"type": "text", "text": item["percent_ht"], "size": "sm", "color": color, "align": "end", "weight": "bold", "gravity": "center"}]}]}
         sold_components.append(component)
-        if i < len(sold_items) - 1:
-            sold_components.append({"type": "separator", "margin": "md", "color": "#4A4A4A"})
+        sold_components.append({"type": "separator", "margin": "md", "color": "#4A4A4A"})
     
     unsold_components = []
     if unsold_items:
-        unsold_components.extend([
-            {"type": "separator", "margin": "xl", "color": "#4A4A4A"},
-            {"type": "text", "text": "NGÀNH HÀNG CHƯA CÓ SỐ:", "color": "#C0C0C0", "size": "sm", "align": "center", "margin": "lg", "weight": "bold"}
-        ])
+        unsold_components.extend([{"type": "separator", "margin": "xl", "color": "#4A4A4A"}, {"type": "text", "text": "NGÀNH HÀNG CHƯA CÓ SỐ:", "color": "#C0C0C0", "size": "sm", "align": "center", "margin": "lg", "weight": "bold"}])
         num_columns = 3
         columns = [[] for _ in range(num_columns)]
         for i, item in enumerate(unsold_items):
@@ -170,40 +151,6 @@ def create_flex_message(store_data, competition_results, ranking):
     
     percent_color = "#4CFF42" if percent_float >= 1 else ("#FFD142" if percent_float > 0.7 else "#FF4242")
 
-    body_contents = [
-        {"type": "box", "layout": "horizontal", "contents": [
-            {"type": "box", "layout": "vertical", "flex": 1, "spacing": "sm", "contents": [
-                {"type": "text", "text": "DOANH THU", "color": "#87CEEB", "size": "md", "align": "center"},
-                {"type": "text", "text": realtime_tong, "color": "#87CEEB", "size": "xxl", "weight": "bold", "align": "center"}
-            ]},
-            {"type": "box", "layout": "vertical", "flex": 1, "spacing": "sm", "contents": [
-                {"type": "text", "text": "TARGET", "color": "#FFB6C1", "size": "md", "align": "center"},
-                {"type": "text", "text": target_tong, "color": "#FFB6C1", "size": "xxl", "weight": "bold", "align": "center"}
-            ]}
-        ]},
-        {"type": "text", "text": "% HOÀN THÀNH", "color": "#C0C0C0", "size": "md", "align": "center", "margin": "xl"},
-        {"type": "text", "text": percent_ht_tong, "color": percent_color, "size": "4xl", "weight": "bold", "align": "center"},
-        {"type": "box", "layout": "vertical", "backgroundColor": "#4A4A4A", "height": "8px", "cornerRadius": "md", "margin": "md", "contents": [
-            {"type": "box", "layout": "vertical", "backgroundColor": percent_color, "height": "8px", "cornerRadius": "md", "width": f"{min(100, round(percent_float * 100))}%"}
-        ]},
-        {"type": "box", "layout": "horizontal", "margin": "xl", "contents": [{"type": "text", "text": "XH D.Thu Kênh", "size": "sm", "color": "#C0C0C0", "align": "center", "flex": 1}]},
-        {"type": "box", "layout": "horizontal", "contents": [{"type": "text", "text": ranking, "weight": "bold", "size": "lg", "color": "#FFFFFF", "align": "center", "flex": 1}]},
-        {"type": "separator", "margin": "xl", "color": "#4A4A4A"},
-        {"type": "box", "layout": "horizontal", "margin": "md", "contents": [
-            {"type": "text", "text": "STT", "color": "#C0C0C0", "size": "sm", "flex": 0, "weight": "bold"},
-            {"type": "text", "text": "Ngành Hàng", "color": "#C0C0C0", "size": "sm", "flex": 4, "weight": "bold", "align": "center"},
-            {"type": "text", "text": "Realtime", "color": "#C0C0C0", "size": "sm", "flex": 2, "align": "center", "weight": "bold"},
-            {"type": "text", "text": "Target", "color": "#C0C0C0", "size": "sm", "flex": 2, "align": "center", "weight": "bold"},
-            {"type": "text", "text": "%HT", "color": "#C0C0C0", "size": "sm", "flex": 2, "align": "end", "weight": "bold"}
-        ]},
-        {"type": "separator", "margin": "md", "color": "#4A4A4A"}
-    ]
-    
-    if sold_components:
-        body_contents.extend(sold_components)
-    if unsold_components:
-        body_contents.extend(unsold_components)
-
     flex_json = {
       "type": "flex", "altText": f"Báo cáo cho {ten_sieu_thi_rut_gon}",
       "contents": {
@@ -212,17 +159,40 @@ def create_flex_message(store_data, competition_results, ranking):
             "type": "box", "layout": "vertical", "paddingAll": "20px", "backgroundColor": style["bg"],
             "contents": [
                 {"type": "text", "text": "Báo cáo Realtime", "color": style["text"], "size": "lg", "align": "center", "weight": "bold"},
-                {"type": "text", "text": ten_sieu_thi_rut_gon.upper(), "color": style["text"], "weight": "bold", "size": "xl", "align": "center", "margin": "md", "wrap": True},
+                {"type": "text", "text": f"🏪 {ten_sieu_thi_rut_gon.upper()}", "color": style["text"], "weight": "bold", "size": "xl", "align": "center", "margin": "md", "wrap": True},
                 {"type": "box", "layout": "vertical", "margin": "lg", "spacing": "sm", "contents": [
-                    {"type": "text", "size": "sm", "color": style["text"], "wrap": True, "contents": [{"type": "span", "text": "⭐ "}, {"type": "span", "text": f"Cụm: {cum}"}]},
-                    {"type": "text", "size": "sm", "color": style["text"], "wrap": True, "contents": [{"type": "span", "text": "🕒 "}, {"type": "span", "text": f"Thời gian: {thoi_gian}"}]},
-                    {"type": "text", "size": "sm", "color": style["text"], "wrap": True, "contents": [{"type": "span", "text": "🏆 "}, {"type": "span", "text": f"NH Thi Đua Đạt: {nh_thi_dua_dat}"}]}
+                    {"type": "text", "text": f"⭐ Cụm: {cum}", "size": "sm", "color": style["text"]},
+                    {"type": "text", "text": f"🕒 Thời gian: {thoi_gian}", "size": "sm", "color": style["text"]},
+                    {"type": "text", "text": f"🏆 NH Thi Đua Đạt: {nh_thi_dua_dat}", "size": "sm", "color": style["text"]}
                 ]}
             ]
         },
         "body": {
-            "type": "box", "layout": "vertical", "paddingAll": "20px", "backgroundColor": "#2E2E2E",
-            "contents": body_contents
+          "type": "box", "layout": "vertical", "paddingAll": "20px", "backgroundColor": "#2E2E2E",
+          "contents": [
+            {"type": "box", "layout": "horizontal", "contents": [
+                {"type": "box", "layout": "vertical", "flex": 1, "spacing": "sm", "contents": [
+                    {"type": "text", "text": "💰 DOANH THU", "color": "#87CEEB", "size": "md", "align": "center"},
+                    {"type": "text", "text": realtime_tong, "color": "#87CEEB", "size": "xxl", "weight": "bold", "align": "center"}
+                ]},
+                {"type": "box", "layout": "vertical", "flex": 1, "spacing": "sm", "contents": [
+                    {"type": "text", "text": "🎯 TARGET", "color": "#FFB6C1", "size": "md", "align": "center"},
+                    {"type": "text", "text": target_tong, "color": "#FFB6C1", "size": "xxl", "weight": "bold", "align": "center"}
+                ]}
+            ]},
+            {"type": "text", "text": "% HOÀN THÀNH", "color": "#C0C0C0", "size": "md", "align": "center", "margin": "xl"},
+            {"type": "text", "text": percent_ht_tong, "color": percent_color, "size": "4xl", "weight": "bold", "align": "center"},
+            {"type": "box", "layout": "vertical", "backgroundColor": "#4A4A4A", "height": "8px", "cornerRadius": "md", "margin": "md", "contents": [
+                {"type": "box", "layout": "vertical", "backgroundColor": percent_color, "height": "8px", "cornerRadius": "md", "width": f"{min(100, round(percent_float * 100))}%"}
+            ]},
+            {"type": "box", "layout": "horizontal", "margin": "xl", "contents": [{"type": "text", "text": "XH D.Thu Kênh", "size": "sm", "color": "#C0C0C0", "align": "center", "flex": 1}]},
+            {"type": "box", "layout": "horizontal", "contents": [{"type": "text", "text": ranking, "weight": "bold", "size": "lg", "color": "#FFFFFF", "align": "center", "flex": 1}]},
+            {"type": "separator", "margin": "xl", "color": "#4A4A4A"},
+            {"type": "box", "layout": "horizontal", "margin": "md", "contents": [{"type": "text", "text": "STT", "color": "#C0C0C0", "size": "sm", "flex": 0, "weight": "bold"}, {"type": "text", "text": "Ngành Hàng", "color": "#C0C0C0", "size": "sm", "flex": 4, "weight": "bold", "align": "center"}, {"type": "text", "text": "Realtime", "color": "#C0C0C0", "size": "sm", "flex": 2, "align": "center", "weight": "bold"}, {"type": "text", "text": "Target", "color": "#C0C0C0", "size": "sm", "flex": 2, "align": "center", "weight": "bold"}, {"type": "text", "text": "%HT", "color": "#C0C0C0", "size": "sm", "flex": 2, "align": "end", "weight": "bold"}]},
+            {"type": "separator", "margin": "md", "color": "#4A4A4A"},
+            *sold_components,
+            *unsold_components
+          ]
         },
         "footer": {"type": "box", "layout": "vertical", "contents": [{"type": "text", "text": "Created By 32859-NH Dương", "color": "#888888", "size": "xs", "align": "center"}]}
       }
@@ -231,34 +201,25 @@ def create_flex_message(store_data, competition_results, ranking):
 
 def create_leaderboard_flex_message(all_data):
     dmx_channels = ['ĐML', 'ĐMM', 'ĐMS']
-    tgdd_channels = ['TGD', 'AAR'] # Giữ nguyên 'AAR' là kênh TGDD
+    tgdd_channels = ['TGD', 'AAR']
     
     dmx_stores = []
     tgdd_stores = []
 
-    for row in all_data[1:]: # Bỏ qua hàng tiêu đề
+    for row in all_data[1:]:
         try:
-            # Đảm bảo các chỉ mục tồn tại
-            if len(row) < 5: 
-                continue # Bỏ qua hàng không đủ dữ liệu
-                
-            kenh = row[1].strip() if len(row) > 1 else ""
-            sieu_thi_full = row[2].strip() if len(row) > 2 else ""
-            doanh_thu_str = str(row[4]).replace(',', '').strip() if len(row) > 4 else "0"
+            kenh = row[1]
+            sieu_thi = row[2]
+            doanh_thu_str = str(row[4]).replace(',', '')
             doanh_thu = float(doanh_thu_str) if doanh_thu_str else 0
             
-            # Rút gọn tên siêu thị cho BXH
-            sieu_thi_parts = sieu_thi_full.split(' - ')
-            sieu_thi_short = sieu_thi_parts[-1] if len(sieu_thi_parts) > 1 else sieu_thi_full
-            
-            store_info = {'kenh': kenh, 'sieu_thi': sieu_thi_short, 'doanh_thu': doanh_thu}
+            store_info = {'kenh': kenh, 'sieu_thi': sieu_thi, 'doanh_thu': doanh_thu}
             
             if kenh in dmx_channels:
                 dmx_stores.append(store_info)
             elif kenh in tgdd_channels:
                 tgdd_stores.append(store_info)
-        except (IndexError, ValueError, TypeError) as e:
-            print(f"Lỗi khi xử lý hàng dữ liệu cho BXH: {row} - Lỗi: {e}")
+        except (IndexError, ValueError, TypeError):
             continue
             
     dmx_stores.sort(key=lambda x: x['doanh_thu'], reverse=True)
@@ -279,15 +240,10 @@ def create_leaderboard_flex_message(all_data):
         
         rows = [table_header, {"type": "separator", "margin": "sm", "color": "#4A4A4A"}]
         for i, store in enumerate(stores):
-            # Cắt ngắn tên siêu thị nếu quá dài
-            sieu_thi_display = store['sieu_thi']
-            if len(sieu_thi_display) > 20: # Giới hạn 20 ký tự, có thể điều chỉnh
-                sieu_thi_display = sieu_thi_display[:17] + "..."
-
             row_component = {"type": "box", "layout": "horizontal", "margin": "md", "contents": [
                 {"type": "text", "text": str(i+1), "size": "sm", "color": "#FFFFFF", "flex": 1},
                 {"type": "text", "text": store['kenh'], "size": "sm", "color": "#FFFFFF", "flex": 2},
-                {"type": "text", "text": sieu_thi_display, "size": "xs", "color": "#FFFFFF", "flex": 6, "wrap": True},
+                {"type": "text", "text": store['sieu_thi'], "size": "xs", "color": "#FFFFFF", "flex": 6, "wrap": True},
                 {"type": "text", "text": str(round(store['doanh_thu'])), "size": "sm", "color": "#FFFFFF", "flex": 2, "align": "end"}
             ]}
             rows.append(row_component)
@@ -321,7 +277,6 @@ def callback():
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
     user_message = event.message.text.strip()
-    reply_message = None # Khởi tạo reply_message
     try:
         sheet = CLIENT.open(SHEET_NAME).worksheet(WORKSHEET_NAME)
         all_data = sheet.get_all_values()
@@ -337,9 +292,8 @@ def handle_message(event):
             for row in all_data[1:]:
                 if row and len(row) > 2 and row[2]:
                     cell_content = row[2].strip()
-                    # Cố gắng tìm mã siêu thị ở đầu chuỗi
-                    supermarket_code_match = cell_content.split(' ')[0].upper()
-                    if supermarket_code_match == user_message.upper(): # So sánh không phân biệt hoa thường
+                    supermarket_code = cell_content.split(' ')[0]
+                    if supermarket_code == user_message:
                         found_row = row
                         break
             if found_row:
@@ -348,22 +302,11 @@ def handle_message(event):
                 flex_message_data = create_flex_message(found_row, competition_results, ranking)
                 reply_message = FlexSendMessage(alt_text='Báo cáo Realtime', contents=flex_message_data['contents'])
             else:
-                reply_message = TextSendMessage(text=f'Không tìm thấy dữ liệu cho mã siêu thị: {user_message}. Vui lòng kiểm tra lại mã hoặc nhập "BXH" để xem bảng xếp hạng.')
+                reply_message = TextSendMessage(text=f'Không tìm thấy dữ liệu cho mã siêu thị: {user_message}')
     except Exception as e:
         print(f"!!! GẶP LỖI NGHIÊM TRỌNG: {repr(e)}")
-        reply_message = TextSendMessage(text=f'Đã có lỗi xảy ra khi truy vấn dữ liệu: {e}. Vui lòng thử lại sau.')
-    
-    if reply_message: # Chỉ gửi tin nhắn nếu reply_message đã được khởi tạo
-        try:
-            line_bot_api.reply_message(event.reply_token, reply_message)
-        except LineBotApiError as e:
-            print(f"!!! LỖI KHI GỬI TIN NHẮN LINE: Status Code={e.status_code}, Request ID={e.request_id}, Error Response={e.error.message}")
-            if e.error.details:
-                for detail in e.error.details:
-                    print(f"Chi tiết lỗi: Property={detail.get('property')}, Message={detail.get('message')}")
-            # Có thể gửi một tin nhắn văn bản thay thế nếu Flex Message bị lỗi
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="Xin lỗi, đã có lỗi xảy ra khi hiển thị báo cáo. Vui lòng thử lại."))
-
+        reply_message = TextSendMessage(text='Đã có lỗi xảy ra khi truy vấn dữ liệu.')
+    line_bot_api.reply_message(event.reply_token, reply_message)
 
 # --- CHẠY ỨNG DỤNG ---
 if __name__ == "__main__":
