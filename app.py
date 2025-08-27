@@ -164,34 +164,34 @@ def create_flex_message(store_data, competition_results, ranking):
       "contents": {
         "type": "bubble", "size": "giga",
         "header": {
-            "type": "box", "layout": "vertical", "paddingAll": "20px", "backgroundColor": style["bg"],
-            "contents": [
-                {"type": "text", "text": "Báo cáo Realtime", "color": style["text"], "size": "lg", "align": "center", "weight": "bold"},
-                {"type": "text", "text": f"🏪 {ten_sieu_thi_rut_gon.upper()}", "color": style["text"], "weight": "bold", "size": "xl", "align": "center", "margin": "md", "wrap": True},
-                {"type": "box", "layout": "vertical", "margin": "lg", "spacing": "sm", "contents": [
-                    {"type": "text", "text": f"⭐ Cụm: {cum}", "size": "sm", "color": style["text"]},
-                    {"type": "text", "text": f"🕒 Thời gian: {thoi_gian}", "size": "sm", "color": style["text"]},
-                    {"type": "text", "text": f"🏆 NH Thi Đua Đạt: {nh_thi_dua_dat}", "size": "sm", "color": style["text"]}
-                ]}
-            ]
+          "type": "box", "layout": "vertical", "paddingAll": "20px", "backgroundColor": style["bg"],
+          "contents": [
+            {"type": "text", "text": "Báo cáo Realtime", "color": style["text"], "size": "lg", "align": "center", "weight": "bold"},
+            {"type": "text", "text": f"🏪 {ten_sieu_thi_rut_gon.upper()}", "color": style["text"], "weight": "bold", "size": "xl", "align": "center", "margin": "md", "wrap": True},
+            {"type": "box", "layout": "vertical", "margin": "lg", "spacing": "sm", "contents": [
+              {"type": "text", "text": f"⭐ Cụm: {cum}", "size": "sm", "color": style["text"]},
+              {"type": "text", "text": f"🕒 Thời gian: {thoi_gian}", "size": "sm", "color": style["text"]},
+              {"type": "text", "text": f"🏆 NH Thi Đua Đạt: {nh_thi_dua_dat}", "size": "sm", "color": style["text"]}
+            ]}
+          ]
         },
         "body": {
           "type": "box", "layout": "vertical", "paddingAll": "20px", "backgroundColor": "#2E2E2E",
           "contents": [
             {"type": "box", "layout": "horizontal", "contents": [
-                {"type": "box", "layout": "vertical", "flex": 1, "spacing": "sm", "contents": [
-                    {"type": "text", "text": "💰 DOANH THU", "color": "#87CEEB", "size": "md", "align": "center"},
-                    {"type": "text", "text": realtime_tong, "color": "#87CEEB", "size": "xxl", "weight": "bold", "align": "center"}
-                ]},
-                {"type": "box", "layout": "vertical", "flex": 1, "spacing": "sm", "contents": [
-                    {"type": "text", "text": "🎯 TARGET", "color": "#FFB6C1", "size": "md", "align": "center"},
-                    {"type": "text", "text": target_tong, "color": "#FFB6C1", "size": "xxl", "weight": "bold", "align": "center"}
-                ]}
+              {"type": "box", "layout": "vertical", "flex": 1, "spacing": "sm", "contents": [
+                {"type": "text", "text": "💰 DOANH THU", "color": "#87CEEB", "size": "md", "align": "center"},
+                {"type": "text", "text": realtime_tong, "color": "#87CEEB", "size": "xxl", "weight": "bold", "align": "center"}
+              ]},
+              {"type": "box", "layout": "vertical", "flex": 1, "spacing": "sm", "contents": [
+                {"type": "text", "text": "🎯 TARGET", "color": "#FFB6C1", "size": "md", "align": "center"},
+                {"type": "text", "text": target_tong, "color": "#FFB6C1", "size": "xxl", "weight": "bold", "align": "center"}
+              ]}
             ]},
             {"type": "text", "text": "% HOÀN THÀNH", "color": "#C0C0C0", "size": "md", "align": "center", "margin": "xl"},
             {"type": "text", "text": percent_ht_tong, "color": percent_color, "size": "4xl", "weight": "bold", "align": "center"},
             {"type": "box", "layout": "vertical", "backgroundColor": "#4A4A4A", "height": "8px", "cornerRadius": "md", "margin": "md", "contents": [
-                {"type": "box", "layout": "vertical", "backgroundColor": percent_color, "height": "8px", "cornerRadius": "md", "width": f"{min(100, round(percent_float * 100))}%"}
+              {"type": "box", "layout": "vertical", "backgroundColor": percent_color, "height": "8px", "cornerRadius": "md", "width": f"{min(100, round(percent_float * 100))}%"}
             ]},
             {"type": "box", "layout": "horizontal", "margin": "xl", "contents": [{"type": "text", "text": "XH D.Thu Kênh", "size": "sm", "color": "#C0C0C0", "align": "center", "flex": 1}]},
             {"type": "box", "layout": "horizontal", "contents": [{"type": "text", "text": ranking, "weight": "bold", "size": "lg", "color": "#FFFFFF", "align": "center", "flex": 1}]},
@@ -207,6 +207,7 @@ def create_flex_message(store_data, competition_results, ranking):
     }
     return flex_json
 
+# <<<--- THAY ĐỔI BẮT ĐẦU TỪ ĐÂY --->>>
 def create_summary_text_message(store_data, competition_results):
     try:
         target_val = float((store_data[3] or "0").replace(',', ''))
@@ -215,7 +216,7 @@ def create_summary_text_message(store_data, competition_results):
         
         remaining_val = target_val - realtime_val
         
-        finished_items = [item for item in competition_results if item['percent_val'] >= 1]
+        finished_items_count = sum(1 for item in competition_results if item['percent_val'] >= 1)
         
         tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
         now = datetime.now(tz_vietnam)
@@ -226,16 +227,32 @@ def create_summary_text_message(store_data, competition_results):
         summary += f"- 🎯 Target Ngày: {math.floor(target_val)}\n"
         summary += f"- 📈 Realtime: {math.floor(realtime_val)} ({round(percent_float*100)}%)\n"
         summary += f"- 📉 Còn lại: {math.floor(remaining_val)}\n"
-        summary += f"- 🏆 Thi đua dự kiến đạt: {len(finished_items)}/{len(competition_results)}\n"
+        summary += f"- 🏆 Thi đua dự kiến đạt: {finished_items_count}/{len(competition_results)}\n"
         summary += "-------------------\n"
-        summary += "🏁 TÌNH HÌNH THI ĐUA (THỰC TẾ) 🏁\n"
+        summary += "🏁 TÌNH HÌNH THI ĐUA NGÀNH HÀNG 🏁\n\n"
         
-        if finished_items:
-            summary += f"\n✅ ĐÃ VỀ ĐÍCH ({len(finished_items)} nhóm):\n"
-            for item in finished_items:
-                summary += f"  - {item['name']} ({item['percent_ht']})\n"
+        # Vòng lặp để tạo định dạng mới cho từng ngành hàng
+        if competition_results:
+            for item in competition_results:
+                try:
+                    realtime = item.get('realtime', 0)
+                    target_str = str(item.get('target', '0')).replace(',', '')
+                    target = float(target_str) if target_str.strip() and target_str.strip() != '-' else 0
+                    
+                    remaining = target - realtime
+                    percent_ht = item.get('percent_ht', '0%')
+                    
+                    # Làm tròn số để hiển thị đẹp hơn
+                    realtime_disp = math.floor(realtime) if realtime == math.floor(realtime) else round(realtime, 2)
+                    target_disp = math.floor(target) if target == math.floor(target) else round(target, 2)
+                    remaining_disp = math.floor(remaining) if remaining == math.floor(remaining) else round(remaining, 2)
+
+                    summary += f"• {item['name']}: {realtime_disp}/{target_disp} ({percent_ht}) còn lại: {remaining_disp}\n"
+                except (ValueError, TypeError):
+                    # Fallback nếu dữ liệu target không phải là số
+                    summary += f"• {item['name']}: {item.get('realtime', 0)} ({item.get('percent_ht', '0%')})\n"
         else:
-            summary += "\nChưa có nhóm nào về đích."
+            summary += "Không có dữ liệu thi đua."
             
         return TextSendMessage(text=summary)
     except Exception as e:
@@ -275,27 +292,40 @@ def create_leaderboard_flex_message(all_data):
     def build_leaderboard_bubble(title, stores, color, text_color="#FFFFFF"):
         header = {"type": "box", "layout": "vertical", "backgroundColor": color, "paddingAll": "lg", "contents": [{"type": "text", "text": title, "weight": "bold", "size": "xl", "color": text_color, "align": "center"}]}
         
+        separator_color = "#555555" # Màu cho đường kẻ
+
+        # Tiêu đề bảng với đường kẻ dọc
         table_header = {"type": "box", "layout": "horizontal", "margin": "md", "contents": [
-            {"type": "text", "text": "STT", "weight": "bold", "size": "sm", "color": "#C0C0C0", "flex": 1},
-            {"type": "text", "text": "KÊNH", "weight": "bold", "size": "sm", "color": "#C0C0C0", "flex": 2},
-            {"type": "text", "text": "SIÊU THỊ", "weight": "bold", "size": "sm", "color": "#C0C0C0", "flex": 6},
-            {"type": "text", "text": "RT", "weight": "bold", "size": "sm", "color": "#C0C0C0", "flex": 2, "align": "end"}
+            {"type": "text", "text": "STT", "weight": "bold", "size": "sm", "color": "#FFFFFF", "flex": 1, "align": "center"},
+            {"type": "separator", "color": separator_color},
+            {"type": "text", "text": "KÊNH", "weight": "bold", "size": "sm", "color": "#FFFFFF", "flex": 2, "align": "center"},
+            {"type": "separator", "color": separator_color},
+            {"type": "text", "text": "SIÊU THỊ", "weight": "bold", "size": "sm", "color": "#FFFFFF", "flex": 6, "align": "center"},
+            {"type": "separator", "color": separator_color},
+            {"type": "text", "text": "RT", "weight": "bold", "size": "sm", "color": "#FFFFFF", "flex": 2, "align": "center"}
         ]}
         
-        rows = [table_header, {"type": "separator", "margin": "sm", "color": "#4A4A4A"}]
+        rows = [table_header, {"type": "separator", "margin": "sm", "color": separator_color}]
         for i, store in enumerate(stores):
-            row_component = {"type": "box", "layout": "horizontal", "margin": "md", "contents": [
-                {"type": "text", "text": str(i+1), "size": "sm", "color": "#FFFFFF", "flex": 1},
-                {"type": "text", "text": store['kenh'], "size": "sm", "color": "#FFFFFF", "flex": 2},
-                {"type": "text", "text": store['sieu_thi'], "size": "xs", "color": "#FFFFFF", "flex": 6, "wrap": True},
-                {"type": "text", "text": str(round(store['doanh_thu'])), "size": "sm", "color": "#FFFFFF", "flex": 2, "align": "end"}
+            # Mỗi hàng dữ liệu với đường kẻ dọc
+            row_component = {"type": "box", "layout": "horizontal", "margin": "md", "paddingTop":"sm", "paddingBottom":"sm", "contents": [
+                {"type": "text", "text": str(i+1), "size": "sm", "color": "#FFFFFF", "flex": 1, "gravity": "center", "align": "center"},
+                {"type": "separator", "color": separator_color},
+                {"type": "text", "text": store['kenh'], "size": "sm", "color": "#FFFFFF", "flex": 2, "gravity": "center", "align": "center"},
+                {"type": "separator", "color": separator_color},
+                {"type": "text", "text": store['sieu_thi'], "size": "xs", "color": "#FFFFFF", "flex": 6, "wrap": True, "gravity": "center"},
+                {"type": "separator", "color": separator_color},
+                {"type": "text", "text": str(round(store['doanh_thu'])), "size": "sm", "color": "#FFFFFF", "flex": 2, "align": "end", "gravity": "center"}
             ]}
             rows.append(row_component)
+            # Thêm đường kẻ ngang sau mỗi hàng
+            rows.append({"type": "separator", "margin": "sm", "color": separator_color})
 
-        return {"type": "bubble", "size": "giga", "backgroundColor": "#2E2E2E", "header": header, "body": {"type": "box", "layout": "vertical", "contents": rows}}
+        # Nền đen cho toàn bộ bubble
+        return {"type": "bubble", "size": "giga", "backgroundColor": "#000000", "header": header, "body": {"type": "box", "layout": "vertical", "contents": rows, "paddingAll":"lg"}}
 
-    dmx_bubble = build_leaderboard_bubble("REALTIME TOP 20 ĐMX", top_20_dmx, "#1E88E5")
-    tgdd_bubble = build_leaderboard_bubble("REALTIME TOP 20 TGDD", top_20_tgdd, "#FDD835", text_color="#000000")
+    dmx_bubble = build_leaderboard_bubble("🏆 REALTIME TOP 20 ĐMX 🏆", top_20_dmx, "#1E88E5")
+    tgdd_bubble = build_leaderboard_bubble("🏆 REALTIME TOP 20 TGDD 🏆", top_20_tgdd, "#FDD835", text_color="#000000")
 
     return {
         "type": "flex",
@@ -305,6 +335,7 @@ def create_leaderboard_flex_message(all_data):
             "contents": [dmx_bubble, tgdd_bubble]
         }
     }
+# <<<--- THAY ĐỔI KẾT THÚC TẠI ĐÂY --->>>
 
 # --- ĐIỂM TIẾP NHẬN WEBHOOK TỪ LINE ---
 @app.route("/callback", methods=['POST'])
