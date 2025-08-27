@@ -132,14 +132,16 @@ def create_flex_message(store_data, competition_results, ranking):
     style = channel_styles.get(kenh, {"bg": "#006c83", "text": "#FFFFFF"})
     
     sold_components = []
-    for i, item in enumerate(sold_items):
+    for item in sold_items:
         percent_val = item.get("percent_val", 0)
         color = "#4CFF42" if percent_val >= 1 else ("#FFD142" if percent_val > 0.7 else "#FF4242")
         component = {"type": "box", "layout": "horizontal", "margin": "md", "paddingTop": "sm", "paddingBottom": "sm", "contents": [
-            {"type": "text", "text": str(i+1), "color": "#C0C0C0", "flex": 0, "margin": "sm", "size": "sm", "gravity": "center"},
             {"type": "text", "text": item["name"], "wrap": True, "size": "sm", "color": "#FFFFFF", "flex": 4, "gravity": "center"},
+            {"type": "separator", "color": "#4A4A4A"},
             {"type": "text", "text": str(round(item["realtime"], 2)), "size": "sm", "color": "#FFFFFF", "align": "center", "flex": 2, "gravity": "center"},
+            {"type": "separator", "color": "#4A4A4A"},
             {"type": "text", "text": str(item["target"]), "size": "sm", "color": "#FFFFFF", "align": "center", "flex": 2, "gravity": "center"},
+            {"type": "separator", "color": "#4A4A4A"},
             {"type": "box", "layout": "vertical", "flex": 2, "contents": [{"type": "text", "text": item["percent_ht"], "size": "sm", "color": color, "align": "end", "weight": "bold", "gravity": "center"}]}
         ]}
         sold_components.append(component)
@@ -194,13 +196,7 @@ def create_flex_message(store_data, competition_results, ranking):
             {"type": "box", "layout": "horizontal", "margin": "xl", "contents": [{"type": "text", "text": "XH D.Thu Kênh", "size": "sm", "color": "#C0C0C0", "align": "center", "flex": 1}]},
             {"type": "box", "layout": "horizontal", "contents": [{"type": "text", "text": ranking, "weight": "bold", "size": "lg", "color": "#FFFFFF", "align": "center", "flex": 1}]},
             {"type": "separator", "margin": "xl", "color": "#4A4A4A"},
-            {"type": "box", "layout": "horizontal", "margin": "md", "contents": [
-                {"type": "text", "text": "STT", "color": "#C0C0C0", "size": "sm", "flex": 0, "weight": "bold"},
-                {"type": "text", "text": "Ngành Hàng", "color": "#C0C0C0", "size": "sm", "flex": 4, "weight": "bold", "align": "center"},
-                {"type": "text", "text": "Realtime", "color": "#C0C0C0", "size": "sm", "flex": 2, "align": "center", "weight": "bold"},
-                {"type": "text", "text": "Target", "color": "#C0C0C0", "size": "sm", "flex": 2, "align": "center", "weight": "bold"},
-                {"type": "text", "text": "%HT", "color": "#C0C0C0", "size": "sm", "flex": 2, "align": "end", "weight": "bold"}
-            ]},
+            {"type": "box", "layout": "horizontal", "margin": "md", "contents": [{"type": "text", "text": "Ngành Hàng", "color": "#C0C0C0", "size": "sm", "flex": 4, "weight": "bold", "align": "center"}, {"type": "text", "text": "Realtime", "color": "#C0C0C0", "size": "sm", "flex": 2, "align": "center", "weight": "bold"}, {"type": "text", "text": "Target", "color": "#C0C0C0", "size": "sm", "flex": 2, "align": "center", "weight": "bold"}, {"type": "text", "text": "%HT", "color": "#C0C0C0", "size": "sm", "flex": 2, "align": "end", "weight": "bold"}]},
             {"type": "separator", "margin": "md", "color": "#4A4A4A"},
             *sold_components,
             *unsold_components
