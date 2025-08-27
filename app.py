@@ -171,7 +171,6 @@ def create_flex_message(store_data, competition_results, ranking):
                 ]}
             ]},
             {"type": "box", "layout": "vertical", "paddingAll": "20px", "backgroundColor": "#1C1C1C", "contents": [
-                # SỬA LỖI: Xóa thuộc tính offsetBottom và offsetStart để đảm bảo tương thích
                 {"type": "box", "layout": "vertical", "backgroundColor": "#2E2E2E", "cornerRadius": "xl", "paddingAll": "lg", "contents": [
                     {"type": "box", "layout": "horizontal", "contents": [
                         {"type": "box", "layout": "vertical", "flex": 1, "spacing": "sm", "contents": [
