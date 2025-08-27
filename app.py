@@ -4,7 +4,7 @@ from flask import Flask, request, abort
 from linebot import (
     LineBotApi, WebhookHandler
 )
-from linebot.exceptions import InvalidSignatureError, LineBotApiError
+from linebot.exceptions import InvalidSignatureError
 from linebot.models import (
     MessageEvent, TextMessage, TextSendMessage, FlexSendMessage
 )
@@ -131,17 +131,14 @@ def create_flex_message(store_data, competition_results, ranking):
     }
     style = channel_styles.get(kenh, {"bg": "#006c83", "text": "#FFFFFF"})
     
-    # 1. Tạo danh sách các component đã bán
     sold_components = []
     for i, item in enumerate(sold_items):
         percent_val = item.get("percent_val", 0)
         color = "#4CFF42" if percent_val >= 1 else ("#FFD142" if percent_val > 0.7 else "#FF4242")
         component = {"type": "box", "layout": "horizontal", "margin": "md", "paddingTop": "sm", "paddingBottom": "sm", "contents": [{"type": "text", "text": str(i+1), "color": "#C0C0C0", "flex": 0, "margin": "sm", "size": "sm", "gravity": "center"}, {"type": "text", "text": item["name"], "wrap": True, "size": "sm", "color": "#FFFFFF", "flex": 4, "gravity": "center"}, {"type": "text", "text": str(round(item["realtime"], 2)), "size": "sm", "color": "#FFFFFF", "align": "center", "flex": 2, "gravity": "center"}, {"type": "text", "text": str(item["target"]), "size": "sm", "color": "#FFFFFF", "align": "center", "flex": 2, "gravity": "center"}, {"type": "box", "layout": "vertical", "flex": 2, "contents": [{"type": "text", "text": item["percent_ht"], "size": "sm", "color": color, "align": "end", "weight": "bold", "gravity": "center"}]}]}
         sold_components.append(component)
-        if i < len(sold_items) - 1:
-            sold_components.append({"type": "separator", "margin": "md", "color": "#4A4A4A"})
+        sold_components.append({"type": "separator", "margin": "md", "color": "#4A4A4A"})
     
-    # 2. Tạo danh sách các component chưa bán
     unsold_components = []
     if unsold_items:
         unsold_components.extend([{"type": "separator", "margin": "xl", "color": "#4A4A4A"}, {"type": "text", "text": "NGÀNH HÀNG CHƯA CÓ SỐ:", "color": "#C0C0C0", "size": "sm", "align": "center", "margin": "lg", "weight": "bold"}])
@@ -154,36 +151,6 @@ def create_flex_message(store_data, competition_results, ranking):
     
     percent_color = "#4CFF42" if percent_float >= 1 else ("#FFD142" if percent_float > 0.7 else "#FF4242")
 
-    # 3. Xây dựng danh sách contents cho body một cách tường minh
-    body_contents = [
-        {"type": "box", "layout": "horizontal", "contents": [
-            {"type": "box", "layout": "vertical", "flex": 1, "spacing": "sm", "contents": [
-                {"type": "text", "text": "DOANH THU", "color": "#87CEEB", "size": "md", "align": "center"},
-                {"type": "text", "text": realtime_tong, "color": "#87CEEB", "size": "xxl", "weight": "bold", "align": "center"}
-            ]},
-            {"type": "box", "layout": "vertical", "flex": 1, "spacing": "sm", "contents": [
-                {"type": "text", "text": "TARGET", "color": "#FFB6C1", "size": "md", "align": "center"},
-                {"type": "text", "text": target_tong, "color": "#FFB6C1", "size": "xxl", "weight": "bold", "align": "center"}
-            ]}
-        ]},
-        {"type": "text", "text": "% HOÀN THÀNH", "color": "#C0C0C0", "size": "md", "align": "center", "margin": "xl"},
-        {"type": "text", "text": percent_ht_tong, "color": percent_color, "size": "4xl", "weight": "bold", "align": "center"},
-        {"type": "box", "layout": "vertical", "backgroundColor": "#4A4A4A", "height": "8px", "cornerRadius": "md", "margin": "md", "contents": [
-            {"type": "box", "layout": "vertical", "backgroundColor": percent_color, "height": "8px", "cornerRadius": "md", "width": f"{min(100, round(percent_float * 100))}%"}
-        ]},
-        {"type": "box", "layout": "horizontal", "margin": "xl", "contents": [{"type": "text", "text": "XH D.Thu Kênh", "size": "sm", "color": "#C0C0C0", "align": "center", "flex": 1}]},
-        {"type": "box", "layout": "horizontal", "contents": [{"type": "text", "text": ranking, "weight": "bold", "size": "lg", "color": "#FFFFFF", "align": "center", "flex": 1}]},
-        {"type": "separator", "margin": "xl", "color": "#4A4A4A"},
-        {"type": "box", "layout": "horizontal", "margin": "md", "contents": [{"type": "text", "text": "STT", "color": "#C0C0C0", "size": "sm", "flex": 0, "weight": "bold"}, {"type": "text", "text": "Ngành Hàng", "color": "#C0C0C0", "size": "sm", "flex": 4, "weight": "bold", "align": "center"}, {"type": "text", "text": "Realtime", "color": "#C0C0C0", "size": "sm", "flex": 2, "align": "center", "weight": "bold"}, {"type": "text", "text": "Target", "color": "#C0C0C0", "size": "sm", "flex": 2, "align": "center", "weight": "bold"}, {"type": "text", "text": "%HT", "color": "#C0C0C0", "size": "sm", "flex": 2, "align": "end", "weight": "bold"}]},
-        {"type": "separator", "margin": "md", "color": "#4A4A4A"}
-    ]
-    
-    # 4. Dùng extend để thêm các component động vào, đảm bảo cấu trúc phẳng
-    if sold_components:
-        body_contents.extend(sold_components)
-    if unsold_components:
-        body_contents.extend(unsold_components)
-
     flex_json = {
       "type": "flex", "altText": f"Báo cáo cho {ten_sieu_thi_rut_gon}",
       "contents": {
@@ -192,18 +159,40 @@ def create_flex_message(store_data, competition_results, ranking):
             "type": "box", "layout": "vertical", "paddingAll": "20px", "backgroundColor": style["bg"],
             "contents": [
                 {"type": "text", "text": "Báo cáo Realtime", "color": style["text"], "size": "lg", "align": "center", "weight": "bold"},
-                {"type": "text", "text": ten_sieu_thi_rut_gon.upper(), "color": style["text"], "weight": "bold", "size": "xl", "align": "center", "margin": "md", "wrap": True},
+                {"type": "text", "text": f"🏪 {ten_sieu_thi_rut_gon.upper()}", "color": style["text"], "weight": "bold", "size": "xl", "align": "center", "margin": "md", "wrap": True},
                 {"type": "box", "layout": "vertical", "margin": "lg", "spacing": "sm", "contents": [
-                    {"type": "text", "size": "sm", "color": style["text"], "wrap": True, "contents": [{"type": "span", "text": "⭐ "}, {"type": "span", "text": f"Cụm: {cum}"}]},
-                    {"type": "text", "size": "sm", "color": style["text"], "wrap": True, "contents": [{"type": "span", "text": "🕒 "}, {"type": "span", "text": f"Thời gian: {thoi_gian}"}]},
-                    {"type": "text", "size": "sm", "color": style["text"], "wrap": True, "contents": [{"type": "span", "text": "🏆 "}, {"type": "span", "text": f"NH Thi Đua Đạt: {nh_thi_dua_dat}"}]}
+                    {"type": "text", "text": f"⭐ Cụm: {cum}", "size": "sm", "color": style["text"]},
+                    {"type": "text", "text": f"🕒 Thời gian: {thoi_gian}", "size": "sm", "color": style["text"]},
+                    {"type": "text", "text": f"🏆 NH Thi Đua Đạt: {nh_thi_dua_dat}", "size": "sm", "color": style["text"]}
                 ]}
             ]
         },
-        # 5. Gán danh sách đã được xây dựng hoàn chỉnh vào đây
         "body": {
-            "type": "box", "layout": "vertical", "paddingAll": "20px", "backgroundColor": "#2E2E2E",
-            "contents": body_contents
+          "type": "box", "layout": "vertical", "paddingAll": "20px", "backgroundColor": "#2E2E2E",
+          "contents": [
+            {"type": "box", "layout": "horizontal", "contents": [
+                {"type": "box", "layout": "vertical", "flex": 1, "spacing": "sm", "contents": [
+                    {"type": "text", "text": "💰 DOANH THU", "color": "#87CEEB", "size": "md", "align": "center"},
+                    {"type": "text", "text": realtime_tong, "color": "#87CEEB", "size": "xxl", "weight": "bold", "align": "center"}
+                ]},
+                {"type": "box", "layout": "vertical", "flex": 1, "spacing": "sm", "contents": [
+                    {"type": "text", "text": "🎯 TARGET", "color": "#FFB6C1", "size": "md", "align": "center"},
+                    {"type": "text", "text": target_tong, "color": "#FFB6C1", "size": "xxl", "weight": "bold", "align": "center"}
+                ]}
+            ]},
+            {"type": "text", "text": "% HOÀN THÀNH", "color": "#C0C0C0", "size": "md", "align": "center", "margin": "xl"},
+            {"type": "text", "text": percent_ht_tong, "color": percent_color, "size": "4xl", "weight": "bold", "align": "center"},
+            {"type": "box", "layout": "vertical", "backgroundColor": "#4A4A4A", "height": "8px", "cornerRadius": "md", "margin": "md", "contents": [
+                {"type": "box", "layout": "vertical", "backgroundColor": percent_color, "height": "8px", "cornerRadius": "md", "width": f"{min(100, round(percent_float * 100))}%"}
+            ]},
+            {"type": "box", "layout": "horizontal", "margin": "xl", "contents": [{"type": "text", "text": "XH D.Thu Kênh", "size": "sm", "color": "#C0C0C0", "align": "center", "flex": 1}]},
+            {"type": "box", "layout": "horizontal", "contents": [{"type": "text", "text": ranking, "weight": "bold", "size": "lg", "color": "#FFFFFF", "align": "center", "flex": 1}]},
+            {"type": "separator", "margin": "xl", "color": "#4A4A4A"},
+            {"type": "box", "layout": "horizontal", "margin": "md", "contents": [{"type": "text", "text": "STT", "color": "#C0C0C0", "size": "sm", "flex": 0, "weight": "bold"}, {"type": "text", "text": "Ngành Hàng", "color": "#C0C0C0", "size": "sm", "flex": 4, "weight": "bold", "align": "center"}, {"type": "text", "text": "Realtime", "color": "#C0C0C0", "size": "sm", "flex": 2, "align": "center", "weight": "bold"}, {"type": "text", "text": "Target", "color": "#C0C0C0", "size": "sm", "flex": 2, "align": "center", "weight": "bold"}, {"type": "text", "text": "%HT", "color": "#C0C0C0", "size": "sm", "flex": 2, "align": "end", "weight": "bold"}]},
+            {"type": "separator", "margin": "md", "color": "#4A4A4A"},
+            *sold_components,
+            *unsold_components
+          ]
         },
         "footer": {"type": "box", "layout": "vertical", "contents": [{"type": "text", "text": "Created By 32859-NH Dương", "color": "#888888", "size": "xs", "align": "center"}]}
       }
@@ -317,13 +306,7 @@ def handle_message(event):
     except Exception as e:
         print(f"!!! GẶP LỖI NGHIÊM TRỌNG: {repr(e)}")
         reply_message = TextSendMessage(text='Đã có lỗi xảy ra khi truy vấn dữ liệu.')
-    
-    try:
-        line_bot_api.reply_message(event.reply_token, reply_message)
-    except LineBotApiError as e:
-        print(f"!!! LỖI KHI GỬI TIN NHẮN: {e.status_code}")
-        print(e.error.details)
-
+    line_bot_api.reply_message(event.reply_token, reply_message)
 
 # --- CHẠY ỨNG DỤNG ---
 if __name__ == "__main__":
