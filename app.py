@@ -40,6 +40,14 @@ handler = WebhookHandler(CHANNEL_SECRET)
 
 # --- ĐỊNH NGHĨA CÁC HÀM XỬ LÝ ---
 
+# <<<--- SỬA LỖI 1: Thay thế dấu phẩy bằng dấu chấm để xử lý số thập phân --->>>
+def parse_float_from_string(s):
+    """Hàm này chuyển đổi chuỗi có dấu phẩy thành số float."""
+    if not isinstance(s, str):
+        s = str(s)
+    # Thay thế dấu phẩy (decimal separator) bằng dấu chấm
+    return float(s.replace(',', '.'))
+
 def handle_percentage_string(percent_str):
     if not percent_str: return 0.0, "0%"
     clean_str = str(percent_str).strip()
@@ -64,12 +72,18 @@ def parse_competition_data(header_row, data_row):
         if len(indices) == 3:
             try:
                 percent_ht_val = data_row[indices[0]]
-                realtime_val = data_row[indices[1]] if data_row[indices[1]] and data_row[indices[1]].strip() != '-' else "0"
+                realtime_val_str = data_row[indices[1]] if data_row[indices[1]] and data_row[indices[1]].strip() != '-' else "0"
                 target_val = data_row[indices[2]] if data_row[indices[2]] and data_row[indices[2]].strip() != '-' else "0"
+                
                 percent_float, percent_ht_formatted = handle_percentage_string(percent_ht_val)
+                
                 results.append({
-                    "name": category_name, "realtime": float(realtime_val.replace(',', '')), "target": target_val,
-                    "percent_ht": percent_ht_formatted, "percent_val": percent_float
+                    "name": category_name,
+                    # Sử dụng hàm parse_float_from_string
+                    "realtime": parse_float_from_string(realtime_val_str),
+                    "target": target_val,
+                    "percent_ht": percent_ht_formatted,
+                    "percent_val": percent_float
                 })
             except (ValueError, TypeError, IndexError): continue
     results.sort(key=lambda x: x['percent_val'], reverse=True)
@@ -78,7 +92,8 @@ def parse_competition_data(header_row, data_row):
 def format_currency(value_str, remove_decimal=False):
     if not value_str or str(value_str).strip() == '-': return "-"
     try:
-        value = float(str(value_str).replace(',', ''))
+        # Sử dụng hàm parse_float_from_string
+        value = parse_float_from_string(value_str)
         if remove_decimal:
             if value >= 1000: return f"{math.floor(value / 1000)} Tỷ"
             return f"{math.floor(value)} Tr"
@@ -90,14 +105,18 @@ def format_currency(value_str, remove_decimal=False):
 def calculate_ranking(all_data, current_row):
     try:
         current_channel = (current_row[1] or "").strip()
-        current_revenue = float(str(current_row[4]).replace(',', ''))
+        # Sử dụng hàm parse_float_from_string
+        current_revenue = parse_float_from_string(current_row[4])
+        
         channel_stores = []
         for row in all_data[1:]:
             if len(row) > 4 and (row[1] or "").strip() == current_channel:
                 try:
-                    revenue = float(str(row[4]).replace(',', ''))
+                    # Sử dụng hàm parse_float_from_string
+                    revenue = parse_float_from_string(row[4])
                     channel_stores.append({'revenue': revenue, 'full_row': row})
                 except (ValueError, TypeError): continue
+        
         channel_stores.sort(key=lambda x: x['revenue'], reverse=True)
         rank = -1
         for i, store in enumerate(channel_stores):
@@ -108,8 +127,9 @@ def calculate_ranking(all_data, current_row):
         return "-/-"
     except (IndexError, ValueError, TypeError): return "-/-"
 
+
 def create_flex_message(store_data, competition_results, ranking):
-    # Hàm này không thay đổi
+    # This function remains unchanged as it builds the main report card
     cum = store_data[0] or "-"
     kenh = (store_data[1] or "").strip()
     sieu_thi_full = store_data[2] or "Không có tên"
@@ -166,15 +186,15 @@ def create_flex_message(store_data, competition_results, ranking):
     }
     return flex_json
 
-# <<<--- THAY ĐỔI 1: Chỉ nhận xét ngành hàng có số --->>>
 def create_summary_text_message(store_data, competition_results):
     try:
-        target_val = float((store_data[3] or "0").replace(',', ''))
-        realtime_val = float((store_data[4] or "0").replace(',', ''))
+        # Sử dụng hàm parse_float_from_string
+        target_val = parse_float_from_string(store_data[3] or "0")
+        realtime_val = parse_float_from_string(store_data[4] or "0")
+        
         percent_float, _ = handle_percentage_string(store_data[5])
         remaining_val = target_val - realtime_val
         
-        # Lọc những ngành hàng có realtime > 0
         sold_items = [item for item in competition_results if item.get('realtime', 0) > 0]
         finished_items_count = sum(1 for item in competition_results if item['percent_val'] >= 1)
         
@@ -191,13 +211,12 @@ def create_summary_text_message(store_data, competition_results):
         summary += "-------------------\n"
         summary += "🏁 TÌNH HÌNH THI ĐUA NGÀNH HÀNG 🏁\n\n"
         
-        # Chỉ xử lý và hiển thị nếu có ngành hàng đã bán
         if sold_items:
             for item in sold_items:
                 try:
                     realtime = item.get('realtime', 0)
-                    target_str = str(item.get('target', '0')).replace(',', '')
-                    target = float(target_str) if target_str.strip() and target_str.strip() != '-' else 0
+                    # Sử dụng hàm parse_float_from_string
+                    target = parse_float_from_string(item.get('target', '0'))
                     
                     remaining = target - realtime
                     percent_ht = item.get('percent_ht', '0%')
@@ -217,7 +236,6 @@ def create_summary_text_message(store_data, competition_results):
         print(f"Lỗi khi tạo tin nhắn tóm tắt: {e}")
         return None
 
-# <<<--- THAY ĐỔI 2: Chuyển BXH thành nền trắng chữ đen và tách riêng --->>>
 def create_leaderboard_flex_message(all_data):
     dmx_channels = ['ĐML', 'ĐMM', 'ĐMS']
     tgdd_channels = ['TGD', 'AAR']
@@ -229,11 +247,11 @@ def create_leaderboard_flex_message(all_data):
             kenh = (row[1] or "").strip()
             if not kenh: continue
             
-            sieu_thi = row[2]
-            doanh_thu_str = str(row[4]).replace(',', '')
-            doanh_thu = float(doanh_thu_str) if doanh_thu_str else 0
+            sieu_thi_full = row[2]
+            # Sử dụng hàm parse_float_from_string
+            doanh_thu = parse_float_from_string(row[4])
             
-            store_info = {'kenh': kenh, 'sieu_thi': sieu_thi, 'doanh_thu': doanh_thu}
+            store_info = {'kenh': kenh, 'sieu_thi': sieu_thi_full, 'doanh_thu': doanh_thu}
             
             if kenh in dmx_channels:
                 dmx_stores.append(store_info)
@@ -249,12 +267,10 @@ def create_leaderboard_flex_message(all_data):
     top_20_tgdd = tgdd_stores[:20]
 
     def build_leaderboard_bubble(title, stores, color, text_color="#FFFFFF"):
-        # Header với màu nền riêng
         header = {"type": "box", "layout": "vertical", "backgroundColor": color, "paddingAll": "lg", "contents": [{"type": "text", "text": title, "weight": "bold", "size": "xl", "color": text_color, "align": "center", "wrap": True}]}
         
-        separator_color = "#EEEEEE" # Màu cho đường kẻ trên nền trắng
+        separator_color = "#EEEEEE"
 
-        # Tiêu đề bảng với chữ đen
         table_header = {"type": "box", "layout": "horizontal", "margin": "md", "contents": [
             {"type": "text", "text": "STT", "weight": "bold", "size": "sm", "color": "#000000", "flex": 1, "align": "center"},
             {"type": "separator", "color": separator_color},
@@ -267,38 +283,33 @@ def create_leaderboard_flex_message(all_data):
         
         rows = [table_header, {"type": "separator", "margin": "sm", "color": separator_color}]
         for i, store in enumerate(stores):
-            # Mỗi hàng dữ liệu với chữ đen
+            # <<<--- SỬA LỖI 2: Rút gọn tên siêu thị --->>>
+            full_name = store['sieu_thi']
+            # Tách chuỗi bằng ' - ' và chỉ lấy phần thứ 2 trở đi
+            name_parts = full_name.split(' - ', 1)
+            short_name = name_parts[1] if len(name_parts) > 1 else full_name
+            
             row_component = {"type": "box", "layout": "horizontal", "margin": "md", "paddingTop":"sm", "paddingBottom":"sm", "contents": [
                 {"type": "text", "text": str(i+1), "size": "sm", "color": "#000000", "flex": 1, "gravity": "center", "align": "center"},
                 {"type": "separator", "color": separator_color},
                 {"type": "text", "text": store['kenh'], "size": "sm", "color": "#000000", "flex": 2, "gravity": "center", "align": "center"},
                 {"type": "separator", "color": separator_color},
-                {"type": "text", "text": store['sieu_thi'], "size": "xs", "color": "#000000", "flex": 6, "wrap": True, "gravity": "center"},
+                {"type": "text", "text": short_name, "size": "xs", "color": "#000000", "flex": 6, "wrap": True, "gravity": "center"},
                 {"type": "separator", "color": separator_color},
-                {"type": "text", "text": str(round(store['doanh_thu'])), "size": "sm", "color": "#000000", "flex": 2, "align": "end", "gravity": "center"}
+                # <<<--- SỬA LỖI 3: Căn giữa cột RT --->>>
+                {"type": "text", "text": str(round(store['doanh_thu'])), "size": "sm", "color": "#000000", "flex": 2, "align": "center", "gravity": "center"}
             ]}
             rows.append(row_component)
             rows.append({"type": "separator", "margin": "sm", "color": separator_color})
 
-        # Nền trắng cho toàn bộ bubble
         return {"type": "bubble", "size": "giga", "backgroundColor": "#FFFFFF", "header": header, "body": {"type": "box", "layout": "vertical", "contents": rows, "paddingAll":"lg"}}
 
     dmx_bubble = build_leaderboard_bubble("🏆 REALTIME TOP 20 ĐMX 🏆", top_20_dmx, "#1E88E5")
     tgdd_bubble = build_leaderboard_bubble("🏆 REALTIME TOP 20 TGDD 🏆", top_20_tgdd, "#FDD835", text_color="#000000")
 
-    # Tạo 2 tin nhắn flex riêng biệt
-    dmx_flex = {
-        "type": "flex",
-        "altText": "Bảng xếp hạng Realtime Top 20 ĐMX",
-        "contents": dmx_bubble
-    }
-    tgdd_flex = {
-        "type": "flex",
-        "altText": "Bảng xếp hạng Realtime Top 20 TGDD",
-        "contents": tgdd_bubble
-    }
+    dmx_flex = { "type": "flex", "altText": "Bảng xếp hạng Realtime Top 20 ĐMX", "contents": dmx_bubble }
+    tgdd_flex = { "type": "flex", "altText": "Bảng xếp hạng Realtime Top 20 TGDD", "contents": tgdd_bubble }
     
-    # Trả về một list chứa 2 tin nhắn
     return [dmx_flex, tgdd_flex]
 
 
@@ -323,9 +334,7 @@ def handle_message(event):
         
         reply_messages = []
         if user_message.upper() == 'BXH':
-            # <<<--- THAY ĐỔI 3: Xử lý list tin nhắn trả về từ hàm create_leaderboard_flex_message --->>>
             list_of_flex_messages = create_leaderboard_flex_message(all_data)
-            # Thêm từng tin nhắn flex vào danh sách trả lời
             for flex_data in list_of_flex_messages:
                 reply_messages.append(FlexSendMessage(
                     alt_text=flex_data['altText'],
