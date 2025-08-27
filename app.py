@@ -109,6 +109,7 @@ def calculate_ranking(all_data, current_row):
     except (IndexError, ValueError, TypeError): return "-/-"
 
 def create_flex_message(store_data, competition_results, ranking):
+    # Hàm này không thay đổi
     cum = store_data[0] or "-"
     kenh = (store_data[1] or "").strip()
     sieu_thi_full = store_data[2] or "Không có tên"
@@ -161,61 +162,20 @@ def create_flex_message(store_data, competition_results, ranking):
 
     flex_json = {
       "type": "flex", "altText": f"Báo cáo cho {ten_sieu_thi_rut_gon}",
-      "contents": {
-        "type": "bubble", "size": "giga",
-        "header": {
-          "type": "box", "layout": "vertical", "paddingAll": "20px", "backgroundColor": style["bg"],
-          "contents": [
-            {"type": "text", "text": "Báo cáo Realtime", "color": style["text"], "size": "lg", "align": "center", "weight": "bold"},
-            {"type": "text", "text": f"🏪 {ten_sieu_thi_rut_gon.upper()}", "color": style["text"], "weight": "bold", "size": "xl", "align": "center", "margin": "md", "wrap": True},
-            {"type": "box", "layout": "vertical", "margin": "lg", "spacing": "sm", "contents": [
-              {"type": "text", "text": f"⭐ Cụm: {cum}", "size": "sm", "color": style["text"]},
-              {"type": "text", "text": f"🕒 Thời gian: {thoi_gian}", "size": "sm", "color": style["text"]},
-              {"type": "text", "text": f"🏆 NH Thi Đua Đạt: {nh_thi_dua_dat}", "size": "sm", "color": style["text"]}
-            ]}
-          ]
-        },
-        "body": {
-          "type": "box", "layout": "vertical", "paddingAll": "20px", "backgroundColor": "#2E2E2E",
-          "contents": [
-            {"type": "box", "layout": "horizontal", "contents": [
-              {"type": "box", "layout": "vertical", "flex": 1, "spacing": "sm", "contents": [
-                {"type": "text", "text": "💰 DOANH THU", "color": "#87CEEB", "size": "md", "align": "center"},
-                {"type": "text", "text": realtime_tong, "color": "#87CEEB", "size": "xxl", "weight": "bold", "align": "center"}
-              ]},
-              {"type": "box", "layout": "vertical", "flex": 1, "spacing": "sm", "contents": [
-                {"type": "text", "text": "🎯 TARGET", "color": "#FFB6C1", "size": "md", "align": "center"},
-                {"type": "text", "text": target_tong, "color": "#FFB6C1", "size": "xxl", "weight": "bold", "align": "center"}
-              ]}
-            ]},
-            {"type": "text", "text": "% HOÀN THÀNH", "color": "#C0C0C0", "size": "md", "align": "center", "margin": "xl"},
-            {"type": "text", "text": percent_ht_tong, "color": percent_color, "size": "4xl", "weight": "bold", "align": "center"},
-            {"type": "box", "layout": "vertical", "backgroundColor": "#4A4A4A", "height": "8px", "cornerRadius": "md", "margin": "md", "contents": [
-              {"type": "box", "layout": "vertical", "backgroundColor": percent_color, "height": "8px", "cornerRadius": "md", "width": f"{min(100, round(percent_float * 100))}%"}
-            ]},
-            {"type": "box", "layout": "horizontal", "margin": "xl", "contents": [{"type": "text", "text": "XH D.Thu Kênh", "size": "sm", "color": "#C0C0C0", "align": "center", "flex": 1}]},
-            {"type": "box", "layout": "horizontal", "contents": [{"type": "text", "text": ranking, "weight": "bold", "size": "lg", "color": "#FFFFFF", "align": "center", "flex": 1}]},
-            {"type": "separator", "margin": "xl", "color": "#4A4A4A"},
-            {"type": "box", "layout": "horizontal", "margin": "md", "contents": [{"type": "text", "text": "Ngành Hàng", "color": "#C0C0C0", "size": "sm", "flex": 4, "weight": "bold", "align": "center"}, {"type": "text", "text": "Realtime", "color": "#C0C0C0", "size": "sm", "flex": 2, "align": "center", "weight": "bold"}, {"type": "text", "text": "Target", "color": "#C0C0C0", "size": "sm", "flex": 2, "align": "center", "weight": "bold"}, {"type": "text", "text": "%HT", "color": "#C0C0C0", "size": "sm", "flex": 2, "align": "end", "weight": "bold"}]},
-            {"type": "separator", "margin": "md", "color": "#4A4A4A"},
-            *sold_components,
-            *unsold_components
-          ]
-        },
-        "footer": {"type": "box", "layout": "vertical", "contents": [{"type": "text", "text": "Created By 32859-NH Dương", "color": "#888888", "size": "xs", "align": "center"}]}
-      }
+      "contents": { "type": "bubble", "size": "giga", "header": { "type": "box", "layout": "vertical", "paddingAll": "20px", "backgroundColor": style["bg"], "contents": [ {"type": "text", "text": "Báo cáo Realtime", "color": style["text"], "size": "lg", "align": "center", "weight": "bold"}, {"type": "text", "text": f"🏪 {ten_sieu_thi_rut_gon.upper()}", "color": style["text"], "weight": "bold", "size": "xl", "align": "center", "margin": "md", "wrap": True}, {"type": "box", "layout": "vertical", "margin": "lg", "spacing": "sm", "contents": [ {"type": "text", "text": f"⭐ Cụm: {cum}", "size": "sm", "color": style["text"]}, {"type": "text", "text": f"🕒 Thời gian: {thoi_gian}", "size": "sm", "color": style["text"]}, {"type": "text", "text": f"🏆 NH Thi Đua Đạt: {nh_thi_dua_dat}", "size": "sm", "color": style["text"]} ]} ] }, "body": { "type": "box", "layout": "vertical", "paddingAll": "20px", "backgroundColor": "#2E2E2E", "contents": [ {"type": "box", "layout": "horizontal", "contents": [ {"type": "box", "layout": "vertical", "flex": 1, "spacing": "sm", "contents": [ {"type": "text", "text": "💰 DOANH THU", "color": "#87CEEB", "size": "md", "align": "center"}, {"type": "text", "text": realtime_tong, "color": "#87CEEB", "size": "xxl", "weight": "bold", "align": "center"} ]}, {"type": "box", "layout": "vertical", "flex": 1, "spacing": "sm", "contents": [ {"type": "text", "text": "🎯 TARGET", "color": "#FFB6C1", "size": "md", "align": "center"}, {"type": "text", "text": target_tong, "color": "#FFB6C1", "size": "xxl", "weight": "bold", "align": "center"} ]} ]}, {"type": "text", "text": "% HOÀN THÀNH", "color": "#C0C0C0", "size": "md", "align": "center", "margin": "xl"}, {"type": "text", "text": percent_ht_tong, "color": percent_color, "size": "4xl", "weight": "bold", "align": "center"}, {"type": "box", "layout": "vertical", "backgroundColor": "#4A4A4A", "height": "8px", "cornerRadius": "md", "margin": "md", "contents": [ {"type": "box", "layout": "vertical", "backgroundColor": percent_color, "height": "8px", "cornerRadius": "md", "width": f"{min(100, round(percent_float * 100))}%"} ]}, {"type": "box", "layout": "horizontal", "margin": "xl", "contents": [{"type": "text", "text": "XH D.Thu Kênh", "size": "sm", "color": "#C0C0C0", "align": "center", "flex": 1}]}, {"type": "box", "layout": "horizontal", "contents": [{"type": "text", "text": ranking, "weight": "bold", "size": "lg", "color": "#FFFFFF", "align": "center", "flex": 1}]}, {"type": "separator", "margin": "xl", "color": "#4A4A4A"}, {"type": "box", "layout": "horizontal", "margin": "md", "contents": [{"type": "text", "text": "Ngành Hàng", "color": "#C0C0C0", "size": "sm", "flex": 4, "weight": "bold", "align": "center"}, {"type": "text", "text": "Realtime", "color": "#C0C0C0", "size": "sm", "flex": 2, "align": "center", "weight": "bold"}, {"type": "text", "text": "Target", "color": "#C0C0C0", "size": "sm", "flex": 2, "align": "center", "weight": "bold"}, {"type": "text", "text": "%HT", "color": "#C0C0C0", "size": "sm", "flex": 2, "align": "end", "weight": "bold"}]}, {"type": "separator", "margin": "md", "color": "#4A4A4A"}, *sold_components, *unsold_components ] }, "footer": {"type": "box", "layout": "vertical", "contents": [{"type": "text", "text": "Created By 32859-NH Dương", "color": "#888888", "size": "xs", "align": "center"}]} }
     }
     return flex_json
 
-# <<<--- THAY ĐỔI BẮT ĐẦU TỪ ĐÂY --->>>
+# <<<--- THAY ĐỔI 1: Chỉ nhận xét ngành hàng có số --->>>
 def create_summary_text_message(store_data, competition_results):
     try:
         target_val = float((store_data[3] or "0").replace(',', ''))
         realtime_val = float((store_data[4] or "0").replace(',', ''))
         percent_float, _ = handle_percentage_string(store_data[5])
-        
         remaining_val = target_val - realtime_val
         
+        # Lọc những ngành hàng có realtime > 0
+        sold_items = [item for item in competition_results if item.get('realtime', 0) > 0]
         finished_items_count = sum(1 for item in competition_results if item['percent_val'] >= 1)
         
         tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
@@ -231,9 +191,9 @@ def create_summary_text_message(store_data, competition_results):
         summary += "-------------------\n"
         summary += "🏁 TÌNH HÌNH THI ĐUA NGÀNH HÀNG 🏁\n\n"
         
-        # Vòng lặp để tạo định dạng mới cho từng ngành hàng
-        if competition_results:
-            for item in competition_results:
+        # Chỉ xử lý và hiển thị nếu có ngành hàng đã bán
+        if sold_items:
+            for item in sold_items:
                 try:
                     realtime = item.get('realtime', 0)
                     target_str = str(item.get('target', '0')).replace(',', '')
@@ -242,23 +202,22 @@ def create_summary_text_message(store_data, competition_results):
                     remaining = target - realtime
                     percent_ht = item.get('percent_ht', '0%')
                     
-                    # Làm tròn số để hiển thị đẹp hơn
                     realtime_disp = math.floor(realtime) if realtime == math.floor(realtime) else round(realtime, 2)
                     target_disp = math.floor(target) if target == math.floor(target) else round(target, 2)
                     remaining_disp = math.floor(remaining) if remaining == math.floor(remaining) else round(remaining, 2)
 
                     summary += f"• {item['name']}: {realtime_disp}/{target_disp} ({percent_ht}) còn lại: {remaining_disp}\n"
                 except (ValueError, TypeError):
-                    # Fallback nếu dữ liệu target không phải là số
                     summary += f"• {item['name']}: {item.get('realtime', 0)} ({item.get('percent_ht', '0%')})\n"
         else:
-            summary += "Không có dữ liệu thi đua."
+            summary += "Chưa có ngành hàng thi đua nào phát sinh doanh số."
             
         return TextSendMessage(text=summary)
     except Exception as e:
         print(f"Lỗi khi tạo tin nhắn tóm tắt: {e}")
         return None
 
+# <<<--- THAY ĐỔI 2: Chuyển BXH thành nền trắng chữ đen và tách riêng --->>>
 def create_leaderboard_flex_message(all_data):
     dmx_channels = ['ĐML', 'ĐMM', 'ĐMS']
     tgdd_channels = ['TGD', 'AAR']
@@ -290,52 +249,58 @@ def create_leaderboard_flex_message(all_data):
     top_20_tgdd = tgdd_stores[:20]
 
     def build_leaderboard_bubble(title, stores, color, text_color="#FFFFFF"):
-        header = {"type": "box", "layout": "vertical", "backgroundColor": color, "paddingAll": "lg", "contents": [{"type": "text", "text": title, "weight": "bold", "size": "xl", "color": text_color, "align": "center"}]}
+        # Header với màu nền riêng
+        header = {"type": "box", "layout": "vertical", "backgroundColor": color, "paddingAll": "lg", "contents": [{"type": "text", "text": title, "weight": "bold", "size": "xl", "color": text_color, "align": "center", "wrap": True}]}
         
-        separator_color = "#555555" # Màu cho đường kẻ
+        separator_color = "#EEEEEE" # Màu cho đường kẻ trên nền trắng
 
-        # Tiêu đề bảng với đường kẻ dọc
+        # Tiêu đề bảng với chữ đen
         table_header = {"type": "box", "layout": "horizontal", "margin": "md", "contents": [
-            {"type": "text", "text": "STT", "weight": "bold", "size": "sm", "color": "#FFFFFF", "flex": 1, "align": "center"},
+            {"type": "text", "text": "STT", "weight": "bold", "size": "sm", "color": "#000000", "flex": 1, "align": "center"},
             {"type": "separator", "color": separator_color},
-            {"type": "text", "text": "KÊNH", "weight": "bold", "size": "sm", "color": "#FFFFFF", "flex": 2, "align": "center"},
+            {"type": "text", "text": "KÊNH", "weight": "bold", "size": "sm", "color": "#000000", "flex": 2, "align": "center"},
             {"type": "separator", "color": separator_color},
-            {"type": "text", "text": "SIÊU THỊ", "weight": "bold", "size": "sm", "color": "#FFFFFF", "flex": 6, "align": "center"},
+            {"type": "text", "text": "SIÊU THỊ", "weight": "bold", "size": "sm", "color": "#000000", "flex": 6, "align": "center"},
             {"type": "separator", "color": separator_color},
-            {"type": "text", "text": "RT", "weight": "bold", "size": "sm", "color": "#FFFFFF", "flex": 2, "align": "center"}
+            {"type": "text", "text": "RT", "weight": "bold", "size": "sm", "color": "#000000", "flex": 2, "align": "center"}
         ]}
         
         rows = [table_header, {"type": "separator", "margin": "sm", "color": separator_color}]
         for i, store in enumerate(stores):
-            # Mỗi hàng dữ liệu với đường kẻ dọc
+            # Mỗi hàng dữ liệu với chữ đen
             row_component = {"type": "box", "layout": "horizontal", "margin": "md", "paddingTop":"sm", "paddingBottom":"sm", "contents": [
-                {"type": "text", "text": str(i+1), "size": "sm", "color": "#FFFFFF", "flex": 1, "gravity": "center", "align": "center"},
+                {"type": "text", "text": str(i+1), "size": "sm", "color": "#000000", "flex": 1, "gravity": "center", "align": "center"},
                 {"type": "separator", "color": separator_color},
-                {"type": "text", "text": store['kenh'], "size": "sm", "color": "#FFFFFF", "flex": 2, "gravity": "center", "align": "center"},
+                {"type": "text", "text": store['kenh'], "size": "sm", "color": "#000000", "flex": 2, "gravity": "center", "align": "center"},
                 {"type": "separator", "color": separator_color},
-                {"type": "text", "text": store['sieu_thi'], "size": "xs", "color": "#FFFFFF", "flex": 6, "wrap": True, "gravity": "center"},
+                {"type": "text", "text": store['sieu_thi'], "size": "xs", "color": "#000000", "flex": 6, "wrap": True, "gravity": "center"},
                 {"type": "separator", "color": separator_color},
-                {"type": "text", "text": str(round(store['doanh_thu'])), "size": "sm", "color": "#FFFFFF", "flex": 2, "align": "end", "gravity": "center"}
+                {"type": "text", "text": str(round(store['doanh_thu'])), "size": "sm", "color": "#000000", "flex": 2, "align": "end", "gravity": "center"}
             ]}
             rows.append(row_component)
-            # Thêm đường kẻ ngang sau mỗi hàng
             rows.append({"type": "separator", "margin": "sm", "color": separator_color})
 
-        # Nền đen cho toàn bộ bubble
-        return {"type": "bubble", "size": "giga", "backgroundColor": "#000000", "header": header, "body": {"type": "box", "layout": "vertical", "contents": rows, "paddingAll":"lg"}}
+        # Nền trắng cho toàn bộ bubble
+        return {"type": "bubble", "size": "giga", "backgroundColor": "#FFFFFF", "header": header, "body": {"type": "box", "layout": "vertical", "contents": rows, "paddingAll":"lg"}}
 
     dmx_bubble = build_leaderboard_bubble("🏆 REALTIME TOP 20 ĐMX 🏆", top_20_dmx, "#1E88E5")
     tgdd_bubble = build_leaderboard_bubble("🏆 REALTIME TOP 20 TGDD 🏆", top_20_tgdd, "#FDD835", text_color="#000000")
 
-    return {
+    # Tạo 2 tin nhắn flex riêng biệt
+    dmx_flex = {
         "type": "flex",
-        "altText": "Bảng xếp hạng Realtime Top 20",
-        "contents": {
-            "type": "carousel",
-            "contents": [dmx_bubble, tgdd_bubble]
-        }
+        "altText": "Bảng xếp hạng Realtime Top 20 ĐMX",
+        "contents": dmx_bubble
     }
-# <<<--- THAY ĐỔI KẾT THÚC TẠI ĐÂY --->>>
+    tgdd_flex = {
+        "type": "flex",
+        "altText": "Bảng xếp hạng Realtime Top 20 TGDD",
+        "contents": tgdd_bubble
+    }
+    
+    # Trả về một list chứa 2 tin nhắn
+    return [dmx_flex, tgdd_flex]
+
 
 # --- ĐIỂM TIẾP NHẬN WEBHOOK TỪ LINE ---
 @app.route("/callback", methods=['POST'])
@@ -358,11 +323,14 @@ def handle_message(event):
         
         reply_messages = []
         if user_message.upper() == 'BXH':
-            flex_message_data = create_leaderboard_flex_message(all_data)
-            reply_messages.append(FlexSendMessage(
-                alt_text='Bảng xếp hạng Realtime Top 20',
-                contents=flex_message_data['contents']
-            ))
+            # <<<--- THAY ĐỔI 3: Xử lý list tin nhắn trả về từ hàm create_leaderboard_flex_message --->>>
+            list_of_flex_messages = create_leaderboard_flex_message(all_data)
+            # Thêm từng tin nhắn flex vào danh sách trả lời
+            for flex_data in list_of_flex_messages:
+                reply_messages.append(FlexSendMessage(
+                    alt_text=flex_data['altText'],
+                    contents=flex_data['contents']
+                ))
         else:
             header_row, found_row = all_data[0], None
             for row in all_data[1:]:
