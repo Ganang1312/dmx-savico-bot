@@ -15,7 +15,7 @@ from datetime import datetime
 import pytz
 import math
 
-# --- PHẦN CẤU HÌNH: ĐỌC TỪ BIẾN MÔI TRƯỜNG ---
+# --- PHẦN CẤU HÌNH: ĐỌC TỪ BIẾN MÔI TRƯỜDNG ---
 CHANNEL_ACCESS_TOKEN = os.environ.get('CHANNEL_ACCESS_TOKEN')
 CHANNEL_SECRET = os.environ.get('CHANNEL_SECRET')
 GOOGLE_CREDS_JSON = os.environ.get('GOOGLE_CREDENTIALS_JSON')
@@ -23,7 +23,7 @@ GOOGLE_CREDS_JSON = os.environ.get('GOOGLE_CREDENTIALS_JSON')
 if not all([CHANNEL_ACCESS_TOKEN, CHANNEL_SECRET, GOOGLE_CREDS_JSON]):
     raise ValueError("Lỗi: Hãy kiểm tra lại các biến môi trường trên Render.")
 
-# --- CẤU HÌNH GOOGLE SHEETS TỪ BIẾN MÔI TRƯỜNG ---
+# --- CẤU HÌNH GOOGLE SHEETS TỪ BIẾN MÔI TRƯỜDNG ---
 SCOPE = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
 google_creds_dict = json.loads(GOOGLE_CREDS_JSON)
 CREDS = ServiceAccountCredentials.from_json_keyfile_dict(google_creds_dict, SCOPE)
@@ -41,7 +41,6 @@ handler = WebhookHandler(CHANNEL_SECRET)
 # --- ĐỊNH NGHĨA CÁC HÀM XỬ LÝ ---
 
 def parse_float_from_string(s):
-    """Hàm này chuyển đổi chuỗi có dấu phẩy thành số float."""
     if s is None: return 0.0
     if not isinstance(s, str): s = str(s)
     clean_s = s.strip()
@@ -77,9 +76,7 @@ def parse_competition_data(header_row, data_row):
                 percent_ht_val = data_row[indices[0]]
                 realtime_val_str = data_row[indices[1]] if data_row[indices[1]] and data_row[indices[1]].strip() != '-' else "0"
                 target_val_str = data_row[indices[2]] if data_row[indices[2]] and data_row[indices[2]].strip() != '-' else "0"
-                
                 percent_float, percent_ht_formatted = handle_percentage_string(percent_ht_val)
-                
                 results.append({
                     "name": category_name,
                     "realtime": parse_float_from_string(realtime_val_str),
@@ -107,7 +104,6 @@ def calculate_ranking(all_data, current_row):
     try:
         current_channel = (current_row[1] or "").strip()
         current_revenue = parse_float_from_string(current_row[4])
-        
         channel_stores = []
         for row in all_data[1:]:
             if len(row) > 4 and (row[1] or "").strip() == current_channel:
@@ -115,7 +111,6 @@ def calculate_ranking(all_data, current_row):
                     revenue = parse_float_from_string(row[4])
                     channel_stores.append({'revenue': revenue, 'full_row': row})
                 except (ValueError, TypeError): continue
-        
         channel_stores.sort(key=lambda x: x['revenue'], reverse=True)
         rank = -1
         for i, store in enumerate(channel_stores):
@@ -190,13 +185,10 @@ def create_summary_text_message(store_data, competition_results):
     try:
         target_val = parse_float_from_string(store_data[3])
         realtime_val = parse_float_from_string(store_data[4])
-        
         percent_float, _ = handle_percentage_string(store_data[5])
         remaining_val = target_val - realtime_val
-        
         sold_items = [item for item in competition_results if item.get('realtime', 0) > 0]
         finished_items_count = sum(1 for item in competition_results if item['percent_val'] >= 1)
-        
         tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
         now = datetime.now(tz_vietnam)
         time_str = now.strftime("%H:%M:%S")
@@ -215,14 +207,11 @@ def create_summary_text_message(store_data, competition_results):
                 try:
                     realtime = item.get('realtime', 0)
                     target = parse_float_from_string(item.get('target', '0'))
-                    
                     remaining = target - realtime
                     percent_ht = item.get('percent_ht', '0%')
-                    
                     realtime_disp = math.floor(realtime) if realtime == math.floor(realtime) else round(realtime, 2)
                     target_disp = math.floor(target) if target == math.floor(target) else round(target, 2)
                     remaining_disp = math.floor(remaining) if remaining == math.floor(remaining) else round(remaining, 2)
-
                     summary += f"• {item['name']}: {realtime_disp}/{target_disp} ({percent_ht}) còn lại: {remaining_disp}\n"
                 except (ValueError, TypeError):
                     summary += f"• {item['name']}: {item.get('realtime', 0)} ({item.get('percent_ht', '0%')})\n"
@@ -237,9 +226,7 @@ def create_summary_text_message(store_data, competition_results):
 def create_leaderboard_flex_message(all_data, cluster_name=None):
     dmx_channels = ['ĐML', 'ĐMM', 'ĐMS']
     tgdd_channels = ['TGD', 'AAR']
-    
     dmx_stores, tgdd_stores = [], []
-
     data_to_process = all_data[1:]
     if cluster_name:
         data_to_process = [row for row in data_to_process if len(row) > 0 and row[0] and row[0].strip().upper() == cluster_name.strip().upper()]
@@ -248,12 +235,9 @@ def create_leaderboard_flex_message(all_data, cluster_name=None):
         try:
             kenh = (row[1] or "").strip()
             if not kenh: continue
-            
             sieu_thi_full = row[2]
             doanh_thu = parse_float_from_string(row[4])
-            
             store_info = {'kenh': kenh, 'sieu_thi': sieu_thi_full, 'doanh_thu': doanh_thu}
-            
             if kenh in dmx_channels:
                 dmx_stores.append(store_info)
             elif kenh in tgdd_channels:
@@ -263,17 +247,16 @@ def create_leaderboard_flex_message(all_data, cluster_name=None):
             
     dmx_stores.sort(key=lambda x: x['doanh_thu'], reverse=True)
     tgdd_stores.sort(key=lambda x: x['doanh_thu'], reverse=True)
-
     if not cluster_name:
         dmx_stores = dmx_stores[:20]
         tgdd_stores = tgdd_stores[:20]
 
+    # <<<--- SỬA LỖI TẠI ĐÂY --->>>
     def build_leaderboard_bubble(title, stores, header_bg_color, header_text_color):
         header = {"type": "box", "layout": "vertical", "backgroundColor": header_bg_color, "paddingAll": "lg", "contents": [{"type": "text", "text": title, "weight": "bold", "size": "xl", "color": header_text_color, "align": "center", "wrap": True}]}
-        
-        body_bg_color = "#2E2E2E" # Nền body đen
-        text_color_body = "#FFFFFF" # Chữ trắng trong body
-        separator_color = "#4A4A4A" # Màu đường kẻ cho nền đen
+        body_bg_color = "#2E2E2E"
+        text_color_body = "#FFFFFF"
+        separator_color = "#4A4A4A"
 
         table_header = {"type": "box", "layout": "horizontal", "margin": "md", "contents": [
             {"type": "text", "text": "STT", "weight": "bold", "size": "sm", "color": text_color_body, "flex": 1, "align": "center"},
@@ -290,7 +273,6 @@ def create_leaderboard_flex_message(all_data, cluster_name=None):
             full_name = store['sieu_thi']
             name_parts = full_name.split(' - ', 1)
             short_name = name_parts[1] if len(name_parts) > 1 else full_name
-            
             row_component = {"type": "box", "layout": "horizontal", "margin": "md", "paddingTop":"sm", "paddingBottom":"sm", "contents": [
                 {"type": "text", "text": str(i+1), "size": "sm", "color": text_color_body, "flex": 1, "gravity": "center", "align": "center"},
                 {"type": "separator", "color": separator_color},
@@ -303,7 +285,19 @@ def create_leaderboard_flex_message(all_data, cluster_name=None):
             rows.append(row_component)
             rows.append({"type": "separator", "margin": "sm", "color": separator_color})
 
-        return {"type": "bubble", "size": "giga", "backgroundColor": body_bg_color, "header": header, "body": {"type": "box", "layout": "vertical", "contents": rows, "paddingAll":"lg"}}
+        # Di chuyển backgroundColor vào đúng vị trí của body
+        return {
+            "type": "bubble", 
+            "size": "giga", 
+            "header": header, 
+            "body": {
+                "type": "box", 
+                "layout": "vertical", 
+                "contents": rows, 
+                "paddingAll":"lg",
+                "backgroundColor": body_bg_color # Đặt màu nền cho body tại đây
+            }
+        }
 
     if cluster_name:
         dmx_title = f"BXH CỤM {cluster_name.upper()} - ĐMX"
@@ -314,12 +308,10 @@ def create_leaderboard_flex_message(all_data, cluster_name=None):
 
     dmx_bubble = build_leaderboard_bubble(dmx_title, dmx_stores, "#1E88E5", "#FFFFFF")
     tgdd_bubble = build_leaderboard_bubble(tgdd_title, tgdd_stores, "#FDD835", "#000000")
-
     dmx_flex = { "type": "flex", "altText": dmx_title, "contents": dmx_bubble }
     tgdd_flex = { "type": "flex", "altText": tgdd_title, "contents": tgdd_bubble }
     
     return [dmx_flex, tgdd_flex]
-
 
 # --- ĐIỂM TIẾP NHẬN WEBHOOK TỪ LINE ---
 @app.route("/callback", methods=['POST'])
@@ -339,26 +331,18 @@ def handle_message(event):
     try:
         sheet = CLIENT.open(SHEET_NAME).worksheet(WORKSHEET_NAME)
         all_data = sheet.get_all_values()
-        
         reply_messages = []
         user_msg_upper = user_message.upper()
-        
         cluster_names = {row[0].strip().upper() for row in all_data[1:] if len(row) > 0 and row[0]}
 
         if user_msg_upper == 'BXH':
             list_of_flex_messages = create_leaderboard_flex_message(all_data)
             for flex_data in list_of_flex_messages:
-                reply_messages.append(FlexSendMessage(
-                    alt_text=flex_data['altText'],
-                    contents=flex_data['contents']
-                ))
+                reply_messages.append(FlexSendMessage(alt_text=flex_data['altText'], contents=flex_data['contents']))
         elif user_msg_upper in cluster_names:
             list_of_flex_messages = create_leaderboard_flex_message(all_data, cluster_name=user_msg_upper)
             for flex_data in list_of_flex_messages:
-                reply_messages.append(FlexSendMessage(
-                    alt_text=flex_data['altText'],
-                    contents=flex_data['contents']
-                ))
+                reply_messages.append(FlexSendMessage(alt_text=flex_data['altText'], contents=flex_data['contents']))
         else:
             header_row, found_row = all_data[0], None
             for row in all_data[1:]:
@@ -373,7 +357,6 @@ def handle_message(event):
                 competition_results = parse_competition_data(header_row, found_row)
                 flex_message = create_flex_message(found_row, competition_results, ranking)
                 reply_messages.append(FlexSendMessage(alt_text='Báo cáo Realtime', contents=flex_message['contents']))
-                
                 summary_message = create_summary_text_message(found_row, competition_results)
                 if summary_message:
                     reply_messages.append(summary_message)
