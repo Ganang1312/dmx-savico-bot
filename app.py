@@ -89,11 +89,11 @@ def format_currency(value_str, remove_decimal=False):
 
 def calculate_ranking(all_data, current_row):
     try:
-        current_channel = current_row[1]
+        current_channel = (current_row[1] or "").strip()
         current_revenue = float(str(current_row[4]).replace(',', ''))
         channel_stores = []
         for row in all_data[1:]:
-            if len(row) > 4 and row[1] == current_channel:
+            if len(row) > 4 and (row[1] or "").strip() == current_channel:
                 try:
                     revenue = float(str(row[4]).replace(',', ''))
                     channel_stores.append({'revenue': revenue, 'full_row': row})
@@ -110,7 +110,7 @@ def calculate_ranking(all_data, current_row):
 
 def create_flex_message(store_data, competition_results, ranking):
     cum = store_data[0] or "-"
-    kenh = store_data[1] or ""
+    kenh = (store_data[1] or "").strip()
     sieu_thi_full = store_data[2] or "Không có tên"
     ten_sieu_thi_parts = sieu_thi_full.split(' - ')
     short_name_part = ten_sieu_thi_parts[-1] if len(ten_sieu_thi_parts) > 1 else sieu_thi_full
@@ -208,7 +208,7 @@ def create_leaderboard_flex_message(all_data):
 
     for row in all_data[1:]:
         try:
-            kenh = row[1]
+            kenh = (row[1] or "").strip()
             sieu_thi = row[2]
             doanh_thu_str = str(row[4]).replace(',', '')
             doanh_thu = float(doanh_thu_str) if doanh_thu_str else 0
