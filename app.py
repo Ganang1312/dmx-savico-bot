@@ -44,10 +44,8 @@ def parse_float_from_string(s):
     """Hàm này chuyển đổi chuỗi có dấu phẩy thành số float."""
     if s is None: return 0.0
     if not isinstance(s, str): s = str(s)
-    # Xử lý trường hợp chuỗi rỗng hoặc chỉ có dấu gạch ngang
     clean_s = s.strip()
     if not clean_s or clean_s == '-': return 0.0
-    # Thay thế dấu phẩy (decimal separator) bằng dấu chấm
     try:
         return float(clean_s.replace(',', '.'))
     except ValueError:
@@ -85,7 +83,7 @@ def parse_competition_data(header_row, data_row):
                 results.append({
                     "name": category_name,
                     "realtime": parse_float_from_string(realtime_val_str),
-                    "target": target_val_str, # Giữ dạng chuỗi để hàm sau xử lý
+                    "target": target_val_str,
                     "percent_ht": percent_ht_formatted,
                     "percent_val": percent_float
                 })
@@ -156,7 +154,6 @@ def create_flex_message(store_data, competition_results, ranking):
     for item in sold_items:
         percent_val = item.get("percent_val", 0)
         color = "#4CFF42" if percent_val >= 1 else ("#FFD142" if percent_val > 0.7 else "#FF4242")
-        # <<<--- SỬA LỖI 2: Thống nhất dấu thập phân cho Target --->>>
         target_display = str(parse_float_from_string(item["target"]))
         
         component = {"type": "box", "layout": "horizontal", "margin": "md", "paddingTop": "sm", "paddingBottom": "sm", "contents": [
@@ -171,7 +168,6 @@ def create_flex_message(store_data, competition_results, ranking):
         sold_components.append(component)
         sold_components.append({"type": "separator", "margin": "md", "color": "#4A4A4A"})
     
-    #... phần còn lại của hàm không đổi
     unsold_components = []
     if unsold_items:
         unsold_components.extend([{"type": "separator", "margin": "xl", "color": "#4A4A4A"}, {"type": "text", "text": "NGÀNH HÀNG CHƯA CÓ SỐ:", "color": "#C0C0C0", "size": "sm", "align": "center", "margin": "lg", "weight": "bold"}])
@@ -186,7 +182,7 @@ def create_flex_message(store_data, competition_results, ranking):
 
     flex_json = {
       "type": "flex", "altText": f"Báo cáo cho {ten_sieu_thi_rut_gon}",
-      "contents": { "type": "bubble", "size": "giga", "header": { "type": "box", "layout": "vertical", "paddingAll": "20px", "backgroundColor": style["bg"], "contents": [ {"type": "text", "text": "Báo cáo Realtime", "color": style["text"], "size": "lg", "align": "center", "weight": "bold"}, {"type": "text", "text": f"🏪 {ten_sieu_thi_rut_gon.upper()}", "color": style["text"], "weight": "bold", "size": "xl", "align": "center", "margin": "md", "wrap": True}, {"type": "box", "layout": "vertical", "margin": "lg", "spacing": "sm", "contents": [ {"type": "text", "text": f"⭐ Cụm: {cum}", "size": "sm", "color": style["text"]}, {"type": "text", "text": f"🕒 Thời gian: {thoi_gian}", "size": "sm", "color": style["text"]}, {"type": "text", "text": f"🏆 NH Thi Đua Đạt: {nh_thi_dua_dat}", "size": "sm", "color": style["text"]} ]} ] }, "body": { "type": "box", "layout": "vertical", "paddingAll": "20px", "backgroundColor": "#2E2E2E", "contents": [ {"type": "box", "layout": "horizontal", "contents": [ {"type": "box", "layout": "vertical", "flex": 1, "spacing": "sm", "contents": [ {"type": "text", "text": "💰 DOANH THU", "color": "#87CEEB", "size": "md", "align": "center"}, {"type": "text", "text": realtime_tong, "color": "#87CEEB", "size": "xxl", "weight": "bold", "align": "center"} ]}, {"type": "box", "layout": "vertical", "flex": 1, "spacing": "sm", "contents": [ {"type": "text", "text": "🎯 TARGET", "color": "#FFB6C1", "size": "md", "align": "center"}, {"type": "text", "text": target_tong, "color": "#FFB6C1", "size": "xxl", "weight": "bold", "align": "center"} ]} ]}, {"type": "text", "text": "% HOÀN THÀNH", "color": "#C0C0C0", "size": "md", "align": "center", "margin": "xl"}, {"type": "text", "text": percent_ht_tong, "color": percent_color, "size": "4xl", "weight": "bold", "align": "center"}, {"type": "box", "layout": "vertical", "backgroundColor": "#4A4A4A", "height": "8px", "cornerRadius": "md", "margin": "md", "contents": [ {"type": "box", "layout": "vertical", "backgroundColor": percent_color, "height": "8px", "cornerRadius": "md", "width": f"{min(100, round(percent_float * 100))}%"} ]}, {"type": "box", "layout": "horizontal", "margin": "xl", "contents": [{"type": "text", "text": "XH D.Thu Kênh", "size": "sm", "color": "#C0C0C0", "align": "center", "flex": 1}]}, {"type": "box", "layout": "horizontal", "contents": [{"type": "text", "text": ranking, "weight": "bold", "size": "lg", "color": "#FFFFFF", "align": "center", "flex": 1}]}, {"type": "separator", "margin": "xl", "color": "#4A4A4A"}, {"type": "box", "layout": "horizontal", "margin": "md", "contents": [{"type": "text", "text": "Ngành Hàng", "color": "#C0C0C0", "size": "sm", "flex": 4, "weight": "bold", "align": "center"}, {"type": "text", "text": "Realtime", "color": "#C0C0C0", "size": "sm", "flex": 2, "align": "center", "weight": "bold"}, {"type": "text", "text": "Target", "color": "#C0C0C0", "size": "sm", "flex": 2, "align": "center", "weight": "bold"}, {"type": "text", "text": "%HT", "color": "#C0C0C0", "size": "sm", "flex": 2, "align": "end", "weight": "bold"}]}, {"type": "separator", "margin": "md", "color": "#4A4A4A"}, *sold_components, *unsold_components ] }, "footer": {"type": "box", "layout": "vertical", "contents": [{"type": "text", "text": "Created By 32859-NH Dương", "color": "#888888", "size": "xs", "align": "center"}]} }
+      "contents": { "type": "bubble", "size": "giga", "header": { "type": "box", "layout": "vertical", "paddingAll": "20px", "backgroundColor": style["bg"], "contents": [ {"type": "text", "text": "Báo cáo Realtime", "color": style["text"], "size": "lg", "align": "center", "weight": "bold"}, {"type": "text", "text": f"🏪 {ten_sieu_thi_rut_gon.upper()}", "color": style["text"], "weight": "bold", "size": "xl", "align": "center", "margin": "md", "wrap": True}, {"type": "box", "layout": "vertical", "margin": "lg", "spacing": "sm", "contents": [ {"type": "text", "text": f"⭐ Cụm: {cum}", "size": "sm", "color": style["text"]}, {"type": "text", "text": f"🕒 Thời gian: {thoi_gian}", "size": "sm", "color": style["text"]}, {"type": "text", "text": f"🏆 NH thi đua đạt: {nh_thi_dua_dat}", "size": "sm", "color": style["text"]} ]} ] }, "body": { "type": "box", "layout": "vertical", "paddingAll": "20px", "backgroundColor": "#2E2E2E", "contents": [ {"type": "box", "layout": "horizontal", "contents": [ {"type": "box", "layout": "vertical", "flex": 1, "spacing": "sm", "contents": [ {"type": "text", "text": "💰 DOANH THU", "color": "#87CEEB", "size": "md", "align": "center"}, {"type": "text", "text": realtime_tong, "color": "#87CEEB", "size": "xxl", "weight": "bold", "align": "center"} ]}, {"type": "box", "layout": "vertical", "flex": 1, "spacing": "sm", "contents": [ {"type": "text", "text": "🎯 TARGET", "color": "#FFB6C1", "size": "md", "align": "center"}, {"type": "text", "text": target_tong, "color": "#FFB6C1", "size": "xxl", "weight": "bold", "align": "center"} ]} ]}, {"type": "text", "text": "% HOÀN THÀNH", "color": "#C0C0C0", "size": "md", "align": "center", "margin": "xl"}, {"type": "text", "text": percent_ht_tong, "color": percent_color, "size": "4xl", "weight": "bold", "align": "center"}, {"type": "box", "layout": "vertical", "backgroundColor": "#4A4A4A", "height": "8px", "cornerRadius": "md", "margin": "md", "contents": [ {"type": "box", "layout": "vertical", "backgroundColor": percent_color, "height": "8px", "cornerRadius": "md", "width": f"{min(100, round(percent_float * 100))}%"} ]}, {"type": "box", "layout": "horizontal", "margin": "xl", "contents": [{"type": "text", "text": "XH D.Thu Kênh", "size": "sm", "color": "#C0C0C0", "align": "center", "flex": 1}]}, {"type": "box", "layout": "horizontal", "contents": [{"type": "text", "text": ranking, "weight": "bold", "size": "lg", "color": "#FFFFFF", "align": "center", "flex": 1}]}, {"type": "separator", "margin": "xl", "color": "#4A4A4A"}, {"type": "box", "layout": "horizontal", "margin": "md", "contents": [{"type": "text", "text": "Ngành Hàng", "color": "#C0C0C0", "size": "sm", "flex": 4, "weight": "bold", "align": "center"}, {"type": "text", "text": "Realtime", "color": "#C0C0C0", "size": "sm", "flex": 2, "align": "center", "weight": "bold"}, {"type": "text", "text": "Target", "color": "#C0C0C0", "size": "sm", "flex": 2, "align": "center", "weight": "bold"}, {"type": "text", "text": "%HT", "color": "#C0C0C0", "size": "sm", "flex": 2, "align": "end", "weight": "bold"}]}, {"type": "separator", "margin": "md", "color": "#4A4A4A"}, *sold_components, *unsold_components ] }, "footer": {"type": "box", "layout": "vertical", "contents": [{"type": "text", "text": "Created By 32859-NH Dương", "color": "#888888", "size": "xs", "align": "center"}]} }
     }
     return flex_json
 
@@ -210,9 +206,9 @@ def create_summary_text_message(store_data, competition_results):
         summary += f"- 🎯 Target Ngày: {math.floor(target_val)}\n"
         summary += f"- 📈 Realtime: {math.floor(realtime_val)} ({round(percent_float*100)}%)\n"
         summary += f"- 📉 Còn lại: {math.floor(remaining_val)}\n"
-        summary += f"- 🏆 Thi đua dự kiến đạt: {finished_items_count}/{len(competition_results)}\n"
+        summary += f"- 🏆 NH thi đua đạt: {finished_items_count}/{len(competition_results)}\n" # Đã sửa
         summary += "-------------------\n"
-        summary += "🏁 TÌNH HÌNH THI ĐUA NGÀNH HÀNG 🏁\n\n"
+        summary += "🏁 THI ĐUA NH:\n\n" # Đã sửa
         
         if sold_items:
             for item in sold_items:
@@ -238,17 +234,15 @@ def create_summary_text_message(store_data, competition_results):
         print(f"Lỗi khi tạo tin nhắn tóm tắt: {e}")
         return None
 
-# <<<--- SỬA LỖI 1, 3: Đổi nền BXH và thêm chức năng xem theo cụm --->>>
 def create_leaderboard_flex_message(all_data, cluster_name=None):
     dmx_channels = ['ĐML', 'ĐMM', 'ĐMS']
     tgdd_channels = ['TGD', 'AAR']
     
     dmx_stores, tgdd_stores = [], []
 
-    # Lọc dữ liệu theo cụm nếu cluster_name được cung cấp
     data_to_process = all_data[1:]
     if cluster_name:
-        data_to_process = [row for row in data_to_process if len(row) > 0 and row[0].strip().upper() == cluster_name.strip().upper()]
+        data_to_process = [row for row in data_to_process if len(row) > 0 and row[0] and row[0].strip().upper() == cluster_name.strip().upper()]
 
     for row in data_to_process:
         try:
@@ -270,15 +264,14 @@ def create_leaderboard_flex_message(all_data, cluster_name=None):
     dmx_stores.sort(key=lambda x: x['doanh_thu'], reverse=True)
     tgdd_stores.sort(key=lambda x: x['doanh_thu'], reverse=True)
 
-    # Nếu không phải xem theo cụm, chỉ lấy top 20
     if not cluster_name:
         dmx_stores = dmx_stores[:20]
         tgdd_stores = tgdd_stores[:20]
 
-    def build_leaderboard_bubble(title, stores, color, text_color="#FFFFFF"):
-        # Đổi nền đen, chữ trắng
+    def build_leaderboard_bubble(title, stores, color, text_color): # text_color được truyền vào
+        # <<<--- SỬA LỖI 4: Đổi nền đen, chữ trắng cho toàn bộ BXH --->>>
         header = {"type": "box", "layout": "vertical", "backgroundColor": color, "paddingAll": "lg", "contents": [{"type": "text", "text": title, "weight": "bold", "size": "xl", "color": text_color, "align": "center", "wrap": True}]}
-        separator_color = "#4A4A4A"
+        separator_color = "#4A4A4A" # Màu đường kẻ cho nền đen
 
         table_header = {"type": "box", "layout": "horizontal", "margin": "md", "contents": [
             {"type": "text", "text": "STT", "weight": "bold", "size": "sm", "color": "#FFFFFF", "flex": 1, "align": "center"},
@@ -308,9 +301,8 @@ def create_leaderboard_flex_message(all_data, cluster_name=None):
             rows.append(row_component)
             rows.append({"type": "separator", "margin": "sm", "color": separator_color})
 
-        return {"type": "bubble", "size": "giga", "backgroundColor": "#2E2E2E", "header": header, "body": {"type": "box", "layout": "vertical", "contents": rows, "paddingAll":"lg"}}
+        return {"type": "bubble", "size": "giga", "backgroundColor": "#2E2E2E", "header": header, "body": {"type": "box", "layout": "vertical", "contents": rows, "paddingAll":"lg"}} # Nền body đen
 
-    # Đặt tiêu đề động tùy theo có xem theo cụm hay không
     if cluster_name:
         dmx_title = f"BXH CỤM {cluster_name.upper()} - ĐMX"
         tgdd_title = f"BXH CỤM {cluster_name.upper()} - TGDD"
@@ -318,8 +310,9 @@ def create_leaderboard_flex_message(all_data, cluster_name=None):
         dmx_title = "🏆 REALTIME TOP 20 ĐMX 🏆"
         tgdd_title = "🏆 REALTIME TOP 20 TGDD 🏆"
 
-    dmx_bubble = build_leaderboard_bubble(dmx_title, dmx_stores, "#1E88E5")
-    tgdd_bubble = build_leaderboard_bubble(tgdd_title, tgdd_stores, "#FDD835", text_color="#000000")
+    # Định nghĩa màu chữ cho header của từng BXH
+    dmx_bubble = build_leaderboard_bubble(dmx_title, dmx_stores, "#1E88E5", "#FFFFFF") # ĐMX: nền xanh, chữ trắng
+    tgdd_bubble = build_leaderboard_bubble(tgdd_title, tgdd_stores, "#FDD835", "#000000") # TGDD: nền vàng, chữ đen
 
     dmx_flex = { "type": "flex", "altText": dmx_title, "contents": dmx_bubble }
     tgdd_flex = { "type": "flex", "altText": tgdd_title, "contents": tgdd_bubble }
@@ -349,7 +342,6 @@ def handle_message(event):
         reply_messages = []
         user_msg_upper = user_message.upper()
         
-        # Lấy danh sách các cụm duy nhất từ cột A
         cluster_names = {row[0].strip().upper() for row in all_data[1:] if len(row) > 0 and row[0]}
 
         if user_msg_upper == 'BXH':
@@ -359,7 +351,6 @@ def handle_message(event):
                     alt_text=flex_data['altText'],
                     contents=flex_data['contents']
                 ))
-        # Kiểm tra xem tin nhắn có phải là tên một cụm không
         elif user_msg_upper in cluster_names:
             list_of_flex_messages = create_leaderboard_flex_message(all_data, cluster_name=user_msg_upper)
             for flex_data in list_of_flex_messages:
@@ -372,7 +363,6 @@ def handle_message(event):
             for row in all_data[1:]:
                 if row and len(row) > 2 and row[2]:
                     cell_content = row[2].strip()
-                    # So sánh chính xác mã siêu thị
                     supermarket_code_parts = cell_content.split(' ')
                     if supermarket_code_parts and supermarket_code_parts[0] == user_message:
                         found_row = row
