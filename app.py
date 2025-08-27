@@ -171,7 +171,8 @@ def create_flex_message(store_data, competition_results, ranking):
                 ]}
             ]},
             {"type": "box", "layout": "vertical", "paddingAll": "20px", "backgroundColor": "#1C1C1C", "contents": [
-                {"type": "box", "layout": "vertical", "backgroundColor": "#2E2E2E", "cornerRadius": "xl", "paddingAll": "lg", "offsetBottom": "4px", "offsetStart": "4px", "contents": [
+                # SỬA LỖI: Xóa thuộc tính offsetBottom và offsetStart để đảm bảo tương thích
+                {"type": "box", "layout": "vertical", "backgroundColor": "#2E2E2E", "cornerRadius": "xl", "paddingAll": "lg", "contents": [
                     {"type": "box", "layout": "horizontal", "contents": [
                         {"type": "box", "layout": "vertical", "flex": 1, "spacing": "sm", "contents": [
                             {"type": "box", "layout": "horizontal", "justifyContent": "center", "spacing": "sm", "contents": [{"type": "icon", "url": "https://img.icons8.com/fluency/48/money-bag.png", "size": "sm"}, {"type": "text", "text": "DOANH THU", "color": "#87CEEB", "size": "md", "align": "center", "gravity": "center"}]},
