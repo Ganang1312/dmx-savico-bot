@@ -206,9 +206,9 @@ def create_summary_text_message(store_data, competition_results):
         summary += f"- 🎯 Target Ngày: {math.floor(target_val)}\n"
         summary += f"- 📈 Realtime: {math.floor(realtime_val)} ({round(percent_float*100)}%)\n"
         summary += f"- 📉 Còn lại: {math.floor(remaining_val)}\n"
-        summary += f"- 🏆 NH thi đua đạt: {finished_items_count}/{len(competition_results)}\n" # Đã sửa
+        summary += f"- 🏆 NH thi đua đạt: {finished_items_count}/{len(competition_results)}\n"
         summary += "-------------------\n"
-        summary += "🏁 THI ĐUA NH:\n\n" # Đã sửa
+        summary += "🏁 THI ĐUA NH:\n\n"
         
         if sold_items:
             for item in sold_items:
@@ -268,19 +268,21 @@ def create_leaderboard_flex_message(all_data, cluster_name=None):
         dmx_stores = dmx_stores[:20]
         tgdd_stores = tgdd_stores[:20]
 
-    def build_leaderboard_bubble(title, stores, color, text_color): # text_color được truyền vào
-        # <<<--- SỬA LỖI 4: Đổi nền đen, chữ trắng cho toàn bộ BXH --->>>
-        header = {"type": "box", "layout": "vertical", "backgroundColor": color, "paddingAll": "lg", "contents": [{"type": "text", "text": title, "weight": "bold", "size": "xl", "color": text_color, "align": "center", "wrap": True}]}
+    def build_leaderboard_bubble(title, stores, header_bg_color, header_text_color):
+        header = {"type": "box", "layout": "vertical", "backgroundColor": header_bg_color, "paddingAll": "lg", "contents": [{"type": "text", "text": title, "weight": "bold", "size": "xl", "color": header_text_color, "align": "center", "wrap": True}]}
+        
+        body_bg_color = "#2E2E2E" # Nền body đen
+        text_color_body = "#FFFFFF" # Chữ trắng trong body
         separator_color = "#4A4A4A" # Màu đường kẻ cho nền đen
 
         table_header = {"type": "box", "layout": "horizontal", "margin": "md", "contents": [
-            {"type": "text", "text": "STT", "weight": "bold", "size": "sm", "color": "#FFFFFF", "flex": 1, "align": "center"},
+            {"type": "text", "text": "STT", "weight": "bold", "size": "sm", "color": text_color_body, "flex": 1, "align": "center"},
             {"type": "separator", "color": separator_color},
-            {"type": "text", "text": "KÊNH", "weight": "bold", "size": "sm", "color": "#FFFFFF", "flex": 2, "align": "center"},
+            {"type": "text", "text": "KÊNH", "weight": "bold", "size": "sm", "color": text_color_body, "flex": 2, "align": "center"},
             {"type": "separator", "color": separator_color},
-            {"type": "text", "text": "SIÊU THỊ", "weight": "bold", "size": "sm", "color": "#FFFFFF", "flex": 6, "align": "center"},
+            {"type": "text", "text": "SIÊU THỊ", "weight": "bold", "size": "sm", "color": text_color_body, "flex": 6, "align": "center"},
             {"type": "separator", "color": separator_color},
-            {"type": "text", "text": "RT", "weight": "bold", "size": "sm", "color": "#FFFFFF", "flex": 2, "align": "center"}
+            {"type": "text", "text": "RT", "weight": "bold", "size": "sm", "color": text_color_body, "flex": 2, "align": "center"}
         ]}
         
         rows = [table_header, {"type": "separator", "margin": "sm", "color": separator_color}]
@@ -290,18 +292,18 @@ def create_leaderboard_flex_message(all_data, cluster_name=None):
             short_name = name_parts[1] if len(name_parts) > 1 else full_name
             
             row_component = {"type": "box", "layout": "horizontal", "margin": "md", "paddingTop":"sm", "paddingBottom":"sm", "contents": [
-                {"type": "text", "text": str(i+1), "size": "sm", "color": "#FFFFFF", "flex": 1, "gravity": "center", "align": "center"},
+                {"type": "text", "text": str(i+1), "size": "sm", "color": text_color_body, "flex": 1, "gravity": "center", "align": "center"},
                 {"type": "separator", "color": separator_color},
-                {"type": "text", "text": store['kenh'], "size": "sm", "color": "#FFFFFF", "flex": 2, "gravity": "center", "align": "center"},
+                {"type": "text", "text": store['kenh'], "size": "sm", "color": text_color_body, "flex": 2, "gravity": "center", "align": "center"},
                 {"type": "separator", "color": separator_color},
-                {"type": "text", "text": short_name, "size": "xs", "color": "#FFFFFF", "flex": 6, "wrap": True, "gravity": "center"},
+                {"type": "text", "text": short_name, "size": "xs", "color": text_color_body, "flex": 6, "wrap": True, "gravity": "center"},
                 {"type": "separator", "color": separator_color},
-                {"type": "text", "text": str(round(store['doanh_thu'])), "size": "sm", "color": "#FFFFFF", "flex": 2, "align": "center", "gravity": "center"}
+                {"type": "text", "text": str(round(store['doanh_thu'])), "size": "sm", "color": text_color_body, "flex": 2, "align": "center", "gravity": "center"}
             ]}
             rows.append(row_component)
             rows.append({"type": "separator", "margin": "sm", "color": separator_color})
 
-        return {"type": "bubble", "size": "giga", "backgroundColor": "#2E2E2E", "header": header, "body": {"type": "box", "layout": "vertical", "contents": rows, "paddingAll":"lg"}} # Nền body đen
+        return {"type": "bubble", "size": "giga", "backgroundColor": body_bg_color, "header": header, "body": {"type": "box", "layout": "vertical", "contents": rows, "paddingAll":"lg"}}
 
     if cluster_name:
         dmx_title = f"BXH CỤM {cluster_name.upper()} - ĐMX"
@@ -310,9 +312,8 @@ def create_leaderboard_flex_message(all_data, cluster_name=None):
         dmx_title = "🏆 REALTIME TOP 20 ĐMX 🏆"
         tgdd_title = "🏆 REALTIME TOP 20 TGDD 🏆"
 
-    # Định nghĩa màu chữ cho header của từng BXH
-    dmx_bubble = build_leaderboard_bubble(dmx_title, dmx_stores, "#1E88E5", "#FFFFFF") # ĐMX: nền xanh, chữ trắng
-    tgdd_bubble = build_leaderboard_bubble(tgdd_title, tgdd_stores, "#FDD835", "#000000") # TGDD: nền vàng, chữ đen
+    dmx_bubble = build_leaderboard_bubble(dmx_title, dmx_stores, "#1E88E5", "#FFFFFF")
+    tgdd_bubble = build_leaderboard_bubble(tgdd_title, tgdd_stores, "#FDD835", "#000000")
 
     dmx_flex = { "type": "flex", "altText": dmx_title, "contents": dmx_bubble }
     tgdd_flex = { "type": "flex", "altText": tgdd_title, "contents": tgdd_bubble }
