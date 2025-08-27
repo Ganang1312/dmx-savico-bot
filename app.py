@@ -132,10 +132,18 @@ def create_flex_message(store_data, competition_results, ranking):
     style = channel_styles.get(kenh, {"bg": "#006c83", "text": "#FFFFFF"})
     
     sold_components = []
-    for i, item in enumerate(sold_items):
+    for item in sold_items:
         percent_val = item.get("percent_val", 0)
         color = "#4CFF42" if percent_val >= 1 else ("#FFD142" if percent_val > 0.7 else "#FF4242")
-        component = {"type": "box", "layout": "horizontal", "margin": "md", "paddingTop": "sm", "paddingBottom": "sm", "contents": [{"type": "text", "text": str(i+1), "color": "#C0C0C0", "flex": 0, "margin": "sm", "size": "sm", "gravity": "center"}, {"type": "text", "text": item["name"], "wrap": True, "size": "sm", "color": "#FFFFFF", "flex": 4, "gravity": "center"}, {"type": "text", "text": str(round(item["realtime"], 2)), "size": "sm", "color": "#FFFFFF", "align": "center", "flex": 2, "gravity": "center"}, {"type": "text", "text": str(item["target"]), "size": "sm", "color": "#FFFFFF", "align": "center", "flex": 2, "gravity": "center"}, {"type": "box", "layout": "vertical", "flex": 2, "contents": [{"type": "text", "text": item["percent_ht"], "size": "sm", "color": color, "align": "end", "weight": "bold", "gravity": "center"}]}]}
+        component = {"type": "box", "layout": "horizontal", "margin": "md", "paddingTop": "sm", "paddingBottom": "sm", "contents": [
+            {"type": "text", "text": item["name"], "wrap": True, "size": "sm", "color": "#FFFFFF", "flex": 4, "gravity": "center"},
+            {"type": "separator", "color": "#4A4A4A"},
+            {"type": "text", "text": str(round(item["realtime"], 2)), "size": "sm", "color": "#FFFFFF", "align": "center", "flex": 2, "gravity": "center"},
+            {"type": "separator", "color": "#4A4A4A"},
+            {"type": "text", "text": str(item["target"]), "size": "sm", "color": "#FFFFFF", "align": "center", "flex": 2, "gravity": "center"},
+            {"type": "separator", "color": "#4A4A4A"},
+            {"type": "box", "layout": "vertical", "flex": 2, "contents": [{"type": "text", "text": item["percent_ht"], "size": "sm", "color": color, "align": "end", "weight": "bold", "gravity": "center"}]}
+        ]}
         sold_components.append(component)
         sold_components.append({"type": "separator", "margin": "md", "color": "#4A4A4A"})
     
@@ -188,7 +196,7 @@ def create_flex_message(store_data, competition_results, ranking):
             {"type": "box", "layout": "horizontal", "margin": "xl", "contents": [{"type": "text", "text": "XH D.Thu Kênh", "size": "sm", "color": "#C0C0C0", "align": "center", "flex": 1}]},
             {"type": "box", "layout": "horizontal", "contents": [{"type": "text", "text": ranking, "weight": "bold", "size": "lg", "color": "#FFFFFF", "align": "center", "flex": 1}]},
             {"type": "separator", "margin": "xl", "color": "#4A4A4A"},
-            {"type": "box", "layout": "horizontal", "margin": "md", "contents": [{"type": "text", "text": "STT", "color": "#C0C0C0", "size": "sm", "flex": 0, "weight": "bold"}, {"type": "text", "text": "Ngành Hàng", "color": "#C0C0C0", "size": "sm", "flex": 4, "weight": "bold", "align": "center"}, {"type": "text", "text": "Realtime", "color": "#C0C0C0", "size": "sm", "flex": 2, "align": "center", "weight": "bold"}, {"type": "text", "text": "Target", "color": "#C0C0C0", "size": "sm", "flex": 2, "align": "center", "weight": "bold"}, {"type": "text", "text": "%HT", "color": "#C0C0C0", "size": "sm", "flex": 2, "align": "end", "weight": "bold"}]},
+            {"type": "box", "layout": "horizontal", "margin": "md", "contents": [{"type": "text", "text": "Ngành Hàng", "color": "#C0C0C0", "size": "sm", "flex": 4, "weight": "bold", "align": "center"}, {"type": "text", "text": "Realtime", "color": "#C0C0C0", "size": "sm", "flex": 2, "align": "center", "weight": "bold"}, {"type": "text", "text": "Target", "color": "#C0C0C0", "size": "sm", "flex": 2, "align": "center", "weight": "bold"}, {"type": "text", "text": "%HT", "color": "#C0C0C0", "size": "sm", "flex": 2, "align": "end", "weight": "bold"}]},
             {"type": "separator", "margin": "md", "color": "#4A4A4A"},
             *sold_components,
             *unsold_components
@@ -199,16 +207,52 @@ def create_flex_message(store_data, competition_results, ranking):
     }
     return flex_json
 
+def create_summary_text_message(store_data, competition_results):
+    try:
+        target_val = float((store_data[3] or "0").replace(',', ''))
+        realtime_val = float((store_data[4] or "0").replace(',', ''))
+        percent_float, _ = handle_percentage_string(store_data[5])
+        
+        remaining_val = target_val - realtime_val
+        
+        finished_items = [item for item in competition_results if item['percent_val'] >= 1]
+        
+        tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
+        now = datetime.now(tz_vietnam)
+        time_str = now.strftime("%H:%M:%S")
+
+        summary = f"📊 BÁO CÁO NHANH REAL-TIME - {time_str} 📊\n"
+        summary += "-------------------\n"
+        summary += f"- 🎯 Target Ngày: {math.floor(target_val)}\n"
+        summary += f"- 📈 Realtime: {math.floor(realtime_val)} ({round(percent_float*100)}%)\n"
+        summary += f"- 📉 Còn lại: {math.floor(remaining_val)}\n"
+        summary += f"- 🏆 Thi đua dự kiến đạt: {len(finished_items)}/{len(competition_results)}\n"
+        summary += "-------------------\n"
+        summary += "🏁 TÌNH HÌNH THI ĐUA (THỰC TẾ) 🏁\n"
+        
+        if finished_items:
+            summary += f"\n✅ ĐÃ VỀ ĐÍCH ({len(finished_items)} nhóm):\n"
+            for item in finished_items:
+                summary += f"  - {item['name']} ({item['percent_ht']})\n"
+        else:
+            summary += "\nChưa có nhóm nào về đích."
+            
+        return TextSendMessage(text=summary)
+    except Exception as e:
+        print(f"Lỗi khi tạo tin nhắn tóm tắt: {e}")
+        return None
+
 def create_leaderboard_flex_message(all_data):
     dmx_channels = ['ĐML', 'ĐMM', 'ĐMS']
     tgdd_channels = ['TGD', 'AAR']
     
-    dmx_stores = []
-    tgdd_stores = []
+    dmx_stores, tgdd_stores = [], []
 
     for row in all_data[1:]:
         try:
             kenh = (row[1] or "").strip()
+            if not kenh: continue
+            
             sieu_thi = row[2]
             doanh_thu_str = str(row[4]).replace(',', '')
             doanh_thu = float(doanh_thu_str) if doanh_thu_str else 0
@@ -281,12 +325,13 @@ def handle_message(event):
         sheet = CLIENT.open(SHEET_NAME).worksheet(WORKSHEET_NAME)
         all_data = sheet.get_all_values()
         
+        reply_messages = []
         if user_message.upper() == 'BXH':
             flex_message_data = create_leaderboard_flex_message(all_data)
-            reply_message = FlexSendMessage(
+            reply_messages.append(FlexSendMessage(
                 alt_text='Bảng xếp hạng Realtime Top 20',
                 contents=flex_message_data['contents']
-            )
+            ))
         else:
             header_row, found_row = all_data[0], None
             for row in all_data[1:]:
@@ -299,14 +344,21 @@ def handle_message(event):
             if found_row:
                 ranking = calculate_ranking(all_data, found_row)
                 competition_results = parse_competition_data(header_row, found_row)
-                flex_message_data = create_flex_message(found_row, competition_results, ranking)
-                reply_message = FlexSendMessage(alt_text='Báo cáo Realtime', contents=flex_message_data['contents'])
+                flex_message = create_flex_message(found_row, competition_results, ranking)
+                reply_messages.append(FlexSendMessage(alt_text='Báo cáo Realtime', contents=flex_message['contents']))
+                
+                summary_message = create_summary_text_message(found_row, competition_results)
+                if summary_message:
+                    reply_messages.append(summary_message)
             else:
-                reply_message = TextSendMessage(text=f'Không tìm thấy dữ liệu cho mã siêu thị: {user_message}')
+                reply_messages.append(TextSendMessage(text=f'Không tìm thấy dữ liệu cho mã siêu thị: {user_message}'))
+        
+        if reply_messages:
+            line_bot_api.reply_message(event.reply_token, reply_messages)
+
     except Exception as e:
         print(f"!!! GẶP LỖI NGHIÊM TRỌNG: {repr(e)}")
-        reply_message = TextSendMessage(text='Đã có lỗi xảy ra khi truy vấn dữ liệu.')
-    line_bot_api.reply_message(event.reply_token, reply_message)
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text='Đã có lỗi xảy ra khi truy vấn dữ liệu.'))
 
 # --- CHẠY ỨNG DỤNG ---
 if __name__ == "__main__":
