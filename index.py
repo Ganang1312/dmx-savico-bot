@@ -1,3 +1,6 @@
+# Tên file: index.py
+# Đặt file này trong thư mục /api
+
 import os
 import json
 from flask import Flask, request, abort
@@ -21,24 +24,31 @@ CHANNEL_SECRET = os.environ.get('CHANNEL_SECRET')
 GOOGLE_CREDS_JSON = os.environ.get('GOOGLE_CREDENTIALS_JSON')
 
 if not all([CHANNEL_ACCESS_TOKEN, CHANNEL_SECRET, GOOGLE_CREDS_JSON]):
-    raise ValueError("Lỗi: Hãy kiểm tra lại các biến môi trường trên Render.")
+    raise ValueError("Lỗi: Hãy kiểm tra lại các biến môi trường trên Vercel.")
 
 # --- CẤU HÌNH GOOGLE SHEETS TỪ BIẾN MÔI TRƯỜDNG ---
 SCOPE = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-google_creds_dict = json.loads(GOOGLE_CREDS_JSON)
-CREDS = ServiceAccountCredentials.from_json_keyfile_dict(google_creds_dict, SCOPE)
-CLIENT = gspread.authorize(CREDS)
+try:
+    google_creds_dict = json.loads(GOOGLE_CREDS_JSON)
+    CREDS = ServiceAccountCredentials.from_json_keyfile_dict(google_creds_dict, SCOPE)
+    CLIENT = gspread.authorize(CREDS)
+except Exception as e:
+    # Thêm log để dễ dàng debug lỗi credentials trên Vercel
+    print(f"Lỗi khi khởi tạo Google Sheets client: {e}")
+    # Có thể raise lỗi ở đây để dừng ứng dụng nếu không thể kết nối
+    # raise e
 
 # Tên file và trang tính cần đọc
 SHEET_NAME = 'DATA REATIME'
 WORKSHEET_NAME = 'chi_tiet_cum'
 
 # --- KHỞI TẠO ỨNG DỤNG ---
+# Vercel sẽ tự động tìm biến `app` này
 app = Flask(__name__)
 line_bot_api = LineBotApi(CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(CHANNEL_SECRET)
 
-# --- ĐỊNH NGHĨA CÁC HÀM XỬ LÝ ---
+# --- ĐỊNH NGHĨA CÁC HÀM XỬ LÝ (GIỮ NGUYÊN) ---
 
 def parse_float_from_string(s):
     if s is None: return 0.0
@@ -367,11 +377,13 @@ def handle_message(event):
         if reply_messages:
             line_bot_api.reply_message(event.reply_token, reply_messages)
 
+    except gspread.exceptions.APIError as e:
+        # Xử lý lỗi API từ Google Sheets (ví dụ: hết hạn quota)
+        print(f"!!! LỖI GOOGLE SHEETS API: {repr(e)}")
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text='Lỗi khi truy cập Google Sheets. Vui lòng thử lại sau.'))
     except Exception as e:
         print(f"!!! GẶP LỖI NGHIÊM TRỌNG: {repr(e)}")
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text='Đã có lỗi xảy ra khi truy vấn dữ liệu.'))
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text='Đã có lỗi xảy ra khi xử lý yêu cầu.'))
 
-# --- CHẠY ỨNG DỤNG ---
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host='0.0.0.0', port=port)
+# KHÔNG CẦN KHỐI `if __name__ == "__main__":` NỮA
+# Vercel sẽ xử lý việc chạy ứng dụng.
