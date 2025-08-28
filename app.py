@@ -9,7 +9,8 @@ from linebot.models import (
     MessageEvent, TextMessage, TextSendMessage, FlexSendMessage
 )
 import gspread
-from oauth2client.service_account import ServiceAccountCredentials
+# SỬA ĐỔI: Thay thế thư viện cũ bằng thư viện mới
+from google.oauth2.service_account import Credentials
 import collections
 from datetime import datetime
 import pytz
@@ -21,12 +22,15 @@ CHANNEL_SECRET = os.environ.get('CHANNEL_SECRET')
 GOOGLE_CREDS_JSON = os.environ.get('GOOGLE_CREDENTIALS_JSON')
 
 if not all([CHANNEL_ACCESS_TOKEN, CHANNEL_SECRET, GOOGLE_CREDS_JSON]):
-    raise ValueError("Lỗi: Hãy kiểm tra lại các biến môi trường trên Render.")
+    raise ValueError("Lỗi: Hãy kiểm tra lại các biến môi trường trên Vercel.")
 
 # --- CẤU HÌNH GOOGLE SHEETS TỪ BIẾN MÔI TRƯỜDNG ---
 SCOPE = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
 google_creds_dict = json.loads(GOOGLE_CREDS_JSON)
-CREDS = ServiceAccountCredentials.from_json_keyfile_dict(google_creds_dict, SCOPE)
+
+# SỬA ĐỔI: Cập nhật cách tạo credentials
+CREDS = Credentials.from_service_account_info(google_creds_dict, scopes=SCOPE)
+
 CLIENT = gspread.authorize(CREDS)
 
 # Tên file và trang tính cần đọc
