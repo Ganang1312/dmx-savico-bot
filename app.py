@@ -261,19 +261,19 @@ def create_leaderboard_flex_message(all_data, cluster_name=None):
     def build_leaderboard_bubble(title, stores, header_bg_color, header_text_color):
         header = {"type": "box", "layout": "vertical", "backgroundColor": header_bg_color, "paddingAll": "lg", "contents": [{"type": "text", "text": title, "weight": "bold", "size": "xl", "color": header_text_color, "align": "center", "wrap": True}]}
         
-        # --- THAY ĐỔI MÀU SẮC TẠI ĐÂY ---
-        body_bg_color = "#FFFFFF"     # Nền trắng
-        text_color_body = "#000000"     # Chữ đen
-        separator_color = "#EEEEEE"     # Kẻ xám nhạt
+        body_bg_color = "#FFFFFF"
+        text_color_body = "#000000"
+        separator_color = "#EEEEEE"
 
-        table_header = {"type": "box", "layout": "horizontal", "margin": "md", "contents": [
-            {"type": "text", "text": "STT", "weight": "bold", "size": "sm", "color": text_color_body, "flex": 1, "align": "center"},
+        # --- CẬP NHẬT: THÊM MÀU NỀN VÀ ĐỔI MÀU CHỮ CHO HÀNG TIÊU ĐỀ ---
+        table_header = {"type": "box", "layout": "horizontal", "margin": "md", "paddingAll": "sm", "backgroundColor": header_bg_color, "cornerRadius": "md", "contents": [
+            {"type": "text", "text": "STT", "weight": "bold", "size": "sm", "color": header_text_color, "flex": 1, "align": "center", "gravity":"center"},
             {"type": "separator", "color": separator_color},
-            {"type": "text", "text": "KÊNH", "weight": "bold", "size": "sm", "color": text_color_body, "flex": 2, "align": "center"},
+            {"type": "text", "text": "KÊNH", "weight": "bold", "size": "sm", "color": header_text_color, "flex": 2, "align": "center", "gravity":"center"},
             {"type": "separator", "color": separator_color},
-            {"type": "text", "text": "SIÊU THỊ", "weight": "bold", "size": "sm", "color": text_color_body, "flex": 6, "align": "center"},
+            {"type": "text", "text": "SIÊU THỊ", "weight": "bold", "size": "sm", "color": header_text_color, "flex": 6, "align": "center", "gravity":"center"},
             {"type": "separator", "color": separator_color},
-            {"type": "text", "text": "RT", "weight": "bold", "size": "sm", "color": text_color_body, "flex": 2, "align": "center"}
+            {"type": "text", "text": "RT", "weight": "bold", "size": "sm", "color": header_text_color, "flex": 2, "align": "center", "gravity":"center"}
         ]}
         
         rows = [table_header, {"type": "separator", "margin": "sm", "color": separator_color}]
@@ -291,25 +291,18 @@ def create_leaderboard_flex_message(all_data, cluster_name=None):
                 {"type": "text", "text": str(round(store['doanh_thu'])), "size": "sm", "color": text_color_body, "flex": 2, "align": "center", "gravity": "center"}
             ]}
             rows.append(row_component)
-            if i < len(stores) -1: # Chỉ thêm separator nếu không phải hàng cuối
+            if i < len(stores) -1:
                  rows.append({"type": "separator", "margin": "sm", "color": separator_color})
 
         return {
-            "type": "bubble", 
-            "size": "giga", 
-            "header": header, 
-            "body": {
-                "type": "box", 
-                "layout": "vertical", 
-                "contents": rows, 
-                "paddingAll":"lg",
-                "backgroundColor": body_bg_color # Đặt màu nền cho body tại đây
-            }
+            "type": "bubble", "size": "giga", "header": header, 
+            "body": { "type": "box", "layout": "vertical", "contents": rows, "paddingAll":"lg", "backgroundColor": body_bg_color }
         }
 
+    # --- CẬP NHẬT: THÊM ICON CUP VÀO TIÊU ĐỀ BXH CỤM ---
     if cluster_name:
-        dmx_title = f"BXH CỤM {cluster_name.upper()} - ĐMX"
-        tgdd_title = f"BXH CỤM {cluster_name.upper()} - TGDD"
+        dmx_title = f"🏆 BXH CỤM {cluster_name.upper()} - ĐMX 🏆"
+        tgdd_title = f"🏆 BXH CỤM {cluster_name.upper()} - TGDD 🏆"
     else:
         dmx_title = "🏆 REALTIME TOP 20 ĐMX 🏆"
         tgdd_title = "🏆 REALTIME TOP 20 TGDD 🏆"
