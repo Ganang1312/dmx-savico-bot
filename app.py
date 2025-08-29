@@ -96,7 +96,7 @@ if 'RENDER' in os.environ:
 # Tải danh sách ID được phép khi khởi động
 load_allowed_ids()
 
-# --- CÁC HÀM XỬ LÝ DỮ LIỆU (không thay đổi) ---
+# --- CÁC HÀM XỬ LÝ DỮ LIỆU ---
 def parse_float_from_string(s):
     if s is None: return 0.0
     if not isinstance(s, str): s = str(s)
@@ -219,6 +219,49 @@ def create_flex_message(store_data, competition_results, ranking):
     flex_json = {"type": "flex", "altText": f"Báo cáo cho {ten_sieu_thi_rut_gon}", "contents": { "type": "bubble", "size": "giga", "header": { "type": "box", "layout": "vertical", "paddingAll": "20px", "backgroundColor": style["bg"], "contents": [ {"type": "text", "text": "Báo cáo Realtime", "color": style["text"], "size": "lg", "align": "center", "weight": "bold"}, {"type": "text", "text": f"🏪 {ten_sieu_thi_rut_gon.upper()}", "color": style["text"], "weight": "bold", "size": "xl", "align": "center", "margin": "md", "wrap": True}, {"type": "box", "layout": "vertical", "margin": "lg", "spacing": "sm", "contents": [ {"type": "text", "text": f"⭐ Cụm: {cum}", "size": "sm", "color": style["text"]}, {"type": "text", "text": f"🕒 Thời gian: {thoi_gian}", "size": "sm", "color": style["text"]}, {"type": "text", "text": f"🏆 NH thi đua đạt: {nh_thi_dua_dat}", "size": "sm", "color": style["text"]} ]} ] }, "body": { "type": "box", "layout": "vertical", "paddingAll": "20px", "backgroundColor": "#FFFFFF", "contents": [ {"type": "box", "layout": "horizontal", "contents": [ {"type": "box", "layout": "vertical", "flex": 1, "spacing": "sm", "contents": [ {"type": "text", "text": "💰 DOANH THU", "color": "#007BFF", "size": "md", "align": "center", "weight":"bold"}, {"type": "text", "text": realtime_tong, "color": "#007BFF", "size": "xxl", "weight": "bold", "align": "center"} ]}, {"type": "box", "layout": "vertical", "flex": 1, "spacing": "sm", "contents": [ {"type": "text", "text": "🎯 TARGET", "color": "#DC3545", "size": "md", "align": "center", "weight":"bold"}, {"type": "text", "text": target_tong, "color": "#DC3545", "size": "xxl", "weight": "bold", "align": "center"} ]} ]}, {"type": "text", "text": "% HOÀN THÀNH", "color": TEXT_COLOR, "size": "md", "align": "center", "margin": "xl"}, {"type": "text", "text": percent_ht_tong, "color": percent_color, "size": "4xl", "weight": "bold", "align": "center"}, {"type": "box", "layout": "vertical", "backgroundColor": "#DDDDDD", "height": "8px", "cornerRadius": "md", "margin": "md", "contents": [ {"type": "box", "layout": "vertical", "backgroundColor": percent_color, "height": "8px", "cornerRadius": "md", "width": f"{min(100, round(percent_float * 100))}%"} ]}, {"type": "box", "layout": "horizontal", "margin": "xl", "contents": [{"type": "text", "text": "XH D.Thu Kênh", "size": "sm", "color": TEXT_COLOR, "align": "center", "flex": 1}]}, {"type": "box", "layout": "horizontal", "contents": [{"type": "text", "text": ranking, "weight": "bold", "size": "lg", "color": TEXT_COLOR, "align": "center", "flex": 1}]}, {"type": "separator", "margin": "xl", "color": SEPARATOR_COLOR}, {"type": "box", "layout": "horizontal", "margin": "md", "contents": [{"type": "text", "text": "Ngành Hàng", "color": "#555555", "size": "sm", "flex": 4, "weight": "bold", "align": "center"}, {"type": "text", "text": "Realtime", "color": "#555555", "size": "sm", "flex": 2, "align": "center", "weight": "bold"}, {"type": "text", "text": "Target", "color": "#555555", "size": "sm", "flex": 2, "align": "center", "weight": "bold"}, {"type": "text", "text": "%HT", "color": "#555555", "size": "sm", "flex": 2, "align": "end", "weight": "bold"}]}, {"type": "separator", "margin": "md", "color": SEPARATOR_COLOR}, *sold_components, *unsold_components ] }, "footer": {"type": "box", "layout": "vertical", "contents": [{"type": "text", "text": "Created By 32859-NH Dương", "color": "#AAAAAA", "size": "xs", "align": "center"}]} }}
     return flex_json
 
+# --- KHÔI PHỤC HÀM TẠO TIN NHẮN TÓM TẮT ---
+def create_summary_text_message(store_data, competition_results):
+    try:
+        target_val = parse_float_from_string(store_data[3])
+        realtime_val = parse_float_from_string(store_data[4])
+        percent_float, _ = handle_percentage_string(store_data[5])
+        remaining_val = target_val - realtime_val
+        sold_items = [item for item in competition_results if item.get('realtime', 0) > 0]
+        finished_items_count = sum(1 for item in competition_results if item['percent_val'] >= 1)
+        tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
+        now = datetime.now(tz_vietnam)
+        time_str = now.strftime("%H:%M:%S")
+
+        summary = f"📊 BÁO CÁO NHANH REAL-TIME - {time_str} 📊\n"
+        summary += "-------------------\n"
+        summary += f"- 🎯 Target Ngày: {math.floor(target_val)}\n"
+        summary += f"- 📈 Realtime: {math.floor(realtime_val)} ({round(percent_float*100)}%)\n"
+        summary += f"- 📉 Còn lại: {math.floor(remaining_val)}\n"
+        summary += f"- 🏆 NH thi đua đạt: {finished_items_count}/{len(competition_results)}\n"
+        summary += "-------------------\n"
+        summary += "🏁 THI ĐUA NH:\n\n"
+        
+        if sold_items:
+            for item in sold_items:
+                try:
+                    realtime = item.get('realtime', 0)
+                    target = parse_float_from_string(item.get('target', '0'))
+                    remaining = target - realtime
+                    percent_ht = item.get('percent_ht', '0%')
+                    realtime_disp = math.floor(realtime) if realtime == math.floor(realtime) else round(realtime, 2)
+                    target_disp = math.floor(target) if target == math.floor(target) else round(target, 2)
+                    remaining_disp = math.floor(remaining) if remaining == math.floor(remaining) else round(remaining, 2)
+                    summary += f"• {item['name']}: {realtime_disp}/{target_disp} ({percent_ht}) còn lại: {remaining_disp}\n"
+                except (ValueError, TypeError):
+                    summary += f"• {item['name']}: {item.get('realtime', 0)} ({item.get('percent_ht', '0%')})\n"
+        else:
+            summary += "Chưa có ngành hàng thi đua nào phát sinh doanh số."
+            
+        return TextSendMessage(text=summary)
+    except Exception as e:
+        print(f"Lỗi khi tạo tin nhắn tóm tắt: {e}")
+        return None
+
 def create_leaderboard_flex_message(all_data, cluster_name=None, channel_filter=None):
     dmx_channels = ['ĐML', 'ĐMM', 'ĐMS']; tgdd_channels = ['TGD', 'AAR']
     dmx_stores, tgdd_stores = [], []
@@ -322,7 +365,6 @@ def handle_message(event):
             return
 
     # --- KIỂM TRA QUYỀN TRUY CẬP ---
-    # Bot sẽ công khai nếu không có sheet 'allowed_users' hoặc không đặt ADMIN_USER_ID
     is_controlled = bool(allowed_ids_cache) and ADMIN_USER_ID
     if is_controlled and source_id not in allowed_ids_cache:
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text='Bạn không có quyền sử dụng bot này. Vui lòng liên hệ quản trị viên.'))
@@ -365,6 +407,10 @@ def handle_message(event):
                 ranking = calculate_ranking(all_data, found_row)
                 competition_results = parse_competition_data(header_row, found_row)
                 reply_messages.append(FlexSendMessage(alt_text='Báo cáo Realtime', contents=create_flex_message(found_row, competition_results, ranking)['contents']))
+                # --- SỬA LỖI: THÊM LẠI PHẦN GỬI NHẬN XÉT ---
+                summary_message = create_summary_text_message(found_row, competition_results)
+                if summary_message:
+                    reply_messages.append(summary_message)
             else:
                 reply_messages.append(TextSendMessage(text=f'Không tìm thấy dữ liệu cho mã siêu thị hoặc cụm: "{user_message}"'))
         
