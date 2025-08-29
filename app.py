@@ -11,7 +11,7 @@ from linebot.models import (
     SourceGroup
 )
 import gspread
-from oauth2client.service_account import ServiceAccountCredentials
+from google.oauth2.service_account import Credentials
 import collections
 from datetime import datetime
 import pytz
@@ -26,9 +26,9 @@ if not all([CHANNEL_ACCESS_TOKEN, CHANNEL_SECRET, GOOGLE_CREDS_JSON]):
     raise ValueError("Lỗi: Hãy kiểm tra lại các biến môi trường trên Render.")
 
 # --- CẤU HÌNH GOOGLE SHEETS TỪ BIẾN MÔI TRƯỜNG ---
-SCOPE = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
+SCOPE = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
 google_creds_dict = json.loads(GOOGLE_CREDS_JSON)
-CREDS = ServiceAccountCredentials.from_json_keyfile_dict(google_creds_dict, SCOPE)
+CREDS = Credentials.from_service_account_info(google_creds_dict, scopes=SCOPE)
 CLIENT = gspread.authorize(CREDS)
 
 # Tên file và trang tính cần đọc
@@ -144,7 +144,7 @@ def calculate_ranking(all_data, current_row):
     except (IndexError, ValueError, TypeError): return "-/-"
 
 # --- create_flex_message, create_summary_text_message, create_leaderboard_flex_message ---
-# 👉 Giữ nguyên code gốc của bạn (dài, mình không thay đổi gì)
+# 👉 Giữ nguyên code gốc của bạn (không thay đổi logic)
 
 # --- ĐIỂM TIẾP NHẬN WEBHOOK TỪ LINE ---
 @app.route("/callback", methods=['POST'])
