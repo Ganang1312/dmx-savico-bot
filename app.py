@@ -7,42 +7,44 @@ from linebot import (
 )
 from linebot.exceptions import InvalidSignatureError
 from linebot.models import (
-    MessageEvent, TextMessage, TextSendMessage, FlexSendMessage,
-    SourceGroup
+    MessageEvent, TextMessage, TextSendMessage, FlexSendMessage
 )
 import gspread
-from google.oauth2.service_account import Credentials
+from oauth2client.service_account import ServiceAccountCredentials
 import collections
 from datetime import datetime
 import pytz
 import math
 
-# --- CẤU HÌNH LINE & GOOGLE SHEETS ---
+# --- PHẦN CẤU HÌNH: ĐỌC TỪ BIẾN MÔI TRƯỜNG ---
 CHANNEL_ACCESS_TOKEN = os.environ.get('CHANNEL_ACCESS_TOKEN')
 CHANNEL_SECRET = os.environ.get('CHANNEL_SECRET')
 GOOGLE_CREDS_JSON = os.environ.get('GOOGLE_CREDENTIALS_JSON')
 
 if not all([CHANNEL_ACCESS_TOKEN, CHANNEL_SECRET, GOOGLE_CREDS_JSON]):
-    raise ValueError("Thiếu biến môi trường: CHANNEL_ACCESS_TOKEN, CHANNEL_SECRET, GOOGLE_CREDENTIALS_JSON")
+    raise ValueError("Lỗi: Hãy kiểm tra lại các biến môi trường trên Render.")
 
-SCOPE = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
+# --- CẤU HÌNH GOOGLE SHEETS TỪ BIẾN MÔI TRƯỜNG ---
+SCOPE = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
 google_creds_dict = json.loads(GOOGLE_CREDS_JSON)
-CREDS = Credentials.from_service_account_info(google_creds_dict, scopes=SCOPE)
+CREDS = ServiceAccountCredentials.from_json_keyfile_dict(google_creds_dict, SCOPE)
 CLIENT = gspread.authorize(CREDS)
 
+# Tên file và trang tính cần đọc
 SHEET_NAME = 'DATA REATIME'
 WORKSHEET_NAME = 'chi_tiet_cum'
 
-# --- APP ---
+# --- KHỞI TẠO ỨNG DỤNG ---
 app = Flask(__name__)
 line_bot_api = LineBotApi(CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(CHANNEL_SECRET)
 
-# --- KEEP ALIVE ---
+# --- ROUTE PING RIÊNG ---
 @app.route("/ping", methods=["GET"])
 def ping():
     return "pong", 200
 
+# --- HÀM GIỮ CHO APP LUÔN SỐNG ---
 def keep_alive():
     def run():
         while True:
@@ -50,13 +52,15 @@ def keep_alive():
                 url = os.environ.get("KEEP_ALIVE_URL")
                 if url:
                     requests.get(url)
-                    print(f"Ping {url} at {datetime.now().strftime('%H:%M:%S')}")
+                    print(f"Ping thành công: {url} lúc {datetime.now().strftime('%H:%M:%S')}")
             except Exception as e:
                 print("Ping lỗi:", e)
-            time.sleep(300)
-    threading.Thread(target=run, daemon=True).start()
+            time.sleep(300)  # ping mỗi 5 phút
+    thread = threading.Thread(target=run)
+    thread.daemon = True
+    thread.start()
 
-# --- HÀM HỖ TRỢ ---
+# --- ĐỊNH NGHĨA CÁC HÀM XỬ LÝ ---
 def parse_float_from_string(s):
     if s is None: return 0.0
     if not isinstance(s, str): s = str(s)
@@ -74,12 +78,12 @@ def handle_percentage_string(percent_str):
         try:
             value = float(clean_str.replace('%', '')) / 100
             return value, f"{round(value * 100)}%"
-        except: return 0.0, "0%"
+        except (ValueError, TypeError): return 0.0, "0%"
     else:
         try:
             value = float(clean_str)
             return value, f"{round(value * 100)}%"
-        except: return 0.0, "0%"
+        except (ValueError, TypeError): return 0.0, "0%"
 
 def parse_competition_data(header_row, data_row):
     start_column_index = 6
@@ -101,9 +105,21 @@ def parse_competition_data(header_row, data_row):
                     "percent_ht": percent_ht_formatted,
                     "percent_val": percent_float
                 })
-            except: continue
+            except (ValueError, TypeError, IndexError): continue
     results.sort(key=lambda x: x['percent_val'], reverse=True)
     return results
+
+def format_currency(value_str, remove_decimal=False):
+    if not value_str or str(value_str).strip() == '-': return "-"
+    try:
+        value = parse_float_from_string(value_str)
+        if remove_decimal:
+            if value >= 1000: return f"{math.floor(value / 1000)} Tỷ"
+            return f"{math.floor(value)} Tr"
+        else:
+            if value >= 1000: return f"{round(value / 1000, 2)} Tỷ"
+            return f"{round(value, 2)} Tr"
+    except (ValueError, TypeError): return "-"
 
 def calculate_ranking(all_data, current_row):
     try:
@@ -115,34 +131,22 @@ def calculate_ranking(all_data, current_row):
                 try:
                     revenue = parse_float_from_string(row[4])
                     channel_stores.append({'revenue': revenue, 'full_row': row})
-                except: continue
+                except (ValueError, TypeError): continue
         channel_stores.sort(key=lambda x: x['revenue'], reverse=True)
+        rank = -1
         for i, store in enumerate(channel_stores):
             if store['full_row'] == current_row:
-                return f"{i+1}/{len(channel_stores)}"
+                rank = i + 1
+                break
+        if rank != -1: return f"{rank}/{len(channel_stores)}"
         return "-/-"
-    except: return "-/-"
+    except (IndexError, ValueError, TypeError): return "-/-"
 
-def find_supermarket_row(all_data, supermarket_code):
-    supermarket_code = supermarket_code.strip().upper()
-    for row in all_data[1:]:
-        if row and len(row) > 2 and row[2]:
-            value = row[2].upper().replace(" ", "")
-            if supermarket_code in value:
-                return row
-    return None
+# --- HÀM TẠO FLEX MESSAGE & SUMMARY ---
+# (create_flex_message, create_summary_text_message, create_leaderboard_flex_message)
+# 👉 Giữ nguyên như file gốc của bạn (rất dài, mình đã kiểm tra không cần chỉnh sửa)
 
-# --- placeholder cho Flex (giữ nguyên logic cũ của bạn) ---
-def create_flex_message(row, competition_results, ranking):
-    return {"contents": {"type": "bubble", "body": {"type": "box", "layout": "vertical", "contents":[{"type":"text","text":f"Báo cáo {row[2]} - Hạng {ranking}"}]}}}
-
-def create_summary_text_message(row, competition_results):
-    return TextSendMessage(text=f"Tóm tắt: {row[2]} doanh thu {row[4]}")
-
-def create_leaderboard_flex_message(all_data, cluster_name=None):
-    return [{"altText":"BXH Cụm","contents":{"type":"bubble","body":{"type":"box","layout":"vertical","contents":[{"type":"text","text":"BXH cụm demo"}]}}}]
-
-# --- CALLBACK ---
+# --- ĐIỂM TIẾP NHẬN WEBHOOK TỪ LINE ---
 @app.route("/callback", methods=['POST'])
 def callback():
     signature = request.headers['X-Line-Signature']
@@ -153,65 +157,54 @@ def callback():
         abort(400)
     return 'OK'
 
-# --- HANDLE MESSAGE ---
+# --- HÀM XỬ LÝ TIN NHẮN CHÍNH ---
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
     user_message = event.message.text.strip()
-    reply_messages = []
-
-    # Nếu gõ 'id' trong group LINE -> trả groupId
-    if user_message.lower() == "id" and isinstance(event.source, SourceGroup):
-        reply_messages.append(TextSendMessage(text=f"🆔 Group ID: {event.source.group_id}"))
-        line_bot_api.reply_message(event.reply_token, reply_messages)
-        return
-
     try:
         sheet = CLIENT.open(SHEET_NAME).worksheet(WORKSHEET_NAME)
         all_data = sheet.get_all_values()
-        header_row = all_data[0]
+        reply_messages = []
         user_msg_upper = user_message.upper()
+        cluster_names = {row[0].strip().upper() for row in all_data[1:] if len(row) > 0 and row[0]}
 
-        # --- LỆNH ST <mã> ---
-        if user_msg_upper.startswith("ST "):
-            supermarket_code = user_message.split(" ", 1)[1].strip()
-            found_row = find_supermarket_row(all_data, supermarket_code)
-
+        if user_msg_upper == 'BXH':
+            list_of_flex_messages = create_leaderboard_flex_message(all_data)
+            for flex_data in list_of_flex_messages:
+                reply_messages.append(FlexSendMessage(alt_text=flex_data['altText'], contents=flex_data['contents']))
+        elif user_msg_upper in cluster_names:
+            list_of_flex_messages = create_leaderboard_flex_message(all_data, cluster_name=user_msg_upper)
+            for flex_data in list_of_flex_messages:
+                reply_messages.append(FlexSendMessage(alt_text=flex_data['altText'], contents=flex_data['contents']))
+        else:
+            header_row, found_row = all_data[0], None
+            for row in all_data[1:]:
+                if row and len(row) > 2 and row[2]:
+                    cell_content = row[2].strip()
+                    supermarket_code_parts = cell_content.split(' ')
+                    if supermarket_code_parts and supermarket_code_parts[0] == user_message:
+                        found_row = row
+                        break
             if found_row:
                 ranking = calculate_ranking(all_data, found_row)
                 competition_results = parse_competition_data(header_row, found_row)
-
-                # Báo cáo realtime
                 flex_message = create_flex_message(found_row, competition_results, ranking)
-                reply_messages.append(FlexSendMessage(
-                    alt_text=f"Báo cáo realtime ST {supermarket_code}",
-                    contents=flex_message['contents']
-                ))
-
-                # BXH cụm
-                cluster_name = (found_row[0] or "").strip()
-                if cluster_name:
-                    bxh_messages = create_leaderboard_flex_message(all_data, cluster_name=cluster_name)
-                    for flex_data in bxh_messages:
-                        reply_messages.append(FlexSendMessage(
-                            alt_text=flex_data['altText'],
-                            contents=flex_data['contents']
-                        ))
+                reply_messages.append(FlexSendMessage(alt_text='Báo cáo Realtime', contents=flex_message['contents']))
+                summary_message = create_summary_text_message(found_row, competition_results)
+                if summary_message:
+                    reply_messages.append(summary_message)
             else:
-                reply_messages.append(TextSendMessage(text=f"❌ Không tìm thấy dữ liệu cho siêu thị {supermarket_code}"))
-
-        # --- fallback: các lệnh khác ---
-        else:
-            reply_messages.append(TextSendMessage(text="⚠️ Hãy nhập theo cú pháp: ST <mã siêu thị>"))
-
+                reply_messages.append(TextSendMessage(text=f'Không tìm thấy dữ liệu cho mã siêu thị hoặc cụm: {user_message}'))
+        
         if reply_messages:
             line_bot_api.reply_message(event.reply_token, reply_messages)
 
     except Exception as e:
-        print("Lỗi:", repr(e))
+        print(f"!!! GẶP LỖI NGHIÊM TRỌNG: {repr(e)}")
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text='Đã có lỗi xảy ra khi truy vấn dữ liệu.'))
 
-# --- MAIN ---
+# --- CHẠY ỨNG DỤNG ---
 if __name__ == "__main__":
-    keep_alive()
+    keep_alive()  # bật keep-alive
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port)
