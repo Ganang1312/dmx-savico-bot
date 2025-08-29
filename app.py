@@ -47,31 +47,23 @@ def keep_alive():
     Gửi một yêu cầu HTTP đến chính nó mỗi 10 phút (600 giây)
     để ngăn ứng dụng trên Render đi vào trạng thái ngủ.
     """
-    # Lấy URL của ứng dụng từ biến môi trường của Render
     app_url = os.environ.get("RENDER_EXTERNAL_URL")
     if not app_url:
         print("Không tìm thấy RENDER_EXTERNAL_URL. Bỏ qua chức năng keep-alive.")
         return
-
     ping_url = f"{app_url}/ping"
-
     while True:
         try:
             print(f"Đang gửi ping đến {ping_url} để giữ ứng dụng hoạt động...")
-            requests.get(ping_url, timeout=10) # Thêm timeout để tránh bị treo
+            requests.get(ping_url, timeout=10)
         except requests.exceptions.RequestException as e:
             print(f"Lỗi khi thực hiện ping: {e}")
-        
-        # Chờ 10 phút (600 giây) trước khi ping lần tiếp theo
         time.sleep(600)
 
-# Bắt đầu luồng keep-alive nếu ứng dụng đang chạy trên Render
-# Điều này đảm bảo nó hoạt động cả khi chạy với gunicorn
 if 'RENDER' in os.environ:
     keep_alive_thread = threading.Thread(target=keep_alive, daemon=True)
     keep_alive_thread.start()
     print("Đã khởi động luồng keep-alive.")
-
 
 # --- ĐỊNH NGHĨA CÁC HÀM XỬ LÝ ---
 
@@ -180,9 +172,8 @@ def create_flex_message(store_data, competition_results, ranking):
     }
     style = channel_styles.get(kenh, {"bg": "#006c83", "text": "#FFFFFF"})
     
-    # --- CÁC BIẾN MÀU SẮC MỚI ---
-    TEXT_COLOR = "#000000" # Chữ đen
-    SEPARATOR_COLOR = "#EEEEEE" # Kẻ xám nhạt
+    TEXT_COLOR = "#000000"
+    SEPARATOR_COLOR = "#EEEEEE"
     
     sold_components = []
     for item in sold_items:
@@ -300,7 +291,6 @@ def create_leaderboard_flex_message(all_data, cluster_name=None):
         text_color_body = "#000000"
         separator_color = "#EEEEEE"
 
-        # --- CẬP NHẬT: THÊM MÀU NỀN VÀ ĐỔI MÀU CHỮ CHO HÀNG TIÊU ĐỀ ---
         table_header = {"type": "box", "layout": "horizontal", "margin": "md", "paddingAll": "sm", "backgroundColor": header_bg_color, "cornerRadius": "md", "contents": [
             {"type": "text", "text": "STT", "weight": "bold", "size": "sm", "color": header_text_color, "flex": 1, "align": "center", "gravity":"center"},
             {"type": "separator", "color": separator_color},
@@ -334,7 +324,6 @@ def create_leaderboard_flex_message(all_data, cluster_name=None):
             "body": { "type": "box", "layout": "vertical", "contents": rows, "paddingAll":"lg", "backgroundColor": body_bg_color }
         }
 
-    # --- CẬP NHẬT: THÊM ICON CUP VÀO TIÊU ĐỀ BXH CỤM ---
     if cluster_name:
         dmx_title = f"🏆 BXH CỤM {cluster_name.upper()} - ĐMX 🏆"
         tgdd_title = f"🏆 BXH CỤM {cluster_name.upper()} - TGDD 🏆"
@@ -363,38 +352,85 @@ def callback():
 # --- ROUTE MỚI ĐỂ PING GIỮ "THỨC" ---
 @app.route("/ping")
 def ping():
-    """
-    Route này chỉ trả về 'OK' để xác nhận ứng dụng đang chạy.
-    Nó được sử dụng bởi chức năng keep-alive.
-    """
     return "OK", 200
 
 # --- HÀM XỬ LÝ TIN NHẮN CHÍNH ---
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
     user_message = event.message.text.strip()
+    user_msg_upper = user_message.upper()
+
+    # TÍNH NĂNG 1: LẤY ID NHÓM CHAT
+    if user_msg_upper == 'ID':
+        if hasattr(event.source, 'group_id'):
+            group_id = event.source.group_id
+            reply_text = f'ID của nhóm này là:\n{group_id}'
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text=reply_text)
+            )
+        else:
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text='Lệnh này chỉ có thể sử dụng trong nhóm chat.')
+            )
+        return
+
     try:
         sheet = CLIENT.open(SHEET_NAME).worksheet(WORKSHEET_NAME)
         all_data = sheet.get_all_values()
         reply_messages = []
-        user_msg_upper = user_message.upper()
         cluster_names = {row[0].strip().upper() for row in all_data[1:] if len(row) > 0 and row[0]}
+        header_row = all_data[0]
+        
+        # TÍNH NĂNG 2: BÁO CÁO KẾT HỢP "ST [MÃ]"
+        if user_msg_upper.startswith('ST '):
+            supermarket_code = user_message[3:].strip()
+            found_row = None
+            for row in all_data[1:]:
+                if row and len(row) > 2 and row[2]:
+                    cell_content = row[2].strip()
+                    if cell_content.split(' ')[0] == supermarket_code:
+                        found_row = row
+                        break
+            if found_row:
+                # 1. Tạo báo cáo doanh thu
+                ranking = calculate_ranking(all_data, found_row)
+                competition_results = parse_competition_data(header_row, found_row)
+                flex_message = create_flex_message(found_row, competition_results, ranking)
+                reply_messages.append(FlexSendMessage(alt_text=f'Báo cáo ST {supermarket_code}', contents=flex_message['contents']))
+                summary_message = create_summary_text_message(found_row, competition_results)
+                if summary_message:
+                    reply_messages.append(summary_message)
+                # 2. Tạo BXH cụm
+                cluster_name = (found_row[0] or "").strip().upper()
+                if cluster_name and cluster_name in cluster_names:
+                    list_of_flex_messages = create_leaderboard_flex_message(all_data, cluster_name=cluster_name)
+                    for flex_data in list_of_flex_messages:
+                        reply_messages.append(FlexSendMessage(alt_text=flex_data['altText'], contents=flex_data['contents']))
+                else:
+                    reply_messages.append(TextSendMessage(text=f'Không tìm thấy dữ liệu BXH cho cụm của siêu thị {supermarket_code}'))
 
-        if user_msg_upper == 'BXH':
+            else:
+                reply_messages.append(TextSendMessage(text=f'Không tìm thấy dữ liệu cho mã siêu thị: {supermarket_code}'))
+
+        # CÁC LỆNH CŨ
+        elif user_msg_upper == 'BXH':
             list_of_flex_messages = create_leaderboard_flex_message(all_data)
             for flex_data in list_of_flex_messages:
                 reply_messages.append(FlexSendMessage(alt_text=flex_data['altText'], contents=flex_data['contents']))
+        
         elif user_msg_upper in cluster_names:
             list_of_flex_messages = create_leaderboard_flex_message(all_data, cluster_name=user_msg_upper)
             for flex_data in list_of_flex_messages:
                 reply_messages.append(FlexSendMessage(alt_text=flex_data['altText'], contents=flex_data['contents']))
-        else:
-            header_row, found_row = all_data[0], None
+        
+        else: # Tìm kiếm mặc định theo mã ST
+            found_row = None
             for row in all_data[1:]:
                 if row and len(row) > 2 and row[2]:
                     cell_content = row[2].strip()
-                    supermarket_code_parts = cell_content.split(' ')
-                    if supermarket_code_parts and supermarket_code_parts[0] == user_message:
+                    if cell_content.split(' ')[0] == user_message:
                         found_row = row
                         break
             if found_row:
@@ -406,7 +442,7 @@ def handle_message(event):
                 if summary_message:
                     reply_messages.append(summary_message)
             else:
-                reply_messages.append(TextSendMessage(text=f'Không tìm thấy dữ liệu cho mã siêu thị hoặc cụm: {user_message}'))
+                reply_messages.append(TextSendMessage(text=f'Không tìm thấy dữ liệu cho mã siêu thị hoặc cụm: "{user_message}"'))
         
         if reply_messages:
             line_bot_api.reply_message(event.reply_token, reply_messages)
@@ -419,3 +455,4 @@ def handle_message(event):
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port)
+
