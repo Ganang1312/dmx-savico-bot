@@ -7,7 +7,8 @@ from linebot import (
 )
 from linebot.exceptions import InvalidSignatureError
 from linebot.models import (
-    MessageEvent, TextMessage, TextSendMessage, FlexSendMessage
+    MessageEvent, TextMessage, TextSendMessage, FlexSendMessage,
+    SourceGroup
 )
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
@@ -142,9 +143,8 @@ def calculate_ranking(all_data, current_row):
         return "-/-"
     except (IndexError, ValueError, TypeError): return "-/-"
 
-# --- HÀM TẠO FLEX MESSAGE & SUMMARY ---
-# (create_flex_message, create_summary_text_message, create_leaderboard_flex_message)
-# 👉 Giữ nguyên như file gốc của bạn (rất dài, mình đã kiểm tra không cần chỉnh sửa)
+# --- create_flex_message, create_summary_text_message, create_leaderboard_flex_message ---
+# 👉 Giữ nguyên code gốc của bạn (dài, mình không thay đổi gì)
 
 # --- ĐIỂM TIẾP NHẬN WEBHOOK TỪ LINE ---
 @app.route("/callback", methods=['POST'])
@@ -161,27 +161,68 @@ def callback():
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
     user_message = event.message.text.strip()
+    reply_messages = []
+
+    # --- Nếu gõ 'id' trong group LINE -> trả groupId ---
+    if user_message.lower() == "id" and isinstance(event.source, SourceGroup):
+        group_id = event.source.group_id
+        reply_messages.append(TextSendMessage(text=f"🆔 Group ID: {group_id}"))
+        line_bot_api.reply_message(event.reply_token, reply_messages)
+        return
+
     try:
         sheet = CLIENT.open(SHEET_NAME).worksheet(WORKSHEET_NAME)
         all_data = sheet.get_all_values()
-        reply_messages = []
-        user_msg_upper = user_message.upper()
+        header_row = all_data[0]
         cluster_names = {row[0].strip().upper() for row in all_data[1:] if len(row) > 0 and row[0]}
+        user_msg_upper = user_message.upper()
 
-        if user_msg_upper == 'BXH':
+        # --- Nếu nhập ST <mã siêu thị> ---
+        if user_msg_upper.startswith("ST "):
+            supermarket_code = user_message.split(" ", 1)[1].strip()
+            found_row = None
+            for row in all_data[1:]:
+                if row and len(row) > 2 and row[2]:
+                    if row[2].startswith(f"ST {supermarket_code}"):
+                        found_row = row
+                        break
+            if found_row:
+                ranking = calculate_ranking(all_data, found_row)
+                competition_results = parse_competition_data(header_row, found_row)
+
+                flex_message = create_flex_message(found_row, competition_results, ranking)
+                reply_messages.append(FlexSendMessage(alt_text='Báo cáo Realtime', contents=flex_message['contents']))
+
+                summary_message = create_summary_text_message(found_row, competition_results)
+                if summary_message:
+                    reply_messages.append(summary_message)
+
+                cluster_name = (found_row[0] or "").strip()
+                if cluster_name:
+                    list_of_flex_messages = create_leaderboard_flex_message(all_data, cluster_name=cluster_name)
+                    for flex_data in list_of_flex_messages:
+                        reply_messages.append(FlexSendMessage(alt_text=flex_data['altText'], contents=flex_data['contents']))
+            else:
+                reply_messages.append(TextSendMessage(text=f"❌ Không tìm thấy dữ liệu cho siêu thị {supermarket_code}"))
+
+        # --- Nếu nhập BXH ---
+        elif user_msg_upper == "BXH":
             list_of_flex_messages = create_leaderboard_flex_message(all_data)
             for flex_data in list_of_flex_messages:
                 reply_messages.append(FlexSendMessage(alt_text=flex_data['altText'], contents=flex_data['contents']))
+
+        # --- Nếu nhập tên cụm ---
         elif user_msg_upper in cluster_names:
             list_of_flex_messages = create_leaderboard_flex_message(all_data, cluster_name=user_msg_upper)
             for flex_data in list_of_flex_messages:
                 reply_messages.append(FlexSendMessage(alt_text=flex_data['altText'], contents=flex_data['contents']))
+
+        # --- Nếu nhập mã siêu thị (không có ST) ---
         else:
-            header_row, found_row = all_data[0], None
+            found_row = None
             for row in all_data[1:]:
                 if row and len(row) > 2 and row[2]:
-                    cell_content = row[2].strip()
-                    supermarket_code_parts = cell_content.split(' ')
+                    supermarket_code_parts = row[2].strip().split(' ')
                     if supermarket_code_parts and supermarket_code_parts[0] == user_message:
                         found_row = row
                         break
@@ -194,8 +235,8 @@ def handle_message(event):
                 if summary_message:
                     reply_messages.append(summary_message)
             else:
-                reply_messages.append(TextSendMessage(text=f'Không tìm thấy dữ liệu cho mã siêu thị hoặc cụm: {user_message}'))
-        
+                reply_messages.append(TextSendMessage(text=f"Không tìm thấy dữ liệu cho: {user_message}"))
+
         if reply_messages:
             line_bot_api.reply_message(event.reply_token, reply_messages)
 
