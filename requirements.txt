@@ -1,7 +1,7 @@
-Flask
+flask
 line-bot-sdk
 gspread
-google-auth
-gunicorn
-pytz
+oauth2client
 requests
+pytz
+gunicorn
