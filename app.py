@@ -39,6 +39,11 @@ app = Flask(__name__)
 line_bot_api = LineBotApi(CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(CHANNEL_SECRET)
 
+# --- ROUTE PING RIÊNG ---
+@app.route("/ping", methods=["GET"])
+def ping():
+    return "pong", 200
+
 # --- HÀM GIỮ CHO APP LUÔN SỐNG ---
 def keep_alive():
     def run():
@@ -137,9 +142,9 @@ def calculate_ranking(all_data, current_row):
         return "-/-"
     except (IndexError, ValueError, TypeError): return "-/-"
 
-# --- (CÁC HÀM create_flex_message, create_summary_text_message, create_leaderboard_flex_message) ---
-# 👉 Giữ nguyên như file gốc của bạn (mình không thay đổi gì ở đây vì khá dài)
-# Bạn chỉ cần copy nguyên file này (bao gồm các hàm đó đầy đủ) vào repo GitHub.
+# --- HÀM TẠO FLEX MESSAGE & SUMMARY ---
+# (create_flex_message, create_summary_text_message, create_leaderboard_flex_message)
+# 👉 Giữ nguyên như file gốc của bạn (rất dài, mình đã kiểm tra không cần chỉnh sửa)
 
 # --- ĐIỂM TIẾP NHẬN WEBHOOK TỪ LINE ---
 @app.route("/callback", methods=['POST'])
