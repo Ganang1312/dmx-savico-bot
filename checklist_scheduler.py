@@ -1,11 +1,11 @@
-# checklist_scheduler.py (PHIÊN BẢN CẬP NHẬT)
+# checklist_scheduler.py
 
 import os
 import sys
 from linebot import LineBotApi
 from linebot.models import FlexSendMessage
 
-# --- Import các hàm mới từ flex_handler ---
+# Import các hàm cần thiết từ flex_handler
 from flex_handler import initialize_daily_tasks, generate_checklist_flex
 
 # --- Cấu hình ---
@@ -18,6 +18,9 @@ if not all([CHANNEL_ACCESS_TOKEN, CHECKLIST_GROUP_ID]):
 line_bot_api = LineBotApi(CHANNEL_ACCESS_TOKEN)
 
 def send_initial_checklist(shift_type):
+    """
+    Hàm được kích hoạt bởi webhook để bắt đầu checklist hàng ngày.
+    """
     try:
         # 1. Reset và khởi tạo công việc trong Google Sheet
         initialize_daily_tasks(CHECKLIST_GROUP_ID, shift_type)
