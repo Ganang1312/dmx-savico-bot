@@ -367,7 +367,7 @@ def handle_message(event):
     # --- KIỂM TRA QUYỀN TRUY CẬP ---
     is_controlled = bool(allowed_ids_cache) and ADMIN_USER_ID
     if is_controlled and source_id not in allowed_ids_cache:
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text='Bạn không có quyền sử dụng bot này. Vui lòng liên hệ quản trị viên.'))
+        # Im lặng nếu không có quyền, thay vì gửi tin nhắn
         return
 
     # --- CÁC LỆNH CHO NGƯỜI DÙNG ĐÃ ĐƯỢC CẤP QUYỀN ---
@@ -411,8 +411,10 @@ def handle_message(event):
                 summary_message = create_summary_text_message(found_row, competition_results)
                 if summary_message:
                     reply_messages.append(summary_message)
-            else:
-                reply_messages.append(TextSendMessage(text=f'Không tìm thấy dữ liệu cho mã siêu thị hoặc cụm: "{user_message}"'))
+            # << THAY ĐỔI QUAN TRỌNG >>
+            # else:
+            #     reply_messages.append(TextSendMessage(text=f'Không tìm thấy dữ liệu cho mã siêu thị hoặc cụm: "{user_message}"'))
+            # Dòng trên đã bị xóa. Nếu không tìm thấy gì, bot sẽ không thêm tin nhắn nào vào danh sách trả lời.
         
         if reply_messages:
             line_bot_api.reply_message(event.reply_token, reply_messages)
@@ -425,4 +427,3 @@ def handle_message(event):
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port)
-
