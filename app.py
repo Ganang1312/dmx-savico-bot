@@ -7,7 +7,6 @@ import time
 import requests
 from datetime import datetime
 import pytz
-import atexit
 
 from flask import Flask, request, abort
 from linebot import (
@@ -22,39 +21,17 @@ from apscheduler.schedulers.background import BackgroundScheduler
 
 # --- IMPORT TỪ CÁC FILE KHÁC CỦA BẠN ---
 # File cấu hình trung tâm để tránh lỗi circular import
-# Giả sử các file này tồn tại và được cấu hình đúng
-# from config import CLIENT, SHEET_NAME, WORKSHEET_NAME_USERS, WORKSHEET_TRACKER_NAME, WORKSHEET_NAME
-# from flex_handler import generate_checklist_flex, initialize_daily_tasks
-# from checklist_scheduler import send_initial_checklist
-
-# Do không có các file trên, một số chức năng liên quan sẽ được comment out hoặc giả lập.
-# Vui lòng bỏ comment khi tích hợp vào dự án của bạn.
-# --- PHẦN GIẢ LẬP CONFIG (XÓA KHI TÍCH HỢP) ---
-class FakeGspreadClient:
-    def open(self, name): return self
-    def worksheet(self, name): return self
-    def get_all_values(self): return [[]]
-    def get_all_records(self): return []
-    def col_values(self, col): return []
-    def findall(self, val): return []
-    def row_values(self, row): return []
-    def update_cell(self, r, c, v): pass
-CLIENT = FakeGspreadClient()
-SHEET_NAME = "YourSheetName"
-WORKSHEET_NAME_USERS = "Users"
-WORKSHEET_TRACKER_NAME = "Tracker"
-WORKSHEET_NAME = "RealtimeData"
-def generate_checklist_flex(group_id, shift_type): return None
-def initialize_daily_tasks(group_id, shift_type): pass
-def send_initial_checklist(shift): pass
-# --- KẾT THÚC PHẦN GIẢ LẬP ---
-
+from config import CLIENT, SHEET_NAME, WORKSHEET_NAME_USERS, WORKSHEET_TRACKER_NAME, WORKSHEET_NAME
+# File xử lý giao diện và logic của checklist
+from flex_handler import generate_checklist_flex, initialize_daily_tasks
+# File chứa hàm kích hoạt checklist từ webhook
+from checklist_scheduler import send_initial_checklist
 
 # --- PHẦN CẤU HÌNH: ĐỌC TỪ BIẾN MÔI TRƯỜNG ---
-CHANNEL_ACCESS_TOKEN = os.environ.get('CHANNEL_ACCESS_TOKEN', 'YOUR_CHANNEL_ACCESS_TOKEN')
-CHANNEL_SECRET = os.environ.get('CHANNEL_SECRET', 'YOUR_CHANNEL_SECRET')
-ADMIN_USER_ID = os.environ.get('ADMIN_USER_ID', 'YOUR_ADMIN_ID')
-CRON_SECRET_KEY = os.environ.get('CRON_SECRET_KEY', 'YOUR_CRON_SECRET')
+CHANNEL_ACCESS_TOKEN = os.environ.get('CHANNEL_ACCESS_TOKEN')
+CHANNEL_SECRET = os.environ.get('CHANNEL_SECRET')
+ADMIN_USER_ID = os.environ.get('ADMIN_USER_ID')
+CRON_SECRET_KEY = os.environ.get('CRON_SECRET_KEY')
 
 if not all([CHANNEL_ACCESS_TOKEN, CHANNEL_SECRET]):
     raise ValueError("Lỗi: Hãy kiểm tra lại các biến môi trường trên Render.")
@@ -134,8 +111,8 @@ def reminder_job():
                     for cell in cell_list:
                         row_values = sheet.row_values(cell.row)
                         if str(row_values[0]) == group_id and row_values[1] == today_str:
-                                sheet.update_cell(cell.row, 7, now.isoformat())
-                                break
+                             sheet.update_cell(cell.row, 7, now.isoformat())
+                             break
     except Exception as e:
         print(f"Lỗi trong reminder_job: {e}")
 
@@ -305,11 +282,14 @@ def create_summary_text_message(store_data, competition_results):
         return None
 
 def create_leaderboard_flex_message(all_data, cluster_name=None, channel_filter=None):
-    dmx_channels = ['ĐML', 'ĐMM', 'ĐMS']; tgdd_channels = ['TGD', 'AAR']
+    dmx_channels = ['ĐML', 'ĐMM', 'ĐMS']
+    tgdd_channels = ['TGD', 'AAR']
     dmx_stores, tgdd_stores = [], []
+    
     data_to_process = all_data[1:]
     if cluster_name:
         data_to_process = [row for row in data_to_process if len(row) > 0 and row[0] and row[0].strip().upper() == cluster_name.strip().upper()]
+
     for row in data_to_process:
         try:
             kenh = (row[1] or "").strip()
@@ -318,9 +298,13 @@ def create_leaderboard_flex_message(all_data, cluster_name=None, channel_filter=
             if kenh in dmx_channels: dmx_stores.append(store_info)
             elif kenh in tgdd_channels: tgdd_stores.append(store_info)
         except (IndexError, ValueError, TypeError): continue
+
     dmx_stores.sort(key=lambda x: x['doanh_thu'], reverse=True)
     tgdd_stores.sort(key=lambda x: x['doanh_thu'], reverse=True)
-    if not cluster_name: dmx_stores, tgdd_stores = dmx_stores[:20], tgdd_stores[:20]
+
+    if not cluster_name:
+        dmx_stores, tgdd_stores = dmx_stores[:20], tgdd_stores[:20]
+
     def build_leaderboard_bubble(title, stores, header_bg_color, header_text_color):
         header = {"type": "box", "layout": "vertical", "backgroundColor": header_bg_color, "paddingAll": "lg", "contents": [{"type": "text", "text": title, "weight": "bold", "size": "xl", "color": header_text_color, "align": "center", "wrap": True}]}
         body_bg_color, text_color_body, separator_color = "#FFFFFF", "#000000", "#EEEEEE"
@@ -333,16 +317,32 @@ def create_leaderboard_flex_message(all_data, cluster_name=None, channel_filter=
             rows.append(row_component)
             if i < len(stores) -1: rows.append({"type": "separator", "margin": "sm", "color": separator_color})
         return {"type": "bubble", "size": "giga", "header": header, "body": { "type": "box", "layout": "vertical", "contents": rows, "paddingAll":"lg", "backgroundColor": body_bg_color }}
-    if cluster_name: dmx_title, tgdd_title = f"🏆 BXH CỤM {cluster_name.upper()} - ĐMX 🏆", f"🏆 BXH CỤM {cluster_name.upper()} - TGDD 🏆"
-    else: dmx_title, tgdd_title = "🏆 REALTIME TOP 20 ĐMX 🏆", "🏆 REALTIME TOP 20 TGDD 🏆"
+
+    if cluster_name:
+        dmx_title = f"🏆 BXH CỤM {cluster_name.upper()} - ĐMX 🏆"
+        tgdd_title = f"🏆 BXH CỤM {cluster_name.upper()} - TGDD 🏆"
+    else:
+        dmx_title = "🏆 REALTIME TOP 20 ĐMX 🏆"
+        tgdd_title = "🏆 REALTIME TOP 20 TGDD 🏆"
+    
     messages_to_return = []
     
-    # Sửa đổi logic để xử lý channel_filter
-    if not channel_filter or any(c in channel_filter for c in dmx_channels):
-        if dmx_stores: messages_to_return.append({ "type": "flex", "altText": dmx_title, "contents": build_leaderboard_bubble(dmx_title, dmx_stores, "#1E88E5", "#FFFFFF") })
-    
-    if not channel_filter or any(c in channel_filter for c in tgdd_channels):
-        if tgdd_stores: messages_to_return.append({ "type": "flex", "altText": tgdd_title, "contents": build_leaderboard_bubble(tgdd_title, tgdd_stores, "#FDD835", "#000000") })
+    # Logic xác định bảng xếp hạng nào cần hiển thị
+    show_dmx, show_tgdd = False, False
+    if channel_filter is None: # Lệnh BXH
+        show_dmx, show_tgdd = True, True
+    elif channel_filter == 'dmx': # Lệnh BXH1
+        show_dmx = True
+    elif channel_filter == 'tgdd': # Lệnh BXH2
+        show_tgdd = True
+    else: # Lọc cho báo cáo của một siêu thị cụ thể
+        if channel_filter in dmx_channels: show_dmx = True
+        if channel_filter in tgdd_channels: show_tgdd = True
+
+    if show_dmx and dmx_stores:
+        messages_to_return.append({ "type": "flex", "altText": dmx_title, "contents": build_leaderboard_bubble(dmx_title, dmx_stores, "#1E88E5", "#FFFFFF") })
+    if show_tgdd and tgdd_stores:
+        messages_to_return.append({ "type": "flex", "altText": tgdd_title, "contents": build_leaderboard_bubble(tgdd_title, tgdd_stores, "#FDD835", "#000000") })
         
     return messages_to_return
 
@@ -356,10 +356,6 @@ if 'RENDER' in os.environ:
 scheduler = BackgroundScheduler(daemon=True, timezone='Asia/Ho_Chi_Minh')
 scheduler.add_job(reminder_job, 'interval', minutes=10)
 scheduler.start()
-
-# Đăng ký hàm shutdown để được gọi khi ứng dụng thoát, giúp dọn dẹp scheduler
-atexit.register(lambda: scheduler.shutdown())
-
 
 # --- ĐIỂM TIẾP NHẬN (ROUTES) ---
 @app.route("/trigger-checklist", methods=['POST'])
@@ -409,16 +405,16 @@ def process_task_completion(group_id, task_id, shift_type):
         cell_list = sheet.findall(task_id)
         target_row = -1
         for cell in cell_list:
-            row_values = sheet.row_values(cell.row)
-            if str(row_values[0]) == group_id and row_values[1] == today_str:
-                target_row = cell.row
-                break
+             row_values = sheet.row_values(cell.row)
+             if str(row_values[0]) == group_id and row_values[1] == today_str:
+                 target_row = cell.row
+                 break
         
         if target_row != -1:
             sheet.update_cell(target_row, 6, 'complete')
             print(f"Đã cập nhật task {task_id} thành 'complete' trong Google Sheet.")
         else:
-            print(f"Không tìm thấy task {task_id} để cập nhật.")
+             print(f"Không tìm thấy task {task_id} để cập nhật.")
 
         new_flex_message = generate_checklist_flex(group_id, shift_type)
         if new_flex_message:
@@ -451,29 +447,6 @@ def handle_message(event):
     user_msg_upper = user_message.upper()
     user_id = event.source.user_id
     source_id = event.source.group_id if event.source.type == 'group' else user_id
-
-    # --- LỆNH MỚI: HIỂN THỊ MENU HƯỚNG DẪN ---
-    if user_msg_upper == 'MENU BOT':
-        menu_text = """📚 MENU HƯỚNG DẪN BOT 📚
----------------------------------
-📌 BÁO CÁO REALTIME:
-- Gõ mã siêu thị (vd: `32859`) để xem báo cáo chi tiết.
-- Gõ `ST` + mã siêu thị (vd: `ST 32859`) để xem báo cáo và BXH cùng kênh trong cụm.
-- Gõ tên cụm (vd: `HCM1`) để xem BXH của cụm đó.
-- `bxh`: Xem Top 20 của cả ĐMX và TGDD.
-- `bxh1`: Chỉ xem Top 20 của ĐMX.
-- `bxh2`: Chỉ xem Top 20 của TGDD.
-
-📌 CHECKLIST CÔNG VIỆC:
-- `Test Sang` / `Reset Sang`: Tạo checklist ca sáng.
-- `Test Chieu` / `Reset Chieu`: Tạo checklist ca chiều.
-
-📌 TIỆN ÍCH KHÁC:
-- `ID`: Lấy ID của bạn và ID của nhóm chat.
-- `Menu Bot`: Xem lại hướng dẫn này.
-"""
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=menu_text))
-        return
 
     if user_msg_upper == 'ID':
         reply_text = f'User ID của bạn là:\n{user_id}'
@@ -535,14 +508,8 @@ def handle_message(event):
                 cluster_name = (found_row[0] or "").strip().upper()
                 store_channel = (found_row[1] or "").strip()
                 if cluster_name in cluster_names:
-                    # Lọc BXH chỉ cho kênh của siêu thị đó (ĐMX hoặc TGDĐ)
-                    dmx_channels = ['ĐML', 'ĐMM', 'ĐMS']
-                    tgdd_channels = ['TGD', 'AAR']
-                    channel_to_show = dmx_channels if store_channel in dmx_channels else (tgdd_channels if store_channel in tgdd_channels else [])
-                    
-                    if channel_to_show:
-                        for flex_data in create_leaderboard_flex_message(all_data, cluster_name=cluster_name, channel_filter=channel_to_show):
-                            reply_messages.append(FlexSendMessage(alt_text=flex_data['altText'], contents=flex_data['contents']))
+                    for flex_data in create_leaderboard_flex_message(all_data, cluster_name=cluster_name, channel_filter=store_channel):
+                        reply_messages.append(FlexSendMessage(alt_text=flex_data['altText'], contents=flex_data['contents']))
             else:
                 reply_messages.append(TextSendMessage(text=f'Không tìm thấy dữ liệu cho mã siêu thị: {supermarket_code}'))
 
@@ -550,17 +517,35 @@ def handle_message(event):
             for flex_data in create_leaderboard_flex_message(all_data):
                 reply_messages.append(FlexSendMessage(alt_text=flex_data['altText'], contents=flex_data['contents']))
         
-        # --- LỆNH MỚI: BXH1 VÀ BXH2 ---
         elif user_msg_upper == 'BXH1':
-            dmx_channels = ['ĐML', 'ĐMM', 'ĐMS']
-            for flex_data in create_leaderboard_flex_message(all_data, channel_filter=dmx_channels):
+            for flex_data in create_leaderboard_flex_message(all_data, channel_filter='dmx'):
                 reply_messages.append(FlexSendMessage(alt_text=flex_data['altText'], contents=flex_data['contents']))
-        
+
         elif user_msg_upper == 'BXH2':
-            tgdd_channels = ['TGD', 'AAR']
-            for flex_data in create_leaderboard_flex_message(all_data, channel_filter=tgdd_channels):
+            for flex_data in create_leaderboard_flex_message(all_data, channel_filter='tgdd'):
                 reply_messages.append(FlexSendMessage(alt_text=flex_data['altText'], contents=flex_data['contents']))
-        
+
+        elif user_msg_upper == 'MENU BOT':
+            menu_text = (
+                "🤖 MENU HƯỚNG DẪN BOT 🤖\n"
+                "-------------------\n"
+                "✅ BÁO CÁO REALTIME:\n"
+                "• `ST [Mã ST]` - Xem báo cáo chi tiết.\n"
+                "  ↳ Ví dụ: `ST 12345`\n"
+                "• `[Tên Cụm]` - BXH doanh thu trong cụm.\n"
+                "  ↳ Ví dụ: `CHG`\n"
+                "• `BXH` - Top 20 ĐMX & TGDD.\n"
+                "• `BXH1` - Top 20 ĐMX.\n"
+                "• `BXH2` - Top 20 TGDD.\n"
+                "\n✅ CHECKLIST CÔNG VIỆC:\n"
+                "• `RESET SANG` - Bắt đầu checklist ca sáng.\n"
+                "• `RESET CHIEU` - Bắt đầu checklist ca chiều.\n"
+                "\n✅ TIỆN ÍCH KHÁC:\n"
+                "• `ID` - Lấy ID cá nhân & ID nhóm.\n"
+                "• `MENU BOT` - Hiển thị lại menu này."
+            )
+            reply_messages.append(TextSendMessage(text=menu_text))
+
         elif user_msg_upper in cluster_names:
             for flex_data in create_leaderboard_flex_message(all_data, cluster_name=user_msg_upper):
                 reply_messages.append(FlexSendMessage(alt_text=flex_data['altText'], contents=flex_data['contents']))
@@ -585,4 +570,3 @@ def handle_message(event):
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port)
-
