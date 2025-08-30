@@ -7,6 +7,7 @@ import time
 import requests
 from datetime import datetime
 import pytz
+import atexit
 
 from flask import Flask, request, abort
 from linebot import (
@@ -356,6 +357,10 @@ scheduler = BackgroundScheduler(daemon=True, timezone='Asia/Ho_Chi_Minh')
 scheduler.add_job(reminder_job, 'interval', minutes=10)
 scheduler.start()
 
+# Đăng ký hàm shutdown để được gọi khi ứng dụng thoát, giúp dọn dẹp scheduler
+atexit.register(lambda: scheduler.shutdown())
+
+
 # --- ĐIỂM TIẾP NHẬN (ROUTES) ---
 @app.route("/trigger-checklist", methods=['POST'])
 def trigger_checklist():
@@ -580,3 +585,4 @@ def handle_message(event):
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port)
+
