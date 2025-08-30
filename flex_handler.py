@@ -1,10 +1,9 @@
-# flex_handler.py (PHIÊN BẢN CẬP NHẬT)
+# flex_handler.py
 
 from datetime import datetime
 import pytz
-from app import CLIENT, SHEET_NAME
-
-WORKSHEET_TRACKER_NAME = 'task_tracker'
+# Thay đổi quan trọng: Import từ config.py
+from config import CLIENT, SHEET_NAME, WORKSHEET_TRACKER_NAME
 
 # --- Định nghĩa các công việc ---
 TASKS = {
@@ -31,7 +30,6 @@ TASKS = {
 def initialize_daily_tasks(group_id, shift_type):
     """
     Reset và khởi tạo lại danh sách công việc của một ca trong Google Sheet.
-    Hàm này sẽ xóa các task cũ của ca đó trong ngày trước khi thêm task mới.
     """
     print(f"Bắt đầu reset và khởi tạo công việc ca {shift_type} cho group {group_id}...")
     try:
@@ -39,35 +37,23 @@ def initialize_daily_tasks(group_id, shift_type):
         tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
         today_str = datetime.now(tz_vietnam).strftime('%Y-%m-%d')
         
-        # Lấy tất cả dữ liệu để xóa các dòng phù hợp
         all_records = sheet.get_all_records()
         rows_to_delete = []
         for i, record in enumerate(all_records):
             task_id = record.get('task_id', '')
-            if (record.get('group_id') == group_id and
+            if (str(record.get('group_id')) == group_id and
                 record.get('date') == today_str and
                 task_id.startswith(shift_type)):
-                # Gspread bắt đầu từ hàng 1, header là 1, nên dữ liệu bắt đầu từ hàng 2
                 rows_to_delete.append(i + 2)
 
-        # Xóa các dòng từ dưới lên để tránh lỗi chỉ mục
         if rows_to_delete:
             print(f"Tìm thấy {len(rows_to_delete)} công việc cũ, đang xóa...")
             for row_num in sorted(rows_to_delete, reverse=True):
                 sheet.delete_rows(row_num)
         
-        # Thêm các dòng công việc mới
         tasks_to_add = []
         for task in TASKS.get(shift_type, []):
-            new_row = [
-                group_id,
-                today_str,
-                task['id'],
-                task['name'],
-                task['time'],
-                'incomplete', # status
-                '' # last_reminded
-            ]
+            new_row = [group_id, today_str, task['id'], task['name'], task['time'], 'incomplete', '']
             tasks_to_add.append(new_row)
 
         if tasks_to_add:
@@ -79,7 +65,9 @@ def initialize_daily_tasks(group_id, shift_type):
         return False
 
 def get_tasks_status_from_sheet(group_id, shift_type):
-    # (Hàm này giữ nguyên, không thay đổi)
+    """
+    Lấy trạng thái công việc hiện tại của nhóm từ Google Sheet.
+    """
     try:
         sheet = CLIENT.open(SHEET_NAME).worksheet(WORKSHEET_TRACKER_NAME)
         tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
@@ -98,12 +86,11 @@ def get_tasks_status_from_sheet(group_id, shift_type):
         print(f"Lỗi khi lấy trạng thái công việc: {e}")
         return {}
 
-
 def generate_checklist_flex(group_id, shift_type):
-    # (Hàm này giữ nguyên, không thay đổi)
+    """
+    Tạo nội dung Flex Message dựa trên trạng thái công việc.
+    """
     task_statuses = get_tasks_status_from_sheet(group_id, shift_type)
-    
-    # Nếu không tìm thấy trạng thái (ví dụ: chưa khởi tạo), coi như incomplete
     if not task_statuses:
         task_statuses = {task['id']: 'incomplete' for task in TASKS.get(shift_type, [])}
 
@@ -120,16 +107,11 @@ def generate_checklist_flex(group_id, shift_type):
         button_label = "Đã xong" if is_complete else "Hoàn tất"
 
         task_component = {
-            "type": "box",
-            "layout": "horizontal",
-            "spacing": "md",
-            "alignItems": "center",
+            "type": "box", "layout": "horizontal", "spacing": "md", "alignItems": "center",
             "contents": [
                 { "type": "image", "url": icon_url, "size": "sm" },
                 {
-                    "type": "box",
-                    "layout": "vertical",
-                    "flex": 5,
+                    "type": "box", "layout": "vertical", "flex": 5,
                     "contents": [
                         { "type": "text", "text": task['name'], "wrap": True, "weight": "bold", "size": "md", "color": text_color, "decoration": text_decoration },
                         { "type": "text", "text": f"Deadline: {task['time']}", "size": "sm", "color": "#B2B2B2" }
@@ -147,9 +129,8 @@ def generate_checklist_flex(group_id, shift_type):
     flex_content = {
         "type": "bubble",
         "header": {
-            "type": "box", "layout": "vertical", "contents": [
-                { "type": "text", "text": title, "weight": "bold", "size": "xl", "color": "#FFFFFF" }
-            ],
+            "type": "box", "layout": "vertical",
+            "contents": [{"type": "text", "text": title, "weight": "bold", "size": "xl", "color": "#FFFFFF"}],
             "backgroundColor": "#0080ff" if shift_type == 'sang' else "#27406E"
         },
         "body": { "type": "box", "layout": "vertical", "spacing": "lg", "contents": task_components }
