@@ -20,15 +20,18 @@ import pandas as pd
 from apscheduler.schedulers.background import BackgroundScheduler
 
 # --- IMPORT TỪ CÁC FILE KHÁC CỦA BẠN ---
+# File cấu hình trung tâm để tránh lỗi circular import
 from config import CLIENT, SHEET_NAME, WORKSHEET_NAME_USERS, WORKSHEET_TRACKER_NAME
+# File xử lý giao diện và logic của checklist
 from flex_handler import generate_checklist_flex, initialize_daily_tasks
+# File chứa hàm kích hoạt checklist từ webhook
 from checklist_scheduler import send_initial_checklist
 
 # --- PHẦN CẤU HÌNH: ĐỌC TỪ BIẾN MÔI TRƯỜNG ---
 CHANNEL_ACCESS_TOKEN = os.environ.get('CHANNEL_ACCESS_TOKEN')
 CHANNEL_SECRET = os.environ.get('CHANNEL_SECRET')
 ADMIN_USER_ID = os.environ.get('ADMIN_USER_ID')
-CRON_SECRET_KEY = os.environ.get('CRON_SECRET_KEY') # Chìa khóa bí mật cho webhook
+CRON_SECRET_KEY = os.environ.get('CRON_SECRET_KEY')
 
 if not all([CHANNEL_ACCESS_TOKEN, CHANNEL_SECRET]):
     raise ValueError("Lỗi: Hãy kiểm tra lại các biến môi trường trên Render.")
@@ -60,12 +63,13 @@ def keep_alive():
         return
     while True:
         try:
-            requests.get(ping_url + "/ping", timeout=10)
+            # Thêm /ping vào cuối URL để gọi đúng route
+            requests.get(ping_url.rstrip('/') + "/ping", timeout=10)
         except requests.exceptions.RequestException as e:
             print(f"Lỗi khi ping: {e}")
-        time.sleep(600) # Ping mỗi 10 phút
+        time.sleep(600)
 
-# --- LOGIC NHẮC NHỞ TỰ ĐỘNG (SCHEDULER) ---
+# --- LOGIC NHẮC NHỞ TỰ ĐỘNG ---
 def reminder_job():
     print("Scheduler: Đang chạy kiểm tra nhắc nhở...")
     try:
@@ -93,7 +97,7 @@ def reminder_job():
                     should_remind = True
                 else:
                     last_reminded_dt = datetime.fromisoformat(last_reminded_str)
-                    if (now - last_reminded_dt).total_seconds() > 600: # Nhắc lại sau 10 phút
+                    if (now - last_reminded_dt).total_seconds() > 600:
                         should_remind = True
                 
                 if should_remind:
@@ -112,7 +116,7 @@ def reminder_job():
     except Exception as e:
         print(f"Lỗi trong reminder_job: {e}")
 
-# --- CÁC HÀM XỬ LÝ DỮ LIỆU BÁO CÁO (TỪ FILE GỐC CỦA BẠN) ---
+# --- CÁC HÀM XỬ LÝ DỮ LIỆU BÁO CÁO ---
 def parse_float_from_string(s):
     if s is None: return 0.0
     if not isinstance(s, str): s = str(s)
@@ -362,6 +366,37 @@ def callback():
 def ping():
     return "OK", 200
 
+# --- TỐI ƯU HÓA XỬ LÝ NÚT BẤM ---
+def process_task_completion(group_id, task_id, shift_type):
+    """Hàm chạy trong luồng riêng để không làm chậm phản hồi webhook."""
+    try:
+        sheet = CLIENT.open(SHEET_NAME).worksheet(WORKSHEET_TRACKER_NAME)
+        tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
+        today_str = datetime.now(tz_vietnam).strftime('%Y-%m-%d')
+        
+        cell_list = sheet.findall(task_id)
+        target_row = -1
+        for cell in cell_list:
+             row_values = sheet.row_values(cell.row)
+             if str(row_values[0]) == group_id and row_values[1] == today_str:
+                 target_row = cell.row
+                 break
+        
+        if target_row != -1:
+            sheet.update_cell(target_row, 6, 'complete')
+            print(f"Đã cập nhật task {task_id} thành 'complete' trong Google Sheet.")
+        else:
+             print(f"Không tìm thấy task {task_id} để cập nhật.")
+
+        new_flex_message = generate_checklist_flex(group_id, shift_type)
+        if new_flex_message:
+            line_bot_api.push_message(
+                group_id,
+                FlexSendMessage(alt_text=f"Cập nhật checklist ca {shift_type}", contents=new_flex_message)
+            )
+    except Exception as e:
+        print(f"Lỗi trong luồng xử lý task: {e}")
+
 # --- BỘ XỬ LÝ SỰ KIỆN (HANDLERS) ---
 @handler.add(PostbackEvent)
 def handle_postback(event):
@@ -373,34 +408,11 @@ def handle_postback(event):
     if action == 'complete_task':
         task_id = params.get('task_id')
         shift_type = params.get('shift')
-        print(f"Nhận yêu cầu hoàn tất task: {task_id} từ group: {group_id}")
-        try:
-            sheet = CLIENT.open(SHEET_NAME).worksheet(WORKSHEET_TRACKER_NAME)
-            tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
-            today_str = datetime.now(tz_vietnam).strftime('%Y-%m-%d')
-            
-            cell_list = sheet.findall(task_id)
-            target_row = -1
-            for cell in cell_list:
-                 row_values = sheet.row_values(cell.row)
-                 if str(row_values[0]) == group_id and row_values[1] == today_str:
-                     target_row = cell.row
-                     break
-            
-            if target_row != -1:
-                sheet.update_cell(target_row, 6, 'complete')
-                print(f"Đã cập nhật task {task_id} thành 'complete' trong Google Sheet.")
-            else:
-                 print(f"Không tìm thấy task {task_id} để cập nhật.")
-
-            new_flex_message = generate_checklist_flex(group_id, shift_type)
-            if new_flex_message:
-                line_bot_api.push_message(
-                    group_id,
-                    FlexSendMessage(alt_text=f"Cập nhật checklist ca {shift_type}", contents=new_flex_message)
-                )
-        except Exception as e:
-            print(f"Lỗi khi xử lý postback: {e}")
+        print(f"Nhận yêu cầu hoàn tất task: {task_id} từ group: {group_id}. Bắt đầu xử lý trong nền.")
+        
+        # Chạy tác vụ nặng trong luồng riêng để phản hồi ngay lập tức
+        task_thread = threading.Thread(target=process_task_completion, args=(group_id, task_id, shift_type))
+        task_thread.start()
 
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
@@ -451,9 +463,8 @@ def handle_message(event):
         print(f"Từ chối truy cập từ source_id: {source_id} vì không có trong danh sách cho phép.")
         return
 
-    # --- XỬ LÝ LOGIC BÁO CÁO REALTIME (CODE GỐC CỦA BẠN) ---
+    # --- XỬ LÝ LOGIC BÁO CÁO REALTIME ---
     try:
-        # Cần import WORKSHEET_NAME từ config
         from config import WORKSHEET_NAME
         sheet = CLIENT.open(SHEET_NAME).worksheet(WORKSHEET_NAME)
         all_data = sheet.get_all_values()
@@ -493,13 +504,12 @@ def handle_message(event):
                 summary_message = create_summary_text_message(found_row, competition_results)
                 if summary_message:
                     reply_messages.append(summary_message)
-
+        
         if reply_messages:
             line_bot_api.reply_message(event.reply_token, reply_messages)
 
     except Exception as e:
         print(f"!!! GẶP LỖI NGHIÊM TRỌNG (BÁO CÁO): {repr(e)}")
-        # line_bot_api.reply_message(event.reply_token, TextSendMessage(text='Đã có lỗi xảy ra khi truy vấn dữ liệu.'))
 
 # --- CHẠY ỨNG DỤNG ---
 if __name__ == "__main__":
