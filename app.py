@@ -1,5 +1,3 @@
-# app.py (PHIÊN BẢN HOÀN CHỈNH CUỐI CÙNG)
-
 import os
 import json
 import collections
@@ -18,39 +16,23 @@ from linebot.exceptions import InvalidSignatureError
 from linebot.models import (
     MessageEvent, TextMessage, TextSendMessage, FlexSendMessage, PostbackEvent
 )
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
 import pandas as pd
 from apscheduler.schedulers.background import BackgroundScheduler
 
 # --- IMPORT TỪ CÁC FILE KHÁC CỦA BẠN ---
-# Các hàm này chứa logic tạo Flex Message và quản lý công việc
+# Thay đổi quan trọng: Import cấu hình từ file config.py
+from config import CLIENT, SHEET_NAME, WORKSHEET_NAME_USERS, WORKSHEET_TRACKER_NAME
 from flex_handler import generate_checklist_flex, initialize_daily_tasks
-# Hàm này dùng cho webhook để kích hoạt checklist từ bên ngoài
 from checklist_scheduler import send_initial_checklist
 
 # --- PHẦN CẤU HÌNH: ĐỌC TỪ BIẾN MÔI TRƯỜNG ---
 CHANNEL_ACCESS_TOKEN = os.environ.get('CHANNEL_ACCESS_TOKEN')
 CHANNEL_SECRET = os.environ.get('CHANNEL_SECRET')
-GOOGLE_CREDS_JSON = os.environ.get('GOOGLE_CREDENTIALS_JSON')
 ADMIN_USER_ID = os.environ.get('ADMIN_USER_ID')
-# Chìa khóa bí mật để bảo vệ webhook
-CRON_SECRET_KEY = os.environ.get('CRON_SECRET_KEY')
+CRON_SECRET_KEY = os.environ.get('CRON_SECRET_KEY') # Chìa khóa bí mật cho webhook
 
-if not all([CHANNEL_ACCESS_TOKEN, CHANNEL_SECRET, GOOGLE_CREDS_JSON]):
+if not all([CHANNEL_ACCESS_TOKEN, CHANNEL_SECRET]):
     raise ValueError("Lỗi: Hãy kiểm tra lại các biến môi trường trên Render.")
-
-# --- CẤU HÌNH GOOGLE SHEETS ---
-SCOPE = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-google_creds_dict = json.loads(GOOGLE_CREDS_JSON)
-CREDS = ServiceAccountCredentials.from_json_keyfile_dict(google_creds_dict, SCOPE)
-CLIENT = gspread.authorize(CREDS)
-
-# Tên các trang tính
-SHEET_NAME = 'DATA REATIME'
-WORKSHEET_NAME = 'chi_tiet_cum'
-WORKSHEET_NAME_USERS = 'allowed_users'
-WORKSHEET_TRACKER_NAME = 'task_tracker'
 
 allowed_ids_cache = set()
 
@@ -68,33 +50,21 @@ def load_allowed_ids():
         list_of_ids = sheet.col_values(1)
         allowed_ids_cache = set(filter(None, list_of_ids[1:] if list_of_ids and list_of_ids[0].lower() == 'id' else list_of_ids))
         print(f"Đã tải thành công {len(allowed_ids_cache)} ID vào danh sách cho phép.")
-    except gspread.exceptions.WorksheetNotFound:
-        print(f"!!! CẢNH BÁO: Không tìm thấy trang tính '{WORKSHEET_NAME_USERS}'. Bot sẽ công khai.")
-        allowed_ids_cache = set()
     except Exception as e:
-        print(f"Lỗi nghiêm trọng khi tải danh sách ID: {e}")
+        print(f"Lỗi khi tải danh sách ID: {e}")
         allowed_ids_cache = set()
 
 def keep_alive():
-    ping_url = os.environ.get("KEEP_ALIVE_URL")
+    ping_url = os.environ.get("RENDER_EXTERNAL_URL")
     if not ping_url:
-        app_url = os.environ.get("RENDER_EXTERNAL_URL")
-        if app_url: ping_url = f"{app_url}/ping"
-    if not ping_url:
-        print("Bỏ qua chức năng keep-alive.")
+        print("Bỏ qua chức năng keep-alive vì không có RENDER_EXTERNAL_URL.")
         return
     while True:
         try:
-            requests.get(ping_url, timeout=10)
+            requests.get(ping_url + "/ping", timeout=10)
         except requests.exceptions.RequestException as e:
             print(f"Lỗi khi ping: {e}")
-        time.sleep(600)
-
-if 'RENDER' in os.environ:
-    keep_alive_thread = threading.Thread(target=keep_alive, daemon=True)
-    keep_alive_thread.start()
-
-load_allowed_ids()
+        time.sleep(600) # Ping mỗi 10 phút
 
 # --- LOGIC NHẮC NHỞ TỰ ĐỘNG (SCHEDULER) ---
 def reminder_job():
@@ -143,22 +113,26 @@ def reminder_job():
     except Exception as e:
         print(f"Lỗi trong reminder_job: {e}")
 
+# --- CÁC HÀM XỬ LÝ DỮ LIỆU BÁO CÁO (TỪ FILE GỐC CỦA BẠN) ---
+def parse_float_from_string(s):
+    # ... (code của bạn)
+    pass
+
+def handle_percentage_string(percent_str):
+    # ... (code của bạn)
+    pass
+# ... (Và các hàm xử lý báo cáo khác: parse_competition_data, format_currency, etc.)
+# <<< DÁN CÁC HÀM XỬ LÝ DỮ LIỆU CỦA BẠN VÀO ĐÂY >>>
+
+# --- KHỞI ĐỘNG CÁC TÁC VỤ NỀN ---
+load_allowed_ids()
+if 'RENDER' in os.environ:
+    keep_alive_thread = threading.Thread(target=keep_alive, daemon=True)
+    keep_alive_thread.start()
+
 scheduler = BackgroundScheduler(daemon=True, timezone='Asia/Ho_Chi_Minh')
 scheduler.add_job(reminder_job, 'interval', minutes=5)
 scheduler.start()
-
-# --- CÁC HÀM XỬ LÝ DỮ LIỆU BÁO CÁO (GIỮ NGUYÊN TỪ FILE CỦA BẠN) ---
-def parse_float_from_string(s):
-    if s is None: return 0.0
-    if not isinstance(s, str): s = str(s)
-    clean_s = s.strip()
-    if not clean_s or clean_s == '-': return 0.0
-    try:
-        return float(clean_s.replace(',', '.'))
-    except ValueError:
-        return 0.0
-# ... (Và các hàm xử lý báo cáo khác của bạn: handle_percentage_string, parse_competition_data, v.v...)
-# <<< DÁN CÁC HÀM XỬ LÝ DỮ LIỆU CỦA BẠN VÀO ĐÂY >>>
 
 # --- ĐIỂM TIẾP NHẬN (ROUTES) ---
 @app.route("/trigger-checklist", methods=['POST'])
@@ -245,11 +219,11 @@ def handle_message(event):
     source_id = event.source.group_id if event.source.type == 'group' else user_id
 
     if user_msg_upper == 'ID':
-        # ... (logic lấy ID)
+        # ... (logic lấy ID của bạn)
         return
 
     if ADMIN_USER_ID and user_id == ADMIN_USER_ID:
-        # ... (logic các lệnh admin)
+        # ... (logic các lệnh admin của bạn)
         return
             
     # --- XỬ LÝ LỆNH TEST VÀ RESET CHECKLIST ---
@@ -282,10 +256,10 @@ def handle_message(event):
     if is_controlled and source_id not in allowed_ids_cache:
         return
 
-    # --- XỬ LÝ LOGIC BÁO CÁO REALTIME ---
+    # --- XỬ LÝ LOGIC BÁO CÁO REALTIME (CODE GỐC CỦA BẠN) ---
     try:
-        sheet = CLIENT.open(SHEET_NAME).worksheet(WORKSHEET_NAME)
-        all_data = sheet.get_all_values()
+        # sheet = CLIENT.open(SHEET_NAME).worksheet(WORKSHEET_NAME) # Đã có trong config.py
+        # all_data = sheet.get_all_values()
         # ... (toàn bộ logic xử lý báo cáo realtime của bạn)
         reply_messages = []
         # ... (thêm tin nhắn vào reply_messages)
@@ -293,8 +267,8 @@ def handle_message(event):
             line_bot_api.reply_message(event.reply_token, reply_messages)
 
     except Exception as e:
-        print(f"!!! GẶP LỖI NGHIÊM TRỌNG: {repr(e)}")
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text='Đã có lỗi xảy ra khi truy vấn dữ liệu.'))
+        print(f"!!! GẶP LỖI NGHIÊM TRỌNG (BÁO CÁO): {repr(e)}")
+        # line_bot_api.reply_message(event.reply_token, TextSendMessage(text='Đã có lỗi xảy ra khi truy vấn dữ liệu.'))
 
 # --- CHẠY ỨNG DỤNG ---
 if __name__ == "__main__":
