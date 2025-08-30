@@ -21,7 +21,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 
 # --- IMPORT TỪ CÁC FILE KHÁC CỦA BẠN ---
 # File cấu hình trung tâm để tránh lỗi circular import
-from config import CLIENT, SHEET_NAME, WORKSHEET_NAME_USERS, WORKSHEET_TRACKER_NAME
+from config import CLIENT, SHEET_NAME, WORKSHEET_NAME_USERS, WORKSHEET_TRACKER_NAME, WORKSHEET_NAME
 # File xử lý giao diện và logic của checklist
 from flex_handler import generate_checklist_flex, initialize_daily_tasks
 # File chứa hàm kích hoạt checklist từ webhook
@@ -325,8 +325,9 @@ if 'RENDER' in os.environ:
     keep_alive_thread = threading.Thread(target=keep_alive, daemon=True)
     keep_alive_thread.start()
 
+# TỐI ƯU HÓA: Giảm tần suất gọi API để tránh lỗi Quota
 scheduler = BackgroundScheduler(daemon=True, timezone='Asia/Ho_Chi_Minh')
-scheduler.add_job(reminder_job, 'interval', minutes=5)
+scheduler.add_job(reminder_job, 'interval', minutes=10)
 scheduler.start()
 
 # --- ĐIỂM TIẾP NHẬN (ROUTES) ---
@@ -410,7 +411,6 @@ def handle_postback(event):
         shift_type = params.get('shift')
         print(f"Nhận yêu cầu hoàn tất task: {task_id} từ group: {group_id}. Bắt đầu xử lý trong nền.")
         
-        # Chạy tác vụ nặng trong luồng riêng để phản hồi ngay lập tức
         task_thread = threading.Thread(target=process_task_completion, args=(group_id, task_id, shift_type))
         task_thread.start()
 
@@ -429,7 +429,7 @@ def handle_message(event):
         return
 
     if ADMIN_USER_ID and user_id == ADMIN_USER_ID:
-        # (logic các lệnh admin của bạn)
+        # (logic các lệnh admin của bạn có thể thêm vào đây)
         pass
             
     # --- XỬ LÝ LỆNH TEST VÀ RESET CHECKLIST ---
@@ -465,7 +465,6 @@ def handle_message(event):
 
     # --- XỬ LÝ LOGIC BÁO CÁO REALTIME ---
     try:
-        from config import WORKSHEET_NAME
         sheet = CLIENT.open(SHEET_NAME).worksheet(WORKSHEET_NAME)
         all_data = sheet.get_all_values()
         reply_messages = []
