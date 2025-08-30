@@ -1,5 +1,3 @@
-# flex_handler.py
-
 from datetime import datetime
 import pytz
 # Thay đổi quan trọng: Import từ config.py
@@ -65,9 +63,6 @@ def initialize_daily_tasks(group_id, shift_type):
         return False
 
 def get_tasks_status_from_sheet(group_id, shift_type):
-    """
-    Lấy trạng thái công việc hiện tại của nhóm từ Google Sheet.
-    """
     try:
         sheet = CLIENT.open(SHEET_NAME).worksheet(WORKSHEET_TRACKER_NAME)
         tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
@@ -87,53 +82,59 @@ def get_tasks_status_from_sheet(group_id, shift_type):
         return {}
 
 def generate_checklist_flex(group_id, shift_type):
-    """
-    Tạo nội dung Flex Message dựa trên trạng thái công việc.
-    """
     task_statuses = get_tasks_status_from_sheet(group_id, shift_type)
     if not task_statuses:
         task_statuses = {task['id']: 'incomplete' for task in TASKS.get(shift_type, [])}
 
-    title = "✅ CHECKLIST CA SÁNG" if shift_type == 'sang' else "🌙 CHECKLIST CA CHIỀU"
+    title = "✅ CHECKLIST CÔNG VIỆC CA SÁNG" if shift_type == 'sang' else "🌙 CHECKLIST CÔNG VIỆC CA CHIỀU"
     
     task_components = []
     for task in TASKS.get(shift_type, []):
         status = task_statuses.get(task['id'], 'incomplete')
         is_complete = (status == 'complete')
-        icon_url = "https://scdn.line-apps.com/n/channel_devcenter/img/fx/review_gold_star_28.png" if is_complete else "https://scdn.line-apps.com/n/channel_devcenter/img/fx/review_gray_star_28.png"
+        
+        icon_url = "https://scdn.line-apps.com/n/channel_devcenter/img/fx/checklist_complete_24.png" if is_complete else "https://scdn.line-apps.com/n/channel_devcenter/img/fx/checklist_incomplete_24.png"
         text_decoration = "line-through" if is_complete else "none"
-        text_color = "#999999" if is_complete else "#555555"
+        text_color = "#AAAAAA" if is_complete else "#555555"
         button_style = "secondary" if is_complete else "primary"
-        button_label = "Đã xong" if is_complete else "Hoàn tất"
+        button_label = "✓ Xong" if is_complete else "Xong"
+        button_color = "#E0E0E0" if is_complete else "#007BFF"
 
         task_component = {
-            "type": "box", "layout": "horizontal", "spacing": "md", "alignItems": "center",
+            "type": "box", "layout": "vertical", "margin": "lg", "spacing": "sm",
             "contents": [
-                { "type": "image", "url": icon_url, "size": "sm" },
                 {
-                    "type": "box", "layout": "vertical", "flex": 5,
+                    "type": "box", "layout": "horizontal", "spacing": "md", "alignItems": "center",
                     "contents": [
-                        { "type": "text", "text": task['name'], "wrap": True, "weight": "bold", "size": "md", "color": text_color, "decoration": text_decoration },
-                        { "type": "text", "text": f"Deadline: {task['time']}", "size": "sm", "color": "#B2B2B2" }
+                        { "type": "image", "url": icon_url, "size": "md", "flex": 0 },
+                        {
+                            "type": "box", "layout": "vertical", "flex": 5,
+                            "contents": [
+                                { "type": "text", "text": task['name'], "wrap": True, "weight": "bold", "size": "md", "color": text_color, "decoration": text_decoration },
+                                { "type": "text", "text": f"Deadline: {task['time']}", "size": "sm", "color": "#B2B2B2" }
+                            ]
+                        },
+                        {
+                            "type": "button",
+                            "action": { "type": "postback", "label": button_label, "data": f"action=complete_task&task_id={task['id']}&shift={shift_type}" },
+                            "style": "primary", "color": button_color, "height": "sm", "flex": 0, "width": "70px"
+                        }
                     ]
                 },
-                {
-                    "type": "button",
-                    "action": { "type": "postback", "label": button_label, "data": f"action=complete_task&task_id={task['id']}&shift={shift_type}" },
-                    "style": button_style, "height": "sm", "flex": 2
-                }
+                {"type": "separator", "margin": "lg"}
             ]
         }
         task_components.append(task_component)
 
     flex_content = {
-        "type": "bubble",
+        "type": "bubble", "size": "giga",
         "header": {
-            "type": "box", "layout": "vertical",
-            "contents": [{"type": "text", "text": title, "weight": "bold", "size": "xl", "color": "#FFFFFF"}],
-            "backgroundColor": "#0080ff" if shift_type == 'sang' else "#27406E"
+            "type": "box", "layout": "vertical", "paddingAll": "20px",
+            "contents": [{"type": "text", "text": title, "weight": "bold", "size": "xl", "color": "#FFFFFF", "align": "center"}],
+            "backgroundColor": "#0080ff" if shift_type == 'sang' else "#27406E",
+            "paddingTop": "15px", "paddingBottom": "15px"
         },
-        "body": { "type": "box", "layout": "vertical", "spacing": "lg", "contents": task_components }
+        "body": { "type": "box", "layout": "vertical", "spacing": "md", "contents": task_components }
     }
     
     return flex_content
