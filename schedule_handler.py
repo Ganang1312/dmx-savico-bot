@@ -4,11 +4,8 @@ import pytz
 from linebot import LineBotApi
 from linebot.models import FlexSendMessage, TextSendMessage
 
-# Import từ file cấu hình trung tâm
-from config import CLIENT, SHEET_NAME
-
-# Tên sheet mới
-WORKSHEET_SCHEDULES_NAME = 'schedules'
+# SỬA LỖI: Import thêm WORKSHEET_SCHEDULES_NAME từ config
+from config import CLIENT, SHEET_NAME, WORKSHEET_SCHEDULES_NAME
 
 # Khởi tạo LineBotApi
 CHANNEL_ACCESS_TOKEN = os.environ.get('CHANNEL_ACCESS_TOKEN')
@@ -32,11 +29,12 @@ def create_schedule_flex_message(schedule_type, schedule_text):
         title = "📅 LỊCH LÀM VIỆC NHÂN VIÊN"
         header_color = "#4D96FF" # Màu xanh dương
 
-    # Xử lý xuống dòng trong text
-    schedule_lines = schedule_text.split('<br>')
+    # Xử lý xuống dòng trong text, hỗ trợ cả <br> và \n
+    schedule_lines = schedule_text.replace('<br>', '\n').split('\n')
     text_components = []
     for line in schedule_lines:
-        text_components.append({"type": "text", "text": line, "wrap": True, "size": "md"})
+        if line.strip(): # Bỏ qua các dòng trống
+            text_components.append({"type": "text", "text": line, "wrap": True, "size": "md"})
 
     flex_content = {
       "type": "bubble",
@@ -112,3 +110,4 @@ def send_daily_schedule(schedule_type):
 
     except Exception as e:
         print(f"Lỗi nghiêm trọng khi gửi lịch làm việc: {e}")
+
