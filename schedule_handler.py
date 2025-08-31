@@ -3,6 +3,7 @@ from datetime import datetime
 import pytz
 from linebot import LineBotApi
 from linebot.models import FlexSendMessage, TextSendMessage
+import re
 
 # SỬA LỖI: Import thêm WORKSHEET_SCHEDULES_NAME từ config
 from config import CLIENT, SHEET_NAME, WORKSHEET_SCHEDULES_NAME
@@ -20,44 +21,131 @@ def get_vietnamese_day_of_week():
     days = ["Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ Bảy", "Chủ Nhật"]
     return days[weekday]
 
+def parse_schedule_text(schedule_text):
+    """Phân tích văn bản lịch làm việc thành các ca và nhân viên."""
+    # Các từ khóa để phân tách các ca
+    keywords = ["Ca Sáng", "Ca Chiều", "Nghỉ", "Vệ Sinh Kho"]
+    
+    # Tạo một pattern regex để tìm các từ khóa
+    pattern = '|'.join(keywords)
+    parts = re.split(f'({pattern})', schedule_text)
+    
+    schedule_parts = []
+    # Bỏ qua phần tử đầu tiên nếu nó trống
+    i = 1 if parts[0].strip() == "" else 0
+    while i < len(parts) - 1:
+        keyword = parts[i].strip()
+        # Lấy nội dung cho đến từ khóa tiếp theo, loại bỏ dấu ';' ở đầu
+        content = parts[i+1].strip().lstrip(';').strip()
+        schedule_parts.append({"shift": keyword, "staff": content})
+        i += 2
+        
+    return schedule_parts
+
 def create_schedule_flex_message(schedule_type, schedule_text):
-    """Tạo tin nhắn Flex Message cho lịch làm việc."""
+    """Tạo tin nhắn Flex Message cho lịch làm việc với giao diện mới."""
     if schedule_type == 'pg':
-        title = "📅 LỊCH LÀM VIỆC PG HÔM NAY"
+        title = "LỊCH LÀM VIỆC PG HÔM NAY"
         header_color = "#FF6B6B" # Màu hồng
     else: # employee
-        title = "📅 LỊCH LÀM VIỆC NHÂN VIÊN"
+        title = "LỊCH LÀM VIỆC NHÂN VIÊN"
         header_color = "#4D96FF" # Màu xanh dương
 
-    # Xử lý xuống dòng trong text, hỗ trợ cả <br> và \n
-    schedule_lines = schedule_text.replace('<br>', '\n').split('\n')
-    text_components = []
-    for line in schedule_lines:
-        if line.strip(): # Bỏ qua các dòng trống
-            text_components.append({"type": "text", "text": line, "wrap": True, "size": "md"})
+    # Icon cho từng ca
+    shift_icons = {
+        "Ca Sáng": "☀️",
+        "Ca Chiều": "🌙",
+        "Nghỉ": "⚪️",
+        "Vệ Sinh Kho": "🧹"
+    }
+
+    parsed_schedule = parse_schedule_text(schedule_text)
+    
+    body_components = []
+    for part in parsed_schedule:
+        shift_name = part["shift"]
+        staff_list = part["staff"]
+        icon = shift_icons.get(shift_name, "📌")
+
+        section_component = {
+            "type": "box",
+            "layout": "vertical",
+            "margin": "lg",
+            "spacing": "sm",
+            "contents": [
+                {
+                    "type": "box",
+                    "layout": "horizontal",
+                    "spacing": "md",
+                    "contents": [
+                        {
+                            "type": "text",
+                            "text": icon,
+                            "flex": 0,
+                            "gravity": "center"
+                        },
+                        {
+                            "type": "text",
+                            "text": shift_name,
+                            "weight": "bold",
+                            "color": "#111111",
+                            "size": "md"
+                        }
+                    ]
+                },
+                {
+                    "type": "text",
+                    "text": staff_list,
+                    "wrap": True,
+                    "size": "sm",
+                    "color": "#555555",
+                    "margin": "md"
+                },
+                {
+                    "type": "separator",
+                    "margin": "lg"
+                }
+            ]
+        }
+        body_components.append(section_component)
+    
+    # Xóa separator cuối cùng để đẹp hơn
+    if body_components:
+        body_components[-1]['contents'].pop()
 
     flex_content = {
       "type": "bubble",
+      "size": "giga",
       "header": {
         "type": "box",
-        "layout": "vertical",
+        "layout": "horizontal",
+        "alignItems": "center",
+        "spacing": "md",
         "contents": [
+          {
+            "type": "text",
+            "text": "📅",
+            "flex": 0,
+            "size": "xl"
+          },
           {
             "type": "text",
             "text": title,
             "color": "#FFFFFF",
             "weight": "bold",
-            "size": "lg",
-            "align": "center"
+            "size": "md", # Giảm size chữ tiêu đề để không bị tràn
+            "wrap": True
           }
         ],
-        "backgroundColor": header_color
+        "backgroundColor": header_color,
+        "paddingTop": "12px",
+        "paddingBottom": "12px"
       },
       "body": {
         "type": "box",
         "layout": "vertical",
-        "spacing": "md",
-        "contents": text_components
+        "contents": body_components,
+        "paddingAll": "md"
       }
     }
     return flex_content
@@ -66,7 +154,6 @@ def send_daily_schedule(schedule_type):
     """Hàm chính để tìm và gửi lịch làm việc hàng ngày."""
     print(f"Bắt đầu gửi lịch làm việc cho nhóm: {schedule_type}")
     
-    # 1. Xác định Group ID và cột cần đọc từ biến môi trường
     if schedule_type == 'pg':
         target_group_id = os.environ.get('PG_GROUP_ID')
         column_to_read = 'pg_schedule'
@@ -82,7 +169,6 @@ def send_daily_schedule(schedule_type):
         return
 
     try:
-        # 2. Lấy lịch làm việc từ Google Sheet
         sheet = CLIENT.open(SHEET_NAME).worksheet(WORKSHEET_SCHEDULES_NAME)
         all_schedules = sheet.get_all_records()
         today_str = get_vietnamese_day_of_week()
@@ -93,7 +179,6 @@ def send_daily_schedule(schedule_type):
                 schedule_text_today = row.get(column_to_read)
                 break
         
-        # 3. Gửi tin nhắn
         if schedule_text_today:
             print(f"Tìm thấy lịch cho {today_str}: {schedule_text_today}")
             flex_message_content = create_schedule_flex_message(schedule_type, schedule_text_today)
@@ -105,8 +190,7 @@ def send_daily_schedule(schedule_type):
             print(f"Gửi lịch thành công đến group ID: {target_group_id}")
         else:
             print(f"Không tìm thấy lịch làm việc cho {today_str} trong sheet.")
-            # Gửi tin nhắn thông báo nếu muốn
-            # line_bot_api.push_message(target_group_id, TextSendMessage(text=f"Không tìm thấy lịch làm việc cho hôm nay ({today_str})."))
+            line_bot_api.push_message(target_group_id, TextSendMessage(text=f"Không tìm thấy lịch làm việc cho hôm nay ({today_str})."))
 
     except Exception as e:
         print(f"Lỗi nghiêm trọng khi gửi lịch làm việc: {e}")
