@@ -20,5 +20,7 @@ CLIENT = gspread.authorize(CREDS)
 SHEET_NAME = 'DATA REATIME'
 WORKSHEET_NAME_USERS = 'allowed_users'
 WORKSHEET_TRACKER_NAME = 'task_tracker'
-# SỬA LỖI: Bổ sung dòng còn thiếu dưới đây
 WORKSHEET_NAME = 'chi_tiet_cum'
+# SỬA LỖI: Bổ sung dòng còn thiếu dưới đây
+WORKSHEET_SCHEDULES_NAME = 'schedules'
+
