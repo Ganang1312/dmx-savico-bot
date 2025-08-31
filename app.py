@@ -342,7 +342,6 @@ if 'RENDER' in os.environ:
     keep_alive_thread.start()
 
 scheduler = BackgroundScheduler(daemon=True, timezone='Asia/Ho_Chi_Minh')
-# ĐÃ XÓA TÁC VỤ NHẮC NHỞ TỰ ĐỘNG (reminder_job)
 scheduler.start()
 
 # --- ĐIỂM TIẾP NHẬN (ROUTES) ---
@@ -406,9 +405,6 @@ def callback():
 def ping():
     return "OK", 200
 
-# --- XỬ LÝ NÚT BẤM (POSTBACK) ĐÃ BỊ XÓA ---
-# Toàn bộ hàm handle_postback và process_task_completion đã được loại bỏ.
-
 # --- XỬ LÝ TIN NHẮN CHÍNH ---
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
@@ -451,15 +447,38 @@ def handle_message(event):
             print(f"Lỗi khi gửi lịch làm việc theo lệnh: {e}")
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text="Đã có lỗi xảy ra khi lấy lịch làm việc."))
         return
-        
-    # --- LỆNH CHECKLIST ĐÃ BỊ XÓA ---
-    # Toàn bộ logic xử lý 'TEST SANG', 'RESET CHIEU' đã được loại bỏ.
 
+    # --- [MỚI] THÊM LẠI LỆNH TEST ---
+    shift_to_process = None
+    if user_msg_upper == 'TEST SANG':
+        shift_to_process = 'sang'
+    elif user_msg_upper == 'TEST CHIEU':
+        shift_to_process = 'chieu'
+    
+    if shift_to_process:
+        print(f"Nhận lệnh test thủ công cho ca: {shift_to_process}")
+        try:
+            # Gửi tin nhắn xác nhận cho người dùng ngay lập tức
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text=f"Đã nhận lệnh test. Bắt đầu gửi thông báo công việc ca {shift_to_process}...")
+            )
+            # Chạy hàm gửi báo cáo trong luồng riêng để không chặn các tác vụ khác
+            thread = threading.Thread(target=send_static_report, args=(shift_to_process,))
+            thread.start()
+        except Exception as e:
+            print(f"Lỗi khi thực thi lệnh test: {e}")
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text=f"Gặp lỗi khi thực hiện lệnh test: {e}")
+            )
+        return
+        
     # --- KIỂM TRA QUYỀN TRUY CẬP ---
     is_controlled = bool(allowed_ids_cache) and ADMIN_USER_ID
     if is_controlled and source_id not in allowed_ids_cache:
         # Cho phép các lệnh không cần kiểm tra quyền truy cập ở trên chạy qua
-        if user_msg_upper not in ['ID', 'NV', 'PG']:
+        if user_msg_upper not in ['ID', 'NV', 'PG', 'TEST SANG', 'TEST CHIEU']:
             print(f"Từ chối truy cập từ source_id: {source_id}")
             return
 
