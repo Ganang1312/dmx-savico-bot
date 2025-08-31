@@ -20,12 +20,11 @@ import pandas as pd
 from apscheduler.schedulers.background import BackgroundScheduler
 
 # --- IMPORT TỪ CÁC FILE KHÁC CỦA BẠN ---
-# File cấu hình trung tâm để tránh lỗi circular import
 from config import CLIENT, SHEET_NAME, WORKSHEET_NAME_USERS, WORKSHEET_TRACKER_NAME, WORKSHEET_NAME
-# File xử lý giao diện và logic của checklist
 from flex_handler import generate_checklist_flex, initialize_daily_tasks
-# File chứa hàm kích hoạt checklist từ webhook
 from checklist_scheduler import send_initial_checklist
+# THÊM MỚI: Import các hàm cần thiết để tra cứu lịch
+from schedule_handler import get_vietnamese_day_of_week, create_schedule_flex_message
 
 # --- PHẦN CẤU HÌNH: ĐỌC TỪ BIẾN MÔI TRƯỜNG ---
 CHANNEL_ACCESS_TOKEN = os.environ.get('CHANNEL_ACCESS_TOKEN')
@@ -63,7 +62,6 @@ def keep_alive():
         return
     while True:
         try:
-            # Thêm /ping vào cuối URL để gọi đúng route
             requests.get(ping_url.rstrip('/') + "/ping", timeout=10)
         except requests.exceptions.RequestException as e:
             print(f"Lỗi khi ping: {e}")
@@ -76,13 +74,10 @@ def reminder_job():
         sheet = CLIENT.open(SHEET_NAME).worksheet(WORKSHEET_TRACKER_NAME)
         df = pd.DataFrame(sheet.get_all_records())
         
-        if df.empty:
-            return
-
+        if df.empty: return
         tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
         now = datetime.now(tz_vietnam)
         today_str = now.strftime('%Y-%m-%d')
-
         overdue_tasks = df[(df['date'] == today_str) & (df['status'] == 'incomplete')]
 
         for index, task in overdue_tasks.iterrows():
@@ -92,7 +87,6 @@ def reminder_job():
             if now > deadline_dt:
                 last_reminded_str = task.get('last_reminded')
                 should_remind = False
-                
                 if not last_reminded_str or last_reminded_str == '':
                     should_remind = True
                 else:
@@ -104,9 +98,7 @@ def reminder_job():
                     group_id = str(task['group_id'])
                     reminder_text = f"🚨 NHẮC NHỞ: Công việc '{task['task_name']}' đã quá hạn lúc {task['deadline']}!"
                     print(f"Gửi nhắc nhở cho task: {task['task_name']} đến group: {group_id}")
-                    
                     line_bot_api.push_message(group_id, TextSendMessage(text=reminder_text))
-                    
                     cell_list = sheet.findall(str(task['task_id']))
                     for cell in cell_list:
                         row_values = sheet.row_values(cell.row)
@@ -124,8 +116,7 @@ def parse_float_from_string(s):
     if not clean_s or clean_s == '-': return 0.0
     try:
         return float(clean_s.replace(',', '.'))
-    except ValueError:
-        return 0.0
+    except ValueError: return 0.0
 
 def handle_percentage_string(percent_str):
     if not percent_str: return 0.0, "0%"
@@ -154,13 +145,7 @@ def parse_competition_data(header_row, data_row):
                 realtime_val_str = data_row[indices[1]] if data_row[indices[1]] and data_row[indices[1]].strip() != '-' else "0"
                 target_val_str = data_row[indices[2]] if data_row[indices[2]] and data_row[indices[2]].strip() != '-' else "0"
                 percent_float, percent_ht_formatted = handle_percentage_string(percent_ht_val)
-                results.append({
-                    "name": category_name,
-                    "realtime": parse_float_from_string(realtime_val_str),
-                    "target": target_val_str,
-                    "percent_ht": percent_ht_formatted,
-                    "percent_val": percent_float
-                })
+                results.append({"name": category_name, "realtime": parse_float_from_string(realtime_val_str), "target": target_val_str, "percent_ht": percent_ht_formatted, "percent_val": percent_float})
             except (ValueError, TypeError, IndexError): continue
     results.sort(key=lambda x: x['percent_val'], reverse=True)
     return results
@@ -192,8 +177,7 @@ def calculate_ranking(all_data, current_row):
         rank = -1
         for i, store in enumerate(channel_stores):
             if store['full_row'] == current_row:
-                rank = i + 1
-                break
+                rank = i + 1; break
         if rank != -1: return f"{rank}/{len(channel_stores)}"
         return "-/-"
     except (IndexError, ValueError, TypeError): return "-/-"
@@ -282,14 +266,11 @@ def create_summary_text_message(store_data, competition_results):
         return None
 
 def create_leaderboard_flex_message(all_data, cluster_name=None, channel_filter=None):
-    dmx_channels = ['ĐML', 'ĐMM', 'ĐMS']
-    tgdd_channels = ['TGD', 'AAR']
+    dmx_channels = ['ĐML', 'ĐMM', 'ĐMS']; tgdd_channels = ['TGD', 'AAR']
     dmx_stores, tgdd_stores = [], []
-    
     data_to_process = all_data[1:]
     if cluster_name:
         data_to_process = [row for row in data_to_process if len(row) > 0 and row[0] and row[0].strip().upper() == cluster_name.strip().upper()]
-
     for row in data_to_process:
         try:
             kenh = (row[1] or "").strip()
@@ -298,13 +279,9 @@ def create_leaderboard_flex_message(all_data, cluster_name=None, channel_filter=
             if kenh in dmx_channels: dmx_stores.append(store_info)
             elif kenh in tgdd_channels: tgdd_stores.append(store_info)
         except (IndexError, ValueError, TypeError): continue
-
     dmx_stores.sort(key=lambda x: x['doanh_thu'], reverse=True)
     tgdd_stores.sort(key=lambda x: x['doanh_thu'], reverse=True)
-
-    if not cluster_name:
-        dmx_stores, tgdd_stores = dmx_stores[:20], tgdd_stores[:20]
-
+    if not cluster_name: dmx_stores, tgdd_stores = dmx_stores[:20], tgdd_stores[:20]
     def build_leaderboard_bubble(title, stores, header_bg_color, header_text_color):
         header = {"type": "box", "layout": "vertical", "backgroundColor": header_bg_color, "paddingAll": "lg", "contents": [{"type": "text", "text": title, "weight": "bold", "size": "xl", "color": header_text_color, "align": "center", "wrap": True}]}
         body_bg_color, text_color_body, separator_color = "#FFFFFF", "#000000", "#EEEEEE"
@@ -317,33 +294,13 @@ def create_leaderboard_flex_message(all_data, cluster_name=None, channel_filter=
             rows.append(row_component)
             if i < len(stores) -1: rows.append({"type": "separator", "margin": "sm", "color": separator_color})
         return {"type": "bubble", "size": "giga", "header": header, "body": { "type": "box", "layout": "vertical", "contents": rows, "paddingAll":"lg", "backgroundColor": body_bg_color }}
-
-    if cluster_name:
-        dmx_title = f"🏆 BXH CỤM {cluster_name.upper()} - ĐMX 🏆"
-        tgdd_title = f"🏆 BXH CỤM {cluster_name.upper()} - TGDD 🏆"
-    else:
-        dmx_title = "🏆 REALTIME TOP 20 ĐMX 🏆"
-        tgdd_title = "🏆 REALTIME TOP 20 TGDD 🏆"
-    
+    if cluster_name: dmx_title, tgdd_title = f"🏆 BXH CỤM {cluster_name.upper()} - ĐMX 🏆", f"🏆 BXH CỤM {cluster_name.upper()} - TGDD 🏆"
+    else: dmx_title, tgdd_title = "🏆 REALTIME TOP 20 ĐMX 🏆", "🏆 REALTIME TOP 20 TGDD 🏆"
     messages_to_return = []
-    
-    # Logic xác định bảng xếp hạng nào cần hiển thị
-    show_dmx, show_tgdd = False, False
-    if channel_filter is None: # Lệnh BXH
-        show_dmx, show_tgdd = True, True
-    elif channel_filter == 'dmx': # Lệnh BXH1
-        show_dmx = True
-    elif channel_filter == 'tgdd': # Lệnh BXH2
-        show_tgdd = True
-    else: # Lọc cho báo cáo của một siêu thị cụ thể
-        if channel_filter in dmx_channels: show_dmx = True
-        if channel_filter in tgdd_channels: show_tgdd = True
-
-    if show_dmx and dmx_stores:
-        messages_to_return.append({ "type": "flex", "altText": dmx_title, "contents": build_leaderboard_bubble(dmx_title, dmx_stores, "#1E88E5", "#FFFFFF") })
-    if show_tgdd and tgdd_stores:
-        messages_to_return.append({ "type": "flex", "altText": tgdd_title, "contents": build_leaderboard_bubble(tgdd_title, tgdd_stores, "#FDD835", "#000000") })
-        
+    if not channel_filter or channel_filter in dmx_channels:
+        if dmx_stores: messages_to_return.append({ "type": "flex", "altText": dmx_title, "contents": build_leaderboard_bubble(dmx_title, dmx_stores, "#1E88E5", "#FFFFFF") })
+    if not channel_filter or channel_filter in tgdd_channels:
+        if tgdd_stores: messages_to_return.append({ "type": "flex", "altText": tgdd_title, "contents": build_leaderboard_bubble(tgdd_title, tgdd_stores, "#FDD835", "#000000") })
     return messages_to_return
 
 # --- KHỞI ĐỘNG CÁC TÁC VỤ NỀN ---
@@ -352,25 +309,42 @@ if 'RENDER' in os.environ:
     keep_alive_thread = threading.Thread(target=keep_alive, daemon=True)
     keep_alive_thread.start()
 
-# TỐI ƯU HÓA: Giảm tần suất gọi API để tránh lỗi Quota
 scheduler = BackgroundScheduler(daemon=True, timezone='Asia/Ho_Chi_Minh')
 scheduler.add_job(reminder_job, 'interval', minutes=10)
 scheduler.start()
 
 # --- ĐIỂM TIẾP NHẬN (ROUTES) ---
+@app.route("/trigger-schedule", methods=['POST'])
+def trigger_schedule():
+    incoming_secret = request.headers.get('X-Cron-Secret')
+    if not CRON_SECRET_KEY or incoming_secret != CRON_SECRET_KEY:
+        print("Lỗi bảo mật: Sai hoặc thiếu CRON_SECRET_KEY.")
+        abort(403)
+    data = request.get_json()
+    schedule_type = data.get('type')
+    if schedule_type not in ['pg', 'employee']:
+        return "Lỗi: 'type' phải là 'pg' hoặc 'employee'.", 400
+    try:
+        # THAY ĐỔI: Phải import send_daily_schedule từ schedule_handler
+        from schedule_handler import send_daily_schedule
+        thread = threading.Thread(target=send_daily_schedule, args=(schedule_type,))
+        thread.start()
+        print(f"Đã kích hoạt thành công gửi lịch cho: {schedule_type}")
+        return f"OK, đã kích hoạt gửi lịch cho {schedule_type}.", 200
+    except Exception as e:
+        print(f"Lỗi khi kích hoạt gửi lịch: {e}")
+        return f"Lỗi máy chủ: {e}", 500
+    
 @app.route("/trigger-checklist", methods=['POST'])
 def trigger_checklist():
     incoming_secret = request.headers.get('X-Cron-Secret')
     if not CRON_SECRET_KEY or incoming_secret != CRON_SECRET_KEY:
         print("Lỗi bảo mật: Sai hoặc thiếu CRON_SECRET_KEY.")
         abort(403)
-
     data = request.get_json()
     shift = data.get('shift')
-
     if shift not in ['sang', 'chieu']:
         return "Lỗi: 'shift' phải là 'sang' hoặc 'chieu'.", 400
-
     try:
         thread = threading.Thread(target=send_initial_checklist, args=(shift,))
         thread.start()
@@ -386,61 +360,50 @@ def callback():
     body = request.get_data(as_text=True)
     try:
         handler.handle(body, signature)
-    except InvalidSignatureError:
-        abort(400)
+    except InvalidSignatureError: abort(400)
     return 'OK'
 
 @app.route("/ping")
 def ping():
     return "OK", 200
 
-# --- TỐI ƯU HÓA XỬ LÝ NÚT BẤM ---
+# --- XỬ LÝ NÚT BẤM (POSTBACK) ---
 def process_task_completion(group_id, task_id, shift_type):
-    """Hàm chạy trong luồng riêng để không làm chậm phản hồi webhook."""
     try:
         sheet = CLIENT.open(SHEET_NAME).worksheet(WORKSHEET_TRACKER_NAME)
         tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
         today_str = datetime.now(tz_vietnam).strftime('%Y-%m-%d')
-        
         cell_list = sheet.findall(task_id)
         target_row = -1
         for cell in cell_list:
              row_values = sheet.row_values(cell.row)
              if str(row_values[0]) == group_id and row_values[1] == today_str:
-                 target_row = cell.row
-                 break
-        
+                 target_row = cell.row; break
         if target_row != -1:
             sheet.update_cell(target_row, 6, 'complete')
             print(f"Đã cập nhật task {task_id} thành 'complete' trong Google Sheet.")
         else:
              print(f"Không tìm thấy task {task_id} để cập nhật.")
-
         new_flex_message = generate_checklist_flex(group_id, shift_type)
         if new_flex_message:
-            line_bot_api.push_message(
-                group_id,
-                FlexSendMessage(alt_text=f"Cập nhật checklist ca {shift_type}", contents=new_flex_message)
-            )
+            line_bot_api.push_message(group_id, FlexSendMessage(alt_text=f"Cập nhật checklist ca {shift_type}", contents=new_flex_message))
     except Exception as e:
         print(f"Lỗi trong luồng xử lý task: {e}")
 
-# --- BỘ XỬ LÝ SỰ KIỆN (HANDLERS) ---
 @handler.add(PostbackEvent)
 def handle_postback(event):
     data = event.postback.data
     params = dict(x.split('=') for x in data.split('&'))
     action = params.get('action')
     group_id = event.source.group_id if event.source.type == 'group' else event.source.user_id
-    
     if action == 'complete_task':
         task_id = params.get('task_id')
         shift_type = params.get('shift')
         print(f"Nhận yêu cầu hoàn tất task: {task_id} từ group: {group_id}. Bắt đầu xử lý trong nền.")
-        
         task_thread = threading.Thread(target=process_task_completion, args=(group_id, task_id, shift_type))
         task_thread.start()
 
+# --- XỬ LÝ TIN NHẮN CHÍNH ---
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
     user_message = event.message.text.strip()
@@ -448,35 +411,53 @@ def handle_message(event):
     user_id = event.source.user_id
     source_id = event.source.group_id if event.source.type == 'group' else user_id
 
+    # --- LỆNH TIỆN ÍCH ---
     if user_msg_upper == 'ID':
-        reply_text = f'User ID của bạn là:\n{user_id}'
+        reply_text = f'User ID: {user_id}'
         if event.source.type == 'group':
-            reply_text = f'ID của nhóm này là:\n{event.source.group_id}\n\n' + reply_text
+            reply_text = f'Group ID: {source_id}\n\n' + reply_text
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
         return
 
-    if ADMIN_USER_ID and user_id == ADMIN_USER_ID:
-        # (logic các lệnh admin của bạn có thể thêm vào đây)
-        pass
-            
-    # --- XỬ LÝ LỆNH TEST VÀ RESET CHECKLIST ---
+    # --- LỆNH XEM LỊCH LÀM VIỆC (MỚI) ---
+    schedule_type_to_send = None
+    if user_msg_upper == 'NV':
+        schedule_type_to_send = 'employee'
+    elif user_msg_upper == 'PG':
+        schedule_type_to_send = 'pg'
+
+    if schedule_type_to_send:
+        print(f"Nhận lệnh xem lịch '{schedule_type_to_send}'")
+        try:
+            from config import WORKSHEET_SCHEDULES_NAME
+            sheet = CLIENT.open(SHEET_NAME).worksheet(WORKSHEET_SCHEDULES_NAME)
+            all_schedules = sheet.get_all_records()
+            today_str = get_vietnamese_day_of_week()
+            column_to_read = 'pg_schedule' if schedule_type_to_send == 'pg' else 'employee_schedule'
+            schedule_text_today = next((row.get(column_to_read) for row in all_schedules if row.get('day_of_week') == today_str), None)
+            if schedule_text_today:
+                flex_content = create_schedule_flex_message(schedule_type_to_send, schedule_text_today)
+                message = FlexSendMessage(alt_text=f"Lịch làm việc {schedule_type_to_send} hôm nay", contents=flex_content)
+                line_bot_api.reply_message(event.reply_token, message)
+            else:
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"Không tìm thấy lịch làm việc cho hôm nay ({today_str})."))
+        except Exception as e:
+            print(f"Lỗi khi gửi lịch làm việc theo lệnh: {e}")
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="Đã có lỗi xảy ra khi lấy lịch làm việc."))
+        return
+        
+    # --- LỆNH CHECKLIST ---
     shift_to_process = None
-    if user_msg_upper in ['TEST SANG', 'RESET SANG']:
-        shift_to_process = 'sang'
-    elif user_msg_upper in ['TEST CHIEU', 'RESET CHIEU']:
-        shift_to_process = 'chieu'
+    if user_msg_upper in ['TEST SANG', 'RESET SANG']: shift_to_process = 'sang'
+    elif user_msg_upper in ['TEST CHIEU', 'RESET CHIEU']: shift_to_process = 'chieu'
 
     if shift_to_process:
         print(f"Nhận lệnh '{user_msg_upper}' từ group {source_id}")
         try:
             initialize_daily_tasks(source_id, shift_to_process)
             flex_message = generate_checklist_flex(source_id, shift_to_process)
-            
             if flex_message:
-                line_bot_api.reply_message(
-                    event.reply_token,
-                    FlexSendMessage(alt_text=f"Checklist ca {shift_to_process}", contents=flex_message)
-                )
+                line_bot_api.reply_message(event.reply_token, FlexSendMessage(alt_text=f"Checklist ca {shift_to_process}", contents=flex_message))
             else:
                 line_bot_api.reply_message(event.reply_token, TextSendMessage(text="Không thể tạo checklist."))
         except Exception as e:
@@ -484,13 +465,13 @@ def handle_message(event):
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"Gặp lỗi: {e}"))
         return
 
-    # --- KIỂM TRA QUYỀN TRUY CẬP CHO BÁO CÁO REALTIME ---
+    # --- KIỂM TRA QUYỀN TRUY CẬP ---
     is_controlled = bool(allowed_ids_cache) and ADMIN_USER_ID
     if is_controlled and source_id not in allowed_ids_cache:
-        print(f"Từ chối truy cập từ source_id: {source_id} vì không có trong danh sách cho phép.")
+        print(f"Từ chối truy cập từ source_id: {source_id}")
         return
 
-    # --- XỬ LÝ LOGIC BÁO CÁO REALTIME ---
+    # --- XỬ LÝ BÁO CÁO REALTIME ---
     try:
         sheet = CLIENT.open(SHEET_NAME).worksheet(WORKSHEET_NAME)
         all_data = sheet.get_all_values()
@@ -524,7 +505,7 @@ def handle_message(event):
         elif user_msg_upper == 'BXH2':
             for flex_data in create_leaderboard_flex_message(all_data, channel_filter='tgdd'):
                 reply_messages.append(FlexSendMessage(alt_text=flex_data['altText'], contents=flex_data['contents']))
-
+        
         elif user_msg_upper == 'MENU BOT':
             menu_text = (
                 "🤖 MENU HƯỚNG DẪN BOT 🤖\n"
@@ -540,12 +521,15 @@ def handle_message(event):
                 "\n✅ CHECKLIST CÔNG VIỆC:\n"
                 "• `RESET SANG` - Bắt đầu checklist ca sáng.\n"
                 "• `RESET CHIEU` - Bắt đầu checklist ca chiều.\n"
+                "\n✅ LỊCH LÀM VIỆC:\n"
+                "• `NV` - Xem lịch làm việc Nhân viên.\n"
+                "• `PG` - Xem lịch làm việc PG.\n"
                 "\n✅ TIỆN ÍCH KHÁC:\n"
                 "• `ID` - Lấy ID cá nhân & ID nhóm.\n"
                 "• `MENU BOT` - Hiển thị lại menu này."
             )
             reply_messages.append(TextSendMessage(text=menu_text))
-
+            
         elif user_msg_upper in cluster_names:
             for flex_data in create_leaderboard_flex_message(all_data, cluster_name=user_msg_upper):
                 reply_messages.append(FlexSendMessage(alt_text=flex_data['altText'], contents=flex_data['contents']))
@@ -570,3 +554,4 @@ def handle_message(event):
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port)
+
