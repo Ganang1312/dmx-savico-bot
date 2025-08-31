@@ -14,15 +14,13 @@ from linebot import (
 )
 from linebot.exceptions import InvalidSignatureError
 from linebot.models import (
-    MessageEvent, TextMessage, TextSendMessage, FlexSendMessage, PostbackEvent
+    MessageEvent, TextMessage, TextSendMessage, FlexSendMessage
 )
 import pandas as pd
 from apscheduler.schedulers.background import BackgroundScheduler
 
 # --- IMPORT TỪ CÁC FILE KHÁC CỦA BẠN ---
-from config import CLIENT, SHEET_NAME, WORKSHEET_NAME_USERS, WORKSHEET_TRACKER_NAME, WORKSHEET_NAME
-from flex_handler import generate_checklist_flex, initialize_daily_tasks
-from checklist_scheduler import send_initial_checklist
+from config import CLIENT, SHEET_NAME, WORKSHEET_NAME_USERS, WORKSHEET_NAME
 # THÊM MỚI: Import các hàm cần thiết để tra cứu lịch
 from schedule_handler import get_vietnamese_day_of_week, create_schedule_flex_message
 
@@ -67,48 +65,64 @@ def keep_alive():
             print(f"Lỗi khi ping: {e}")
         time.sleep(600)
 
-# --- LOGIC NHẮC NHỞ TỰ ĐỘNG ---
-def reminder_job():
-    print("Scheduler: Đang chạy kiểm tra nhắc nhở...")
+# --- HÀM GỬI BÁO CÁO CÔNG VIỆC CỐ ĐỊNH (MỚI) ---
+def send_static_report(shift):
+    """
+    Hàm này gửi một tin nhắn văn bản cố định thông báo công việc
+    đến tất cả các group được liệt kê trong Google Sheet.
+    """
+    print(f"Bắt đầu gửi báo cáo công việc cố định cho ca: {shift}")
+
+    # --- ĐỊNH NGHĨA NỘI DUNG TIN NHẮN ---
+    if shift == 'sang':
+        report_text = (
+            "✅ BÁO CÁO CÔNG VIỆC CA SÁNG\n"
+            "1️⃣ 📦 Check lệnh chuyển kho online (09:15)\n"
+            "2️⃣ 🚚 Check đơn GHTK chuyển kho (09:30)\n"
+            "3️⃣ 🏷️ Chạy tủ, thay giá TBBM, DSD (thứ 2 & 5) (10:00)\n"
+            "4️⃣ 🧹 Rà soát tốc kệ (cùng model, nhóm màu, sạch bụi) (10:30)\n"
+            "5️⃣ 📑 Check Phiếu CK / NK quá 7 ngày (11:30)\n"
+            "6️⃣ 🔧 Đổ tồn hàng T.Thái (lỗi) → Gửi bảo hành, xử lý về 0 (Trước 14:00)"
+        )
+    elif shift == 'chieu':
+        report_text = (
+            "🌙 BÁO CÁO CÔNG VIỆC CA CHIỀU\n"
+            "1️⃣ 📦 Check lệnh online (15:15)\n"
+            "2️⃣ 🚚 Check đơn GHTK (15:30)\n"
+            "3️⃣ 📦🧹 Sắp xếp hàng hóa kho & dọn bàn làm việc (16:00)\n"
+            "4️⃣ 🖼️ Rà soát tốc kệ (gia dụng / tivi / ụ giá sốc) (16:30)\n"
+            "5️⃣ 📊 Xử lý BCNB chiều (17:30)\n"
+            "6️⃣ 🔧 Đổ tồn hàng T.Thái (lỗi) → Gửi bảo hành, xử lý về 0 (Trước 19:00)\n"
+            "7️⃣ 📦🚚 Check GHTK / Grab (21:00)\n"
+            "8️⃣ 📸 Up hình máy cũ / máy trưng bày (21:30)"
+        )
+    else:
+        print(f"Lỗi: Ca làm việc '{shift}' không hợp lệ.")
+        return
+
+    # --- LẤY DANH SÁCH GROUP VÀ GỬI TIN NHẮN ---
     try:
-        sheet = CLIENT.open(SHEET_NAME).worksheet(WORKSHEET_TRACKER_NAME)
-        df = pd.DataFrame(sheet.get_all_records())
+        sheet = CLIENT.open(SHEET_NAME).worksheet(WORKSHEET_NAME_USERS)
+        group_ids = sheet.col_values(1)[1:] 
         
-        if df.empty: return
-        tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
-        now = datetime.now(tz_vietnam)
-        today_str = now.strftime('%Y-%m-%d')
-        overdue_tasks = df[(df['date'] == today_str) & (df['status'] == 'incomplete')]
+        if not group_ids:
+            print("Không tìm thấy group ID nào để gửi thông báo.")
+            return
 
-        for index, task in overdue_tasks.iterrows():
-            deadline_time = datetime.strptime(str(task['deadline']), '%H:%M').time()
-            deadline_dt = now.replace(hour=deadline_time.hour, minute=deadline_time.minute, second=0, microsecond=0)
-            
-            if now > deadline_dt:
-                last_reminded_str = task.get('last_reminded')
-                should_remind = False
-                if not last_reminded_str or last_reminded_str == '':
-                    should_remind = True
-                else:
-                    last_reminded_dt = datetime.fromisoformat(last_reminded_str)
-                    if (now - last_reminded_dt).total_seconds() > 600:
-                        should_remind = True
-                
-                if should_remind:
-                    group_id = str(task['group_id'])
-                    reminder_text = f"🚨 NHẮC NHỞ: Công việc '{task['task_name']}' đã quá hạn lúc {task['deadline']}!"
-                    print(f"Gửi nhắc nhở cho task: {task['task_name']} đến group: {group_id}")
-                    line_bot_api.push_message(group_id, TextSendMessage(text=reminder_text))
-                    cell_list = sheet.findall(str(task['task_id']))
-                    for cell in cell_list:
-                        row_values = sheet.row_values(cell.row)
-                        if str(row_values[0]) == group_id and row_values[1] == today_str:
-                             sheet.update_cell(cell.row, 7, now.isoformat())
-                             break
+        print(f"Sẽ gửi thông báo đến {len(group_ids)} group.")
+        
+        for group_id in group_ids:
+            if group_id:
+                try:
+                    line_bot_api.push_message(group_id, TextSendMessage(text=report_text))
+                    print(f"Đã gửi thành công đến group: {group_id}")
+                except Exception as e:
+                    print(f"Lỗi khi gửi đến group {group_id}: {e}")
+                    
     except Exception as e:
-        print(f"Lỗi trong reminder_job: {e}")
+        print(f"Lỗi nghiêm trọng khi thực hiện send_static_report: {e}")
 
-# --- CÁC HÀM XỬ LÝ DỮ LIỆU BÁO CÁO ---
+# --- CÁC HÀM XỬ LÝ DỮ LIỆU BÁO CÁO (KHÔNG THAY ĐỔI) ---
 def parse_float_from_string(s):
     if s is None: return 0.0
     if not isinstance(s, str): s = str(s)
@@ -299,20 +313,19 @@ def create_leaderboard_flex_message(all_data, cluster_name=None, channel_filter=
     
     messages_to_return = []
     
-    # SỬA LỖI LOGIC: Xử lý chính xác các trường hợp của channel_filter
     show_dmx = False
     show_tgdd = False
 
-    if channel_filter is None: # Lệnh 'BXH' hoặc 'ST' cho cụm
+    if channel_filter is None:
         show_dmx = True
         show_tgdd = True
-    elif channel_filter == 'dmx': # Lệnh 'BXH1'
+    elif channel_filter == 'dmx':
         show_dmx = True
-    elif channel_filter == 'tgdd': # Lệnh 'BXH2'
+    elif channel_filter == 'tgdd':
         show_tgdd = True
-    elif channel_filter in dmx_channels: # Lệnh 'ST' cho một siêu thị thuộc kênh ĐMX
+    elif channel_filter in dmx_channels:
         show_dmx = True
-    elif channel_filter in tgdd_channels: # Lệnh 'ST' cho một siêu thị thuộc kênh TGDĐ
+    elif channel_filter in tgdd_channels:
         show_tgdd = True
 
     if show_dmx and dmx_stores:
@@ -329,7 +342,7 @@ if 'RENDER' in os.environ:
     keep_alive_thread.start()
 
 scheduler = BackgroundScheduler(daemon=True, timezone='Asia/Ho_Chi_Minh')
-scheduler.add_job(reminder_job, 'interval', minutes=10)
+# ĐÃ XÓA TÁC VỤ NHẮC NHỞ TỰ ĐỘNG (reminder_job)
 scheduler.start()
 
 # --- ĐIỂM TIẾP NHẬN (ROUTES) ---
@@ -355,21 +368,29 @@ def trigger_schedule():
     
 @app.route("/trigger-checklist", methods=['POST'])
 def trigger_checklist():
+    """
+    Endpoint này được Cron Job gọi để gửi báo cáo công việc cố định.
+    Đã được chỉnh sửa để gọi hàm send_static_report.
+    """
     incoming_secret = request.headers.get('X-Cron-Secret')
     if not CRON_SECRET_KEY or incoming_secret != CRON_SECRET_KEY:
         print("Lỗi bảo mật: Sai hoặc thiếu CRON_SECRET_KEY.")
         abort(403)
+        
     data = request.get_json()
     shift = data.get('shift')
     if shift not in ['sang', 'chieu']:
         return "Lỗi: 'shift' phải là 'sang' hoặc 'chieu'.", 400
+        
     try:
-        thread = threading.Thread(target=send_initial_checklist, args=(shift,))
+        # Chạy hàm gửi báo cáo trong một luồng riêng để không bị timeout
+        thread = threading.Thread(target=send_static_report, args=(shift,))
         thread.start()
-        print(f"Đã kích hoạt thành công checklist cho ca: {shift}")
-        return f"OK, đã kích hoạt checklist ca {shift}.", 200
+        
+        print(f"Đã kích hoạt gửi báo cáo công việc cố định cho ca: {shift}")
+        return f"OK, đã kích hoạt gửi báo cáo ca {shift}.", 200
     except Exception as e:
-        print(f"Lỗi khi kích hoạt checklist: {e}")
+        print(f"Lỗi khi kích hoạt gửi báo cáo: {e}")
         return f"Lỗi máy chủ: {e}", 500
 
 @app.route("/callback", methods=['POST'])
@@ -385,41 +406,8 @@ def callback():
 def ping():
     return "OK", 200
 
-# --- XỬ LÝ NÚT BẤM (POSTBACK) ---
-def process_task_completion(group_id, task_id, shift_type):
-    try:
-        sheet = CLIENT.open(SHEET_NAME).worksheet(WORKSHEET_TRACKER_NAME)
-        tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
-        today_str = datetime.now(tz_vietnam).strftime('%Y-%m-%d')
-        cell_list = sheet.findall(task_id)
-        target_row = -1
-        for cell in cell_list:
-             row_values = sheet.row_values(cell.row)
-             if str(row_values[0]) == group_id and row_values[1] == today_str:
-                 target_row = cell.row; break
-        if target_row != -1:
-            sheet.update_cell(target_row, 6, 'complete')
-            print(f"Đã cập nhật task {task_id} thành 'complete' trong Google Sheet.")
-        else:
-             print(f"Không tìm thấy task {task_id} để cập nhật.")
-        new_flex_message = generate_checklist_flex(group_id, shift_type)
-        if new_flex_message:
-            line_bot_api.push_message(group_id, FlexSendMessage(alt_text=f"Cập nhật checklist ca {shift_type}", contents=new_flex_message))
-    except Exception as e:
-        print(f"Lỗi trong luồng xử lý task: {e}")
-
-@handler.add(PostbackEvent)
-def handle_postback(event):
-    data = event.postback.data
-    params = dict(x.split('=') for x in data.split('&'))
-    action = params.get('action')
-    group_id = event.source.group_id if event.source.type == 'group' else event.source.user_id
-    if action == 'complete_task':
-        task_id = params.get('task_id')
-        shift_type = params.get('shift')
-        print(f"Nhận yêu cầu hoàn tất task: {task_id} từ group: {group_id}. Bắt đầu xử lý trong nền.")
-        task_thread = threading.Thread(target=process_task_completion, args=(group_id, task_id, shift_type))
-        task_thread.start()
+# --- XỬ LÝ NÚT BẤM (POSTBACK) ĐÃ BỊ XÓA ---
+# Toàn bộ hàm handle_postback và process_task_completion đã được loại bỏ.
 
 # --- XỬ LÝ TIN NHẮN CHÍNH ---
 @handler.add(MessageEvent, message=TextMessage)
@@ -464,30 +452,16 @@ def handle_message(event):
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text="Đã có lỗi xảy ra khi lấy lịch làm việc."))
         return
         
-    # --- LỆNH CHECKLIST ---
-    shift_to_process = None
-    if user_msg_upper in ['TEST SANG', 'RESET SANG']: shift_to_process = 'sang'
-    elif user_msg_upper in ['TEST CHIEU', 'RESET CHIEU']: shift_to_process = 'chieu'
-
-    if shift_to_process:
-        print(f"Nhận lệnh '{user_msg_upper}' từ group {source_id}")
-        try:
-            initialize_daily_tasks(source_id, shift_to_process)
-            flex_message = generate_checklist_flex(source_id, shift_to_process)
-            if flex_message:
-                line_bot_api.reply_message(event.reply_token, FlexSendMessage(alt_text=f"Checklist ca {shift_to_process}", contents=flex_message))
-            else:
-                line_bot_api.reply_message(event.reply_token, TextSendMessage(text="Không thể tạo checklist."))
-        except Exception as e:
-            print(f"Lỗi khi thực thi lệnh test/reset: {e}")
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"Gặp lỗi: {e}"))
-        return
+    # --- LỆNH CHECKLIST ĐÃ BỊ XÓA ---
+    # Toàn bộ logic xử lý 'TEST SANG', 'RESET CHIEU' đã được loại bỏ.
 
     # --- KIỂM TRA QUYỀN TRUY CẬP ---
     is_controlled = bool(allowed_ids_cache) and ADMIN_USER_ID
     if is_controlled and source_id not in allowed_ids_cache:
-        print(f"Từ chối truy cập từ source_id: {source_id}")
-        return
+        # Cho phép các lệnh không cần kiểm tra quyền truy cập ở trên chạy qua
+        if user_msg_upper not in ['ID', 'NV', 'PG']:
+            print(f"Từ chối truy cập từ source_id: {source_id}")
+            return
 
     # --- XỬ LÝ BÁO CÁO REALTIME ---
     try:
@@ -536,9 +510,6 @@ def handle_message(event):
                 "• `BXH` - Top 20 ĐMX & TGDD.\n"
                 "• `BXH1` - Top 20 ĐMX.\n"
                 "• `BXH2` - Top 20 TGDD.\n"
-                "\n✅ CHECKLIST CÔNG VIỆC:\n"
-                "• `RESET SANG` - Bắt đầu checklist ca sáng.\n"
-                "• `RESET CHIEU` - Bắt đầu checklist ca chiều.\n"
                 "\n✅ LỊCH LÀM VIỆC:\n"
                 "• `NV` - Xem lịch làm việc Nhân viên.\n"
                 "• `PG` - Xem lịch làm việc PG.\n"
@@ -572,4 +543,3 @@ def handle_message(event):
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port)
-
