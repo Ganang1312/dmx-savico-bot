@@ -21,8 +21,9 @@ from apscheduler.schedulers.background import BackgroundScheduler
 
 # --- IMPORT TỪ CÁC FILE KHÁC CỦA BẠN ---
 from config import CLIENT, SHEET_NAME, WORKSHEET_NAME_USERS, WORKSHEET_NAME
-# THÊM MỚI: Import các hàm cần thiết để tra cứu lịch
 from schedule_handler import get_vietnamese_day_of_week, create_schedule_flex_message
+# SỬA LỖI: Import hàm gửi checklist đúng
+from checklist_scheduler import send_initial_checklist
 
 # --- PHẦN CẤU HÌNH: ĐỌC TỪ BIẾN MÔI TRƯỜNG ---
 CHANNEL_ACCESS_TOKEN = os.environ.get('CHANNEL_ACCESS_TOKEN')
@@ -65,62 +66,7 @@ def keep_alive():
             print(f"Lỗi khi ping: {e}")
         time.sleep(600)
 
-# --- HÀM GỬI BÁO CÁO CÔNG VIỆC CỐ ĐỊNH (MỚI) ---
-def send_static_report(shift):
-    """
-    Hàm này gửi một tin nhắn văn bản cố định thông báo công việc
-    đến tất cả các group được liệt kê trong Google Sheet.
-    """
-    print(f"Bắt đầu gửi báo cáo công việc cố định cho ca: {shift}")
-
-    # --- ĐỊNH NGHĨA NỘI DUNG TIN NHẮN ---
-    if shift == 'sang':
-        report_text = (
-            "✅ BÁO CÁO CÔNG VIỆC CA SÁNG\n"
-            "1️⃣ 📦 Check lệnh chuyển kho online (09:15)\n"
-            "2️⃣ 🚚 Check đơn GHTK chuyển kho (09:30)\n"
-            "3️⃣ 🏷️ Chạy tủ, thay giá TBBM, DSD (thứ 2 & 5) (10:00)\n"
-            "4️⃣ 🧹 Rà soát tốc kệ (cùng model, nhóm màu, sạch bụi) (10:30)\n"
-            "5️⃣ 📑 Check Phiếu CK / NK quá 7 ngày (11:30)\n"
-            "6️⃣ 🔧 Đổ tồn hàng T.Thái (lỗi) → Gửi bảo hành, xử lý về 0 (Trước 14:00)"
-        )
-    elif shift == 'chieu':
-        report_text = (
-            "🌙 BÁO CÁO CÔNG VIỆC CA CHIỀU\n"
-            "1️⃣ 📦 Check lệnh online (15:15)\n"
-            "2️⃣ 🚚 Check đơn GHTK (15:30)\n"
-            "3️⃣ 📦🧹 Sắp xếp hàng hóa kho & dọn bàn làm việc (16:00)\n"
-            "4️⃣ 🖼️ Rà soát tốc kệ (gia dụng / tivi / ụ giá sốc) (16:30)\n"
-            "5️⃣ 📊 Xử lý BCNB chiều (17:30)\n"
-            "6️⃣ 🔧 Đổ tồn hàng T.Thái (lỗi) → Gửi bảo hành, xử lý về 0 (Trước 19:00)\n"
-            "7️⃣ 📦🚚 Check GHTK / Grab (21:00)\n"
-            "8️⃣ 📸 Up hình máy cũ / máy trưng bày (21:30)"
-        )
-    else:
-        print(f"Lỗi: Ca làm việc '{shift}' không hợp lệ.")
-        return
-
-    # --- LẤY DANH SÁCH GROUP VÀ GỬI TIN NHẮN ---
-    try:
-        sheet = CLIENT.open(SHEET_NAME).worksheet(WORKSHEET_NAME_USERS)
-        group_ids = sheet.col_values(1)[1:] 
-        
-        if not group_ids:
-            print("Không tìm thấy group ID nào để gửi thông báo.")
-            return
-
-        print(f"Sẽ gửi thông báo đến {len(group_ids)} group.")
-        
-        for group_id in group_ids:
-            if group_id:
-                try:
-                    line_bot_api.push_message(group_id, TextSendMessage(text=report_text))
-                    print(f"Đã gửi thành công đến group: {group_id}")
-                except Exception as e:
-                    print(f"Lỗi khi gửi đến group {group_id}: {e}")
-                    
-    except Exception as e:
-        print(f"Lỗi nghiêm trọng khi thực hiện send_static_report: {e}")
+# --- XÓA BỎ HÀM CŨ: send_static_report ĐÃ ĐƯỢC LOẠI BỎ ---
 
 # --- CÁC HÀM XỬ LÝ DỮ LIỆU BÁO CÁO (KHÔNG THAY ĐỔI) ---
 def parse_float_from_string(s):
@@ -367,10 +313,6 @@ def trigger_schedule():
     
 @app.route("/trigger-checklist", methods=['POST'])
 def trigger_checklist():
-    """
-    Endpoint này được Cron Job gọi để gửi báo cáo công việc cố định.
-    Đã được chỉnh sửa để gọi hàm send_static_report.
-    """
     incoming_secret = request.headers.get('X-Cron-Secret')
     if not CRON_SECRET_KEY or incoming_secret != CRON_SECRET_KEY:
         print("Lỗi bảo mật: Sai hoặc thiếu CRON_SECRET_KEY.")
@@ -382,14 +324,14 @@ def trigger_checklist():
         return "Lỗi: 'shift' phải là 'sang' hoặc 'chieu'.", 400
         
     try:
-        # Chạy hàm gửi báo cáo trong một luồng riêng để không bị timeout
-        thread = threading.Thread(target=send_static_report, args=(shift,))
+        # SỬA LỖI: Gọi hàm send_initial_checklist đúng
+        thread = threading.Thread(target=send_initial_checklist, args=(shift,))
         thread.start()
         
-        print(f"Đã kích hoạt gửi báo cáo công việc cố định cho ca: {shift}")
-        return f"OK, đã kích hoạt gửi báo cáo ca {shift}.", 200
+        print(f"Đã kích hoạt gửi checklist tương tác cho ca: {shift}")
+        return f"OK, đã kích hoạt gửi checklist ca {shift}.", 200
     except Exception as e:
-        print(f"Lỗi khi kích hoạt gửi báo cáo: {e}")
+        print(f"Lỗi khi kích hoạt gửi checklist: {e}")
         return f"Lỗi máy chủ: {e}", 500
 
 @app.route("/callback", methods=['POST'])
@@ -413,7 +355,6 @@ def handle_message(event):
     user_id = event.source.user_id
     source_id = event.source.group_id if event.source.type == 'group' else user_id
 
-    # --- LỆNH TIỆN ÍCH ---
     if user_msg_upper == 'ID':
         reply_text = f'User ID: {user_id}'
         if event.source.type == 'group':
@@ -421,7 +362,6 @@ def handle_message(event):
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
         return
 
-    # --- LỆNH XEM LỊCH LÀM VIỆC ---
     schedule_type_to_send = None
     if user_msg_upper == 'NV':
         schedule_type_to_send = 'employee'
@@ -448,7 +388,7 @@ def handle_message(event):
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text="Đã có lỗi xảy ra khi lấy lịch làm việc."))
         return
 
-    # --- [MỚI] THÊM LẠI LỆNH TEST ---
+    # SỬA LỖI: Sửa lệnh TEST để gọi hàm checklist đúng
     shift_to_process = None
     if user_msg_upper == 'TEST SANG':
         shift_to_process = 'sang'
@@ -458,31 +398,22 @@ def handle_message(event):
     if shift_to_process:
         print(f"Nhận lệnh test thủ công cho ca: {shift_to_process}")
         try:
-            # Gửi tin nhắn xác nhận cho người dùng ngay lập tức
             line_bot_api.reply_message(
                 event.reply_token,
-                TextSendMessage(text=f"Đã nhận lệnh test. Bắt đầu gửi thông báo công việc ca {shift_to_process}...")
+                TextSendMessage(text=f"Đã nhận lệnh test. Bắt đầu gửi checklist ca {shift_to_process}...")
             )
-            # Chạy hàm gửi báo cáo trong luồng riêng để không chặn các tác vụ khác
-            thread = threading.Thread(target=send_static_report, args=(shift_to_process,))
+            thread = threading.Thread(target=send_initial_checklist, args=(shift_to_process,))
             thread.start()
         except Exception as e:
             print(f"Lỗi khi thực thi lệnh test: {e}")
-            line_bot_api.reply_message(
-                event.reply_token,
-                TextSendMessage(text=f"Gặp lỗi khi thực hiện lệnh test: {e}")
-            )
         return
         
-    # --- KIỂM TRA QUYỀN TRUY CẬP ---
     is_controlled = bool(allowed_ids_cache) and ADMIN_USER_ID
     if is_controlled and source_id not in allowed_ids_cache:
-        # Cho phép các lệnh không cần kiểm tra quyền truy cập ở trên chạy qua
         if user_msg_upper not in ['ID', 'NV', 'PG', 'TEST SANG', 'TEST CHIEU']:
             print(f"Từ chối truy cập từ source_id: {source_id}")
             return
 
-    # --- XỬ LÝ BÁO CÁO REALTIME ---
     try:
         sheet = CLIENT.open(SHEET_NAME).worksheet(WORKSHEET_NAME)
         all_data = sheet.get_all_values()
