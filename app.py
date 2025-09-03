@@ -61,12 +61,16 @@ def send_scheduled_announcements(line_bot_api_instance):
         for idx, ann in enumerate(announcements):
             group_id = ann.get('GroupID')
             content = ann.get('Content')
-            send_time = ann.get('Time')
+            send_time = str(ann.get('Time', '')).strip() # Đảm bảo là chuỗi
             schedule_type = str(ann.get('ScheduleType', '')).strip()
             status = ann.get('Status', '').strip().lower()
             
             if not all([group_id, content, send_time, status]) or status != 'active':
                 continue
+            
+            # SỬA LỖI: Chuẩn hóa thời gian từ Sheet về dạng HH:MM để so sánh chính xác
+            if len(send_time) > 5:
+                send_time = send_time[:5]
 
             should_send = False
             if send_time == current_time_str:
