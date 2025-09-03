@@ -43,7 +43,7 @@ app = Flask(__name__)
 line_bot_api = LineBotApi(CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(CHANNEL_SECRET)
 
-# --- LOGIC XỬ LÝ THÔNG BÁO TỰ ĐỘNG (ĐÃ TÍCH HỢP) ---
+# --- LOGIC XỬ LÝ THÔNG BÁO TỰ ĐỘNG (ĐÃ TÍCH HỢP VÀ SỬA LỖI) ---
 def send_scheduled_announcements(line_bot_api_instance):
     """
     Quét worksheet 'ThongBao' và gửi tin nhắn đến các group/user được lên lịch.
@@ -70,9 +70,12 @@ def send_scheduled_announcements(line_bot_api_instance):
 
             should_send = False
             if send_time == current_time_str:
-                if schedule_type.lower() == 'hang_ngay':
+                # SỬA LỖI: Tự động chuyển đổi định dạng ngày YYYY/MM/DD thành YYYY-MM-DD để khớp
+                normalized_schedule_date = schedule_type.replace('/', '-')
+
+                if normalized_schedule_date.lower() == 'hang_ngay':
                     should_send = True
-                elif schedule_type == current_date_str:
+                elif normalized_schedule_date == current_date_str:
                     should_send = True
 
             if should_send:
@@ -81,7 +84,6 @@ def send_scheduled_announcements(line_bot_api_instance):
                     line_bot_api_instance.push_message(str(group_id), TextSendMessage(text=str(content)))
                     
                     if schedule_type.lower() != 'hang_ngay':
-                        # Gsheet hàng bắt đầu từ 1, header là hàng 1 => dữ liệu bắt đầu từ hàng idx + 2
                         status_col = sheet.find('Status').col
                         sheet.update_cell(idx + 2, status_col, 'sent')
                         print(f"Đã cập nhật trạng thái 'sent' cho thông báo tại hàng {idx + 2}")
@@ -94,7 +96,8 @@ def send_scheduled_announcements(line_bot_api_instance):
 
     print("Hoàn tất kiểm tra thông báo.")
 
-# --- CÁC HÀM TIỆN ÍCH ---
+
+# --- CÁC HÀM TIỆN ÍCH KHÁC ---
 def load_allowed_ids():
     global allowed_ids_cache
     try:
@@ -120,7 +123,6 @@ def keep_alive():
         time.sleep(600)
 
 def send_text_checklist(shift):
-    """Gửi checklist công việc dưới dạng tin nhắn văn bản đơn giản."""
     morning_message = (
         "✅ BÁO CÁO CÔNG VIỆC CA SÁNG\n"
         "1️⃣ 📦 Check lệnh chuyển kho online (09:15)\n"
@@ -130,7 +132,6 @@ def send_text_checklist(shift):
         "5️⃣ 📑 Check Phiếu CK / NK quá 7 ngày (11:30)\n"
         "6️⃣ 🔧 Đổ tồn hàng T.Thái (lỗi) → Gửi bảo hành, xử lý về 0 (Trước 14:00)"
     )
-
     afternoon_message = (
         "🌙 BÁO CÁO CÔNG VIỆC CA CHIỀU\n"
         "1️⃣ 📦 Check lệnh online (15:15)\n"
@@ -142,29 +143,16 @@ def send_text_checklist(shift):
         "7️⃣ 📦🚚 Check GHTK / Grab (21:00)\n"
         "8️⃣ 📸 Up hình máy cũ / máy trưng bày (21:30)"
     )
-
     message_to_send = ""
-    if shift == 'sang':
-        message_to_send = morning_message
-    elif shift == 'chieu':
-        message_to_send = afternoon_message
-    else:
-        print(f"Lỗi: Ca không hợp lệ '{shift}' trong send_text_checklist")
-        return
+    if shift == 'sang': message_to_send = morning_message
+    elif shift == 'chieu': message_to_send = afternoon_message
+    else: return
 
-    # ID của nhóm duy nhất nhận checklist tự động
     target_group_id = "C37e48216804398593d8c79fe3edacdc7"
-    
-    print(f"Bắt đầu gửi checklist tự động ca '{shift}' tới ID: {target_group_id}")
     try:
         line_bot_api.push_message(target_group_id, TextSendMessage(text=message_to_send))
-        print(f"Đã gửi checklist thành công tới ID: {target_group_id}")
     except Exception as e:
         print(f"Lỗi khi gửi checklist tới ID {target_group_id}: {e}")
-        if ADMIN_USER_ID:
-            line_bot_api.push_message(ADMIN_USER_ID, TextSendMessage(text=f"Lỗi khi gửi checklist tự động: {e}"))
-    print("Hoàn tất gửi checklist tự động.")
-
 
 # --- CÁC HÀM XỬ LÝ DỮ LIỆU BÁO CÁO ---
 def parse_float_from_string(s):
@@ -178,7 +166,6 @@ def parse_float_from_string(s):
 
 def handle_percentage_string(percent_str):
     if not percent_str: return 0.0, "0%"
-    # Chuyển đổi dấu phẩy (,) thành dấu chấm (.) trước khi xử lý
     clean_str = str(percent_str).strip().replace(',', '.')
     if '%' in clean_str:
         try:
@@ -410,7 +397,6 @@ def trigger_announcements():
 def trigger_schedule():
     incoming_secret = request.headers.get('X-Cron-Secret')
     if not CRON_SECRET_KEY or incoming_secret != CRON_SECRET_KEY:
-        print("Lỗi bảo mật: Sai hoặc thiếu CRON_SECRET_KEY.")
         abort(403)
     data = request.get_json()
     schedule_type = data.get('type')
@@ -420,17 +406,14 @@ def trigger_schedule():
         from schedule_handler import send_daily_schedule
         thread = threading.Thread(target=send_daily_schedule, args=(schedule_type,))
         thread.start()
-        print(f"Đã kích hoạt thành công gửi lịch cho: {schedule_type}")
         return f"OK, đã kích hoạt gửi lịch cho {schedule_type}.", 200
     except Exception as e:
-        print(f"Lỗi khi kích hoạt gửi lịch: {e}")
         return f"Lỗi máy chủ: {e}", 500
     
 @app.route("/trigger-checklist", methods=['POST'])
 def trigger_checklist():
     incoming_secret = request.headers.get('X-Cron-Secret')
     if not CRON_SECRET_KEY or incoming_secret != CRON_SECRET_KEY:
-        print("Lỗi bảo mật: Sai hoặc thiếu CRON_SECRET_KEY.")
         abort(403)
         
     data = request.get_json()
@@ -441,11 +424,8 @@ def trigger_checklist():
     try:
         thread = threading.Thread(target=send_text_checklist, args=(shift,))
         thread.start()
-        
-        print(f"Đã kích hoạt gửi checklist văn bản cho ca: {shift}")
         return f"OK, đã kích hoạt gửi checklist ca {shift}.", 200
     except Exception as e:
-        print(f"Lỗi khi kích hoạt gửi checklist: {e}")
         return f"Lỗi máy chủ: {e}", 500
 
 @app.route("/callback", methods=['POST'])
@@ -483,7 +463,6 @@ def handle_message(event):
         schedule_type_to_send = 'pg'
 
     if schedule_type_to_send:
-        print(f"Nhận lệnh xem lịch '{schedule_type_to_send}'")
         try:
             from config import WORKSHEET_SCHEDULES_NAME
             sheet = CLIENT.open(SHEET_NAME).worksheet(WORKSHEET_SCHEDULES_NAME)
@@ -498,7 +477,6 @@ def handle_message(event):
             else:
                 line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"Không tìm thấy lịch làm việc cho hôm nay ({today_str})."))
         except Exception as e:
-            print(f"Lỗi khi gửi lịch làm việc theo lệnh: {e}")
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text="Đã có lỗi xảy ra khi lấy lịch làm việc."))
         return
 
@@ -509,8 +487,6 @@ def handle_message(event):
         shift_to_process = 'chieu'
     
     if shift_to_process:
-        print(f"Nhận lệnh test thủ công cho ca '{shift_to_process}' từ ID: {source_id}")
-        
         morning_message = (
             "✅ BÁO CÁO CÔNG VIỆC CA SÁNG\n"
             "1️⃣ 📦 Check lệnh chuyển kho online (09:15)\n"
@@ -520,7 +496,6 @@ def handle_message(event):
             "5️⃣ 📑 Check Phiếu CK / NK quá 7 ngày (11:30)\n"
             "6️⃣ 🔧 Đổ tồn hàng T.Thái (lỗi) → Gửi bảo hành, xử lý về 0 (Trước 14:00)"
         )
-
         afternoon_message = (
             "🌙 BÁO CÁO CÔNG VIỆC CA CHIỀU\n"
             "1️⃣ 📦 Check lệnh online (15:15)\n"
@@ -532,19 +507,12 @@ def handle_message(event):
             "7️⃣ 📦🚚 Check GHTK / Grab (21:00)\n"
             "8️⃣ 📸 Up hình máy cũ / máy trưng bày (21:30)"
         )
-
         message_to_send = ""
-        if shift_to_process == 'sang':
-            message_to_send = morning_message
-        elif shift_to_process == 'chieu':
-            message_to_send = afternoon_message
+        if shift_to_process == 'sang': message_to_send = morning_message
+        elif shift_to_process == 'chieu': message_to_send = afternoon_message
 
         try:
-            line_bot_api.reply_message(
-                event.reply_token,
-                TextSendMessage(text=message_to_send)
-            )
-            print(f"Đã gửi tin nhắn test thành công tới ID: {source_id}")
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=message_to_send))
         except Exception as e:
             print(f"Lỗi khi gửi tin nhắn test: {e}")
         return
@@ -552,7 +520,6 @@ def handle_message(event):
     is_controlled = bool(allowed_ids_cache) and ADMIN_USER_ID
     if is_controlled and source_id not in allowed_ids_cache:
         if user_msg_upper not in ['ID', 'NV', 'PG', 'TEST SANG', 'TEST CHIEU']:
-            print(f"Từ chối truy cập từ source_id: {source_id}")
             return
 
     try:
