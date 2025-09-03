@@ -22,8 +22,8 @@ from apscheduler.schedulers.background import BackgroundScheduler
 # --- IMPORT TỪ CÁC FILE KHÁC CỦA BẠN ---
 from config import CLIENT, SHEET_NAME, WORKSHEET_NAME_USERS, WORKSHEET_NAME
 from schedule_handler import get_vietnamese_day_of_week, create_schedule_flex_message
-# SỬA LỖI: Import hàm gửi checklist đúng
-from checklist_scheduler import send_initial_checklist
+
+# THAY ĐỔI: Đã xóa import 'send_initial_checklist' vì logic được tích hợp trực tiếp.
 
 # --- PHẦN CẤU HÌNH: ĐỌC TỪ BIẾN MÔI TRƯỜNG ---
 CHANNEL_ACCESS_TOKEN = os.environ.get('CHANNEL_ACCESS_TOKEN')
@@ -66,9 +66,61 @@ def keep_alive():
             print(f"Lỗi khi ping: {e}")
         time.sleep(600)
 
-# --- XÓA BỎ HÀM CŨ: send_static_report ĐÃ ĐƯỢC LOẠI BỎ ---
+# THAY ĐỔI: Hàm gửi checklist dạng văn bản
+def send_text_checklist(shift):
+    """Gửi checklist công việc dưới dạng tin nhắn văn bản đơn giản."""
+    morning_message = (
+        "✅ BÁO CÁO CÔNG VIỆC CA SÁNG\n"
+        "1️⃣ 📦 Check lệnh chuyển kho online (09:15)\n"
+        "2️⃣ 🚚 Check đơn GHTK chuyển kho (09:30)\n"
+        "3️⃣ 🏷️ Chạy tủ, thay giá TBBM, DSD (thứ 2 & 5) (10:00)\n"
+        "4️⃣ 🧹 Rà soát tốc kệ (cùng model, nhóm màu, sạch bụi) (10:30)\n"
+        "5️⃣ 📑 Check Phiếu CK / NK quá 7 ngày (11:30)\n"
+        "6️⃣ 🔧 Đổ tồn hàng T.Thái (lỗi) → Gửi bảo hành, xử lý về 0 (Trước 14:00)"
+    )
 
-# --- CÁC HÀM XỬ LÝ DỮ LIỆU BÁO CÁO (KHÔNG THAY ĐỔI) ---
+    afternoon_message = (
+        "🌙 BÁO CÁO CÔNG VIỆC CA CHIỀU\n"
+        "1️⃣ 📦 Check lệnh online (15:15)\n"
+        "2️⃣ 🚚 Check đơn GHTK (15:30)\n"
+        "3️⃣ 📦🧹 Sắp xếp hàng hóa kho & dọn bàn làm việc (16:00)\n"
+        "4️⃣ 🖼️ Rà soát tốc kệ (gia dụng / tivi / ụ giá sốc) (16:30)\n"
+        "5️⃣ 📊 Xử lý BCNB chiều (17:30)\n"
+        "6️⃣ 🔧 Đổ tồn hàng T.Thái (lỗi) → Gửi bảo hành, xử lý về 0 (Trước 19:00)\n"
+        "7️⃣ 📦🚚 Check GHTK / Grab (21:00)\n"
+        "8️⃣ 📸 Up hình máy cũ / máy trưng bày (21:30)"
+    )
+
+    message_to_send = ""
+    if shift == 'sang':
+        message_to_send = morning_message
+    elif shift == 'chieu':
+        message_to_send = afternoon_message
+    else:
+        print(f"Lỗi: Ca không hợp lệ '{shift}' trong send_text_checklist")
+        return
+
+    if not allowed_ids_cache:
+        print("Chưa có ID nào trong danh sách được phép. Tải lại...")
+        load_allowed_ids()
+
+    if not allowed_ids_cache:
+        print("Lỗi: Không thể gửi checklist vì không có ID nào được phép.")
+        if ADMIN_USER_ID:
+             line_bot_api.push_message(ADMIN_USER_ID, TextSendMessage(text="Lỗi: Không thể gửi checklist vì danh sách ID rỗng."))
+        return
+
+    print(f"Bắt đầu gửi checklist ca '{shift}' tới {len(allowed_ids_cache)} ID...")
+    for group_id in allowed_ids_cache:
+        try:
+            line_bot_api.push_message(group_id, TextSendMessage(text=message_to_send))
+            print(f"Đã gửi checklist tới ID: {group_id}")
+        except Exception as e:
+            print(f"Lỗi khi gửi checklist tới ID {group_id}: {e}")
+    print("Hoàn tất gửi checklist.")
+
+
+# --- CÁC HÀM XỬ LÝ DỮ LIỆU BÁO CÁO ---
 def parse_float_from_string(s):
     if s is None: return 0.0
     if not isinstance(s, str): s = str(s)
@@ -78,9 +130,11 @@ def parse_float_from_string(s):
         return float(clean_s.replace(',', '.'))
     except ValueError: return 0.0
 
+# SỬA LỖI: Cập nhật hàm để xử lý dấu phẩy thập phân từ Google Sheet
 def handle_percentage_string(percent_str):
     if not percent_str: return 0.0, "0%"
-    clean_str = str(percent_str).strip()
+    # Chuyển đổi dấu phẩy (,) thành dấu chấm (.) trước khi xử lý
+    clean_str = str(percent_str).strip().replace(',', '.')
     if '%' in clean_str:
         try:
             value = float(clean_str.replace('%', '')) / 100
@@ -180,7 +234,7 @@ def create_flex_message(store_data, competition_results, ranking):
         column_boxes = [{"type": "box", "layout": "vertical", "flex": 1, "contents": col} for col in columns]
         unsold_components.append({"type": "box", "layout": "horizontal", "margin": "md", "spacing": "md", "contents": column_boxes})
     percent_color = "#00B33C" if percent_float >= 1 else ("#FFC400" if percent_float > 0.7 else "#FF3B30")
-    
+
     flex_json = {"type": "flex", "altText": f"Báo cáo cho {ten_sieu_thi_rut_gon}", "contents": { "type": "bubble", "size": "giga", "header": { "type": "box", "layout": "vertical", "paddingAll": "20px", "backgroundColor": style["bg"], "contents": [ {"type": "text", "text": "Báo cáo Realtime", "color": style["text"], "size": "lg", "align": "center", "weight": "bold"}, {"type": "text", "text": f"🏪 {ten_sieu_thi_rut_gon.upper()}", "color": style["text"], "weight": "bold", "size": "xl", "align": "center", "margin": "md", "wrap": True}, {"type": "box", "layout": "vertical", "margin": "lg", "spacing": "sm", "contents": [ {"type": "text", "text": f"⭐ Cụm: {cum}", "size": "sm", "color": style["text"]}, {"type": "text", "text": f"🕒 Thời gian: {thoi_gian}", "size": "sm", "color": style["text"]}, {"type": "text", "text": f"🏆 NH thi đua đạt: {nh_thi_dua_dat}", "size": "sm", "color": style["text"]} ]} ] }, "body": { "type": "box", "layout": "vertical", "paddingAll": "20px", "backgroundColor": "#FFFFFF", "contents": [ {"type": "box", "layout": "horizontal", "contents": [ {"type": "box", "layout": "vertical", "flex": 1, "spacing": "sm", "contents": [ {"type": "text", "text": "💰 DOANH THU", "color": "#007BFF", "size": "md", "align": "center", "weight":"bold"}, {"type": "text", "text": realtime_tong, "color": "#007BFF", "size": "xxl", "weight": "bold", "align": "center"} ]}, {"type": "box", "layout": "vertical", "flex": 1, "spacing": "sm", "contents": [ {"type": "text", "text": "🎯 TARGET", "color": "#DC3545", "size": "md", "align": "center", "weight":"bold"}, {"type": "text", "text": target_tong, "color": "#DC3545", "size": "xxl", "weight": "bold", "align": "center"} ]} ]}, {"type": "text", "text": "% HOÀN THÀNH", "color": TEXT_COLOR, "size": "md", "align": "center", "margin": "xl"}, {"type": "text", "text": percent_ht_tong, "color": percent_color, "size": "4xl", "weight": "bold", "align": "center"}, {"type": "box", "layout": "vertical", "backgroundColor": "#DDDDDD", "height": "8px", "cornerRadius": "md", "margin": "md", "contents": [ {"type": "box", "layout": "vertical", "backgroundColor": percent_color, "height": "8px", "cornerRadius": "md", "width": f"{min(100, round(percent_float * 100))}%"} ]}, {"type": "box", "layout": "horizontal", "margin": "xl", "contents": [{"type": "text", "text": "XH D.Thu Kênh", "size": "sm", "color": TEXT_COLOR, "align": "center", "flex": 1}]}, {"type": "box", "layout": "horizontal", "contents": [{"type": "text", "text": ranking, "weight": "bold", "size": "lg", "color": TEXT_COLOR, "align": "center", "flex": 1}]}, {"type": "separator", "margin": "xl", "color": SEPARATOR_COLOR}, {"type": "box", "layout": "horizontal", "margin": "md", "contents": [{"type": "text", "text": "Ngành Hàng", "color": "#555555", "size": "sm", "flex": 4, "weight": "bold", "align": "center"}, {"type": "text", "text": "Realtime", "color": "#555555", "size": "sm", "flex": 2, "align": "center", "weight": "bold"}, {"type": "text", "text": "Target", "color": "#555555", "size": "sm", "flex": 2, "align": "center", "weight": "bold"}, {"type": "text", "text": "%HT", "color": "#555555", "size": "sm", "flex": 2, "align": "end", "weight": "bold"}]}, {"type": "separator", "margin": "md", "color": SEPARATOR_COLOR}, *sold_components, *unsold_components ] } }}
     return flex_json
 
@@ -324,11 +378,11 @@ def trigger_checklist():
         return "Lỗi: 'shift' phải là 'sang' hoặc 'chieu'.", 400
         
     try:
-        # SỬA LỖI: Gọi hàm send_initial_checklist đúng
-        thread = threading.Thread(target=send_initial_checklist, args=(shift,))
+        # THAY ĐỔI: Gọi hàm gửi checklist dạng văn bản mới
+        thread = threading.Thread(target=send_text_checklist, args=(shift,))
         thread.start()
         
-        print(f"Đã kích hoạt gửi checklist tương tác cho ca: {shift}")
+        print(f"Đã kích hoạt gửi checklist văn bản cho ca: {shift}")
         return f"OK, đã kích hoạt gửi checklist ca {shift}.", 200
     except Exception as e:
         print(f"Lỗi khi kích hoạt gửi checklist: {e}")
@@ -388,7 +442,7 @@ def handle_message(event):
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text="Đã có lỗi xảy ra khi lấy lịch làm việc."))
         return
 
-    # SỬA LỖI: Sửa lệnh TEST để gọi hàm checklist đúng
+    # THAY ĐỔI: Cập nhật lệnh TEST để gọi hàm checklist văn bản
     shift_to_process = None
     if user_msg_upper == 'TEST SANG':
         shift_to_process = 'sang'
@@ -402,7 +456,7 @@ def handle_message(event):
                 event.reply_token,
                 TextSendMessage(text=f"Đã nhận lệnh test. Bắt đầu gửi checklist ca {shift_to_process}...")
             )
-            thread = threading.Thread(target=send_initial_checklist, args=(shift_to_process,))
+            thread = threading.Thread(target=send_text_checklist, args=(shift_to_process,))
             thread.start()
         except Exception as e:
             print(f"Lỗi khi thực thi lệnh test: {e}")
