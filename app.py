@@ -58,31 +58,46 @@ def send_scheduled_announcements(line_bot_api_instance):
         current_time_str = now.strftime("%H:%M")
         current_date_str = now.strftime("%Y-%m-%d")
 
+        print(f"DEBUG: Thời gian máy chủ hiện tại (VN): {current_date_str} {current_time_str}")
+
         for idx, ann in enumerate(announcements):
             group_id = ann.get('GroupID')
             content = ann.get('Content')
-            send_time = str(ann.get('Time', '')).strip() # Đảm bảo là chuỗi
-            schedule_type = str(ann.get('ScheduleType', '')).strip()
+            send_time_original = ann.get('Time', '')
+            schedule_type_original = ann.get('ScheduleType', '')
             status = ann.get('Status', '').strip().lower()
+
+            # --- Thêm log gỡ lỗi chi tiết ---
+            print("-" * 20)
+            print(f"DEBUG Hàng {idx + 2}:")
+            print(f"  > Đọc từ Sheet: GroupID='{group_id}', Time='{send_time_original}', ScheduleType='{schedule_type_original}', Status='{status}'")
+
+            send_time = str(send_time_original).strip()
+            schedule_type = str(schedule_type_original).strip()
             
             if not all([group_id, content, send_time, status]) or status != 'active':
+                print("  > Bỏ qua: Dữ liệu không hợp lệ hoặc trạng thái không 'active'.")
                 continue
             
-            # SỬA LỖI: Chuẩn hóa thời gian từ Sheet về dạng HH:MM để so sánh chính xác
+            # Chuẩn hóa thời gian từ Sheet về dạng HH:MM để so sánh chính xác
             if len(send_time) > 5:
                 send_time = send_time[:5]
 
+            # Chuẩn hóa ngày từ Sheet về dạng YYYY-MM-DD
+            normalized_schedule_date = schedule_type.replace('/', '-')
+
+            print(f"  > So sánh Time: Lấy từ Sheet='{send_time}' vs Hiện tại='{current_time_str}' -> Khớp? {send_time == current_time_str}")
+            print(f"  > So sánh Date: Lấy từ Sheet='{normalized_schedule_date}' vs Hiện tại='{current_date_str}' -> Khớp? {normalized_schedule_date == current_date_str}")
+
             should_send = False
             if send_time == current_time_str:
-                # SỬA LỖI: Tự động chuyển đổi định dạng ngày YYYY/MM/DD thành YYYY-MM-DD để khớp
-                normalized_schedule_date = schedule_type.replace('/', '-')
-
                 if normalized_schedule_date.lower() == 'hang_ngay':
                     should_send = True
                 elif normalized_schedule_date == current_date_str:
                     should_send = True
 
             if should_send:
+                print(f"  > ĐIỀU KIỆN HỢP LỆ. Đang chuẩn bị gửi...")
                 try:
                     print(f"Đang gửi thông báo tới Group ID: {group_id}")
                     line_bot_api_instance.push_message(str(group_id), TextSendMessage(text=str(content)))
@@ -94,6 +109,9 @@ def send_scheduled_announcements(line_bot_api_instance):
 
                 except Exception as e:
                     print(f"Lỗi khi gửi thông báo tới {group_id}: {e}")
+            else:
+                print(f"  > Bỏ qua: Điều kiện thời gian/ngày không khớp.")
+
 
     except Exception as e:
         print(f"Lỗi nghiêm trọng trong quá trình gửi thông báo: {e}")
