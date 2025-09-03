@@ -23,8 +23,6 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from config import CLIENT, SHEET_NAME, WORKSHEET_NAME_USERS, WORKSHEET_NAME
 from schedule_handler import get_vietnamese_day_of_week, create_schedule_flex_message
 
-# THAY ĐỔI: Đã xóa import 'send_initial_checklist' vì logic được tích hợp trực tiếp.
-
 # --- PHẦN CẤU HÌNH: ĐỌC TỪ BIẾN MÔI TRƯỜNG ---
 CHANNEL_ACCESS_TOKEN = os.environ.get('CHANNEL_ACCESS_TOKEN')
 CHANNEL_SECRET = os.environ.get('CHANNEL_SECRET')
@@ -36,10 +34,65 @@ if not all([CHANNEL_ACCESS_TOKEN, CHANNEL_SECRET]):
 
 allowed_ids_cache = set()
 
+# Tên của worksheet chứa các thông báo cần gửi
+WORKSHEET_NAME_ANNOUNCEMENTS = 'ThongBao'
+
+
 # --- KHỞI TẠO ỨNG DỤNG ---
 app = Flask(__name__)
 line_bot_api = LineBotApi(CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(CHANNEL_SECRET)
+
+# --- LOGIC XỬ LÝ THÔNG BÁO TỰ ĐỘNG (ĐÃ TÍCH HỢP) ---
+def send_scheduled_announcements(line_bot_api_instance):
+    """
+    Quét worksheet 'ThongBao' và gửi tin nhắn đến các group/user được lên lịch.
+    """
+    print("Bắt đầu kiểm tra và gửi thông báo theo lịch...")
+    try:
+        sheet = CLIENT.open(SHEET_NAME).worksheet(WORKSHEET_NAME_ANNOUNCEMENTS)
+        announcements = sheet.get_all_records()
+        
+        tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
+        now = datetime.now(tz_vietnam)
+        current_time_str = now.strftime("%H:%M")
+        current_date_str = now.strftime("%Y-%m-%d")
+
+        for idx, ann in enumerate(announcements):
+            group_id = ann.get('GroupID')
+            content = ann.get('Content')
+            send_time = ann.get('Time')
+            schedule_type = str(ann.get('ScheduleType', '')).strip()
+            status = ann.get('Status', '').strip().lower()
+            
+            if not all([group_id, content, send_time, status]) or status != 'active':
+                continue
+
+            should_send = False
+            if send_time == current_time_str:
+                if schedule_type.lower() == 'hang_ngay':
+                    should_send = True
+                elif schedule_type == current_date_str:
+                    should_send = True
+
+            if should_send:
+                try:
+                    print(f"Đang gửi thông báo tới Group ID: {group_id}")
+                    line_bot_api_instance.push_message(str(group_id), TextSendMessage(text=str(content)))
+                    
+                    if schedule_type.lower() != 'hang_ngay':
+                        # Gsheet hàng bắt đầu từ 1, header là hàng 1 => dữ liệu bắt đầu từ hàng idx + 2
+                        status_col = sheet.find('Status').col
+                        sheet.update_cell(idx + 2, status_col, 'sent')
+                        print(f"Đã cập nhật trạng thái 'sent' cho thông báo tại hàng {idx + 2}")
+
+                except Exception as e:
+                    print(f"Lỗi khi gửi thông báo tới {group_id}: {e}")
+
+    except Exception as e:
+        print(f"Lỗi nghiêm trọng trong quá trình gửi thông báo: {e}")
+
+    print("Hoàn tất kiểm tra thông báo.")
 
 # --- CÁC HÀM TIỆN ÍCH ---
 def load_allowed_ids():
@@ -66,7 +119,6 @@ def keep_alive():
             print(f"Lỗi khi ping: {e}")
         time.sleep(600)
 
-# SỬA LỖI: Checklist tự động chỉ gửi đến 1 ID nhóm cụ thể
 def send_text_checklist(shift):
     """Gửi checklist công việc dưới dạng tin nhắn văn bản đơn giản."""
     morning_message = (
@@ -124,7 +176,6 @@ def parse_float_from_string(s):
         return float(clean_s.replace(',', '.'))
     except ValueError: return 0.0
 
-# SỬA LỖI: Cập nhật hàm để xử lý dấu phẩy thập phân từ Google Sheet
 def handle_percentage_string(percent_str):
     if not percent_str: return 0.0, "0%"
     # Chuyển đổi dấu phẩy (,) thành dấu chấm (.) trước khi xử lý
@@ -339,6 +390,22 @@ scheduler = BackgroundScheduler(daemon=True, timezone='Asia/Ho_Chi_Minh')
 scheduler.start()
 
 # --- ĐIỂM TIẾP NHẬN (ROUTES) ---
+@app.route("/trigger-announcements", methods=['POST'])
+def trigger_announcements():
+    incoming_secret = request.headers.get('X-Cron-Secret')
+    if not CRON_SECRET_KEY or incoming_secret != CRON_SECRET_KEY:
+        print("Lỗi bảo mật: Sai hoặc thiếu CRON_SECRET_KEY.")
+        abort(403)
+        
+    try:
+        thread = threading.Thread(target=send_scheduled_announcements, args=(line_bot_api,))
+        thread.start()
+        print("Đã kích hoạt chức năng kiểm tra và gửi thông báo.")
+        return "OK, đã kích hoạt gửi thông báo.", 200
+    except Exception as e:
+        print(f"Lỗi khi kích hoạt gửi thông báo: {e}")
+        return f"Lỗi máy chủ: {e}", 500
+
 @app.route("/trigger-schedule", methods=['POST'])
 def trigger_schedule():
     incoming_secret = request.headers.get('X-Cron-Secret')
@@ -372,7 +439,6 @@ def trigger_checklist():
         return "Lỗi: 'shift' phải là 'sang' hoặc 'chieu'.", 400
         
     try:
-        # THAY ĐỔI: Gọi hàm gửi checklist dạng văn bản mới
         thread = threading.Thread(target=send_text_checklist, args=(shift,))
         thread.start()
         
@@ -436,7 +502,6 @@ def handle_message(event):
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text="Đã có lỗi xảy ra khi lấy lịch làm việc."))
         return
 
-    # SỬA LỖI: Lệnh TEST chỉ gửi cho người/nhóm ra lệnh, không gửi hàng loạt
     shift_to_process = None
     if user_msg_upper == 'TEST SANG':
         shift_to_process = 'sang'
@@ -475,7 +540,6 @@ def handle_message(event):
             message_to_send = afternoon_message
 
         try:
-            # Gửi tin nhắn checklist chỉ tới nhóm/người dùng đã ra lệnh
             line_bot_api.reply_message(
                 event.reply_token,
                 TextSendMessage(text=message_to_send)
