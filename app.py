@@ -66,7 +66,7 @@ def keep_alive():
             print(f"Lỗi khi ping: {e}")
         time.sleep(600)
 
-# THAY ĐỔI: Hàm gửi checklist dạng văn bản
+# SỬA LỖI: Checklist tự động chỉ gửi đến 1 ID nhóm cụ thể
 def send_text_checklist(shift):
     """Gửi checklist công việc dưới dạng tin nhắn văn bản đơn giản."""
     morning_message = (
@@ -100,24 +100,18 @@ def send_text_checklist(shift):
         print(f"Lỗi: Ca không hợp lệ '{shift}' trong send_text_checklist")
         return
 
-    if not allowed_ids_cache:
-        print("Chưa có ID nào trong danh sách được phép. Tải lại...")
-        load_allowed_ids()
-
-    if not allowed_ids_cache:
-        print("Lỗi: Không thể gửi checklist vì không có ID nào được phép.")
+    # ID của nhóm duy nhất nhận checklist tự động
+    target_group_id = "C37e48216804398593d8c79fe3edacdc7"
+    
+    print(f"Bắt đầu gửi checklist tự động ca '{shift}' tới ID: {target_group_id}")
+    try:
+        line_bot_api.push_message(target_group_id, TextSendMessage(text=message_to_send))
+        print(f"Đã gửi checklist thành công tới ID: {target_group_id}")
+    except Exception as e:
+        print(f"Lỗi khi gửi checklist tới ID {target_group_id}: {e}")
         if ADMIN_USER_ID:
-             line_bot_api.push_message(ADMIN_USER_ID, TextSendMessage(text="Lỗi: Không thể gửi checklist vì danh sách ID rỗng."))
-        return
-
-    print(f"Bắt đầu gửi checklist ca '{shift}' tới {len(allowed_ids_cache)} ID...")
-    for group_id in allowed_ids_cache:
-        try:
-            line_bot_api.push_message(group_id, TextSendMessage(text=message_to_send))
-            print(f"Đã gửi checklist tới ID: {group_id}")
-        except Exception as e:
-            print(f"Lỗi khi gửi checklist tới ID {group_id}: {e}")
-    print("Hoàn tất gửi checklist.")
+            line_bot_api.push_message(ADMIN_USER_ID, TextSendMessage(text=f"Lỗi khi gửi checklist tự động: {e}"))
+    print("Hoàn tất gửi checklist tự động.")
 
 
 # --- CÁC HÀM XỬ LÝ DỮ LIỆU BÁO CÁO ---
@@ -442,7 +436,7 @@ def handle_message(event):
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text="Đã có lỗi xảy ra khi lấy lịch làm việc."))
         return
 
-    # THAY ĐỔI: Cập nhật lệnh TEST để gọi hàm checklist văn bản
+    # SỬA LỖI: Lệnh TEST chỉ gửi cho người/nhóm ra lệnh, không gửi hàng loạt
     shift_to_process = None
     if user_msg_upper == 'TEST SANG':
         shift_to_process = 'sang'
@@ -450,16 +444,45 @@ def handle_message(event):
         shift_to_process = 'chieu'
     
     if shift_to_process:
-        print(f"Nhận lệnh test thủ công cho ca: {shift_to_process}")
+        print(f"Nhận lệnh test thủ công cho ca '{shift_to_process}' từ ID: {source_id}")
+        
+        morning_message = (
+            "✅ BÁO CÁO CÔNG VIỆC CA SÁNG\n"
+            "1️⃣ 📦 Check lệnh chuyển kho online (09:15)\n"
+            "2️⃣ 🚚 Check đơn GHTK chuyển kho (09:30)\n"
+            "3️⃣ 🏷️ Chạy tủ, thay giá TBBM, DSD (thứ 2 & 5) (10:00)\n"
+            "4️⃣ 🧹 Rà soát tốc kệ (cùng model, nhóm màu, sạch bụi) (10:30)\n"
+            "5️⃣ 📑 Check Phiếu CK / NK quá 7 ngày (11:30)\n"
+            "6️⃣ 🔧 Đổ tồn hàng T.Thái (lỗi) → Gửi bảo hành, xử lý về 0 (Trước 14:00)"
+        )
+
+        afternoon_message = (
+            "🌙 BÁO CÁO CÔNG VIỆC CA CHIỀU\n"
+            "1️⃣ 📦 Check lệnh online (15:15)\n"
+            "2️⃣ 🚚 Check đơn GHTK (15:30)\n"
+            "3️⃣ 📦🧹 Sắp xếp hàng hóa kho & dọn bàn làm việc (16:00)\n"
+            "4️⃣ 🖼️ Rà soát tốc kệ (gia dụng / tivi / ụ giá sốc) (16:30)\n"
+            "5️⃣ 📊 Xử lý BCNB chiều (17:30)\n"
+            "6️⃣ 🔧 Đổ tồn hàng T.Thái (lỗi) → Gửi bảo hành, xử lý về 0 (Trước 19:00)\n"
+            "7️⃣ 📦🚚 Check GHTK / Grab (21:00)\n"
+            "8️⃣ 📸 Up hình máy cũ / máy trưng bày (21:30)"
+        )
+
+        message_to_send = ""
+        if shift_to_process == 'sang':
+            message_to_send = morning_message
+        elif shift_to_process == 'chieu':
+            message_to_send = afternoon_message
+
         try:
+            # Gửi tin nhắn checklist chỉ tới nhóm/người dùng đã ra lệnh
             line_bot_api.reply_message(
                 event.reply_token,
-                TextSendMessage(text=f"Đã nhận lệnh test. Bắt đầu gửi checklist ca {shift_to_process}...")
+                TextSendMessage(text=message_to_send)
             )
-            thread = threading.Thread(target=send_text_checklist, args=(shift_to_process,))
-            thread.start()
+            print(f"Đã gửi tin nhắn test thành công tới ID: {source_id}")
         except Exception as e:
-            print(f"Lỗi khi thực thi lệnh test: {e}")
+            print(f"Lỗi khi gửi tin nhắn test: {e}")
         return
         
     is_controlled = bool(allowed_ids_cache) and ADMIN_USER_ID
@@ -547,3 +570,4 @@ def handle_message(event):
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port)
+
