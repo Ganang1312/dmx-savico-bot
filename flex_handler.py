@@ -177,7 +177,7 @@ def generate_checklist_flex(group_id, shift_type):
 
     flex_content = {
         "type": "bubble",
-        "size": "giga",
+        "size": "mega",
         "header": {
             "type": "box",
             "layout": "horizontal",
@@ -215,4 +215,3 @@ def generate_checklist_flex(group_id, shift_type):
     }
     
     return flex_content
-

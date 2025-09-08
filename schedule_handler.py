@@ -124,7 +124,7 @@ def create_schedule_flex_message(schedule_type, schedule_text):
         body_components[-1]['contents'].pop() # Xóa separator cuối cùng
 
     flex_content = {
-      "type": "bubble", "size": "giga",
+      "type": "bubble", "size": "mega",
       "header": {
         "type": "box", "layout": "horizontal", "alignItems": "center", "spacing": "md",
         "contents": [
@@ -172,4 +172,3 @@ def send_daily_schedule(schedule_type):
 
     except Exception as e:
         print(f"Lỗi nghiêm trọng khi gửi lịch làm việc: {e}")
-
