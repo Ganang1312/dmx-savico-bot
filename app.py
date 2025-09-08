@@ -5,8 +5,10 @@ import math
 import threading
 import time
 import requests
-from datetime import datetime
+from datetime import datetime, date
 import pytz
+from dateutil.relativedelta import relativedelta
+import re
 
 from flask import Flask, request, abort
 from linebot import (
@@ -22,6 +24,9 @@ import pandas as pd
 from config import CLIENT, SHEET_NAME, WORKSHEET_NAME_USERS, WORKSHEET_NAME, WORKSHEET_TRACKER_NAME
 from schedule_handler import get_vietnamese_day_of_week, create_schedule_flex_message
 from flex_handler import initialize_daily_tasks, generate_checklist_flex
+# --- BỔ SUNG: Import hàm để cron job có thể gọi ---
+from checklist_scheduler import send_initial_checklist
+
 
 # --- PHẦN CẤU HÌNH: ĐỌC TỪ BIẾN MÔI TRƯỜNG ---
 CHANNEL_ACCESS_TOKEN = os.environ.get('CHANNEL_ACCESS_TOKEN')
@@ -29,8 +34,8 @@ CHANNEL_SECRET = os.environ.get('CHANNEL_SECRET')
 ADMIN_USER_ID = os.environ.get('ADMIN_USER_ID')
 CRON_SECRET_KEY = os.environ.get('CRON_SECRET_KEY')
 
-if not all([CHANNEL_ACCESS_TOKEN, CHANNEL_SECRET]):
-    raise ValueError("Lỗi: Hãy kiểm tra lại các biến môi trường trên Render.")
+if not all([CHANNEL_ACCESS_TOKEN, CHANNEL_SECRET, ADMIN_USER_ID]):
+    raise ValueError("Lỗi: Hãy kiểm tra lại các biến môi trường trên Render, bao gồm cả ADMIN_USER_ID.")
 
 # --- BỘ NHỚ ĐỆM CHO CÁC ID ĐƯỢỢC PHÉP ---
 allowed_ids_cache = set()
@@ -43,18 +48,33 @@ handler = WebhookHandler(CHANNEL_SECRET)
 # --- CÁC HÀM TIỆN ÍCH ---
 
 def load_allowed_ids():
-    """Tải danh sách ID người dùng và nhóm được phép tương tác từ Google Sheet."""
+    """Tải danh sách ID được phép và kiểm tra ngày hết hạn."""
     global allowed_ids_cache
     try:
-        print("Đang tải danh sách ID được phép...")
+        print("Đang tải danh sách ID được phép và kiểm tra hạn sử dụng...")
         sheet = CLIENT.open(SHEET_NAME).worksheet(WORKSHEET_NAME_USERS)
-        list_of_ids = sheet.col_values(1)
-        if list_of_ids:
-            start_index = 1 if list_of_ids[0].lower() == 'id' else 0
-            allowed_ids_cache = set(filter(None, list_of_ids[start_index:]))
-        else:
-            allowed_ids_cache = set()
-        print(f"Đã tải thành công {len(allowed_ids_cache)} ID vào danh sách cho phép.")
+        records = sheet.get_all_records()
+        
+        new_allowed_ids = set()
+        today = datetime.now(pytz.timezone('Asia/Ho_Chi_Minh')).date()
+
+        for record in records:
+            user_id = record.get('id')
+            exp_date_str = record.get('expiration_date')
+
+            if not user_id or not exp_date_str:
+                continue
+
+            try:
+                exp_date = datetime.strptime(exp_date_str, '%Y-%m-%d').date()
+                if exp_date >= today:
+                    new_allowed_ids.add(str(user_id))
+            except ValueError:
+                print(f"Lỗi: Định dạng ngày không hợp lệ cho ID {user_id}: '{exp_date_str}'. Bỏ qua.")
+                continue
+        
+        allowed_ids_cache = new_allowed_ids
+        print(f"Đã tải thành công {len(allowed_ids_cache)} ID hợp lệ vào danh sách cho phép.")
     except Exception as e:
         print(f"Lỗi nghiêm trọng khi tải danh sách ID: {e}")
         allowed_ids_cache = set()
@@ -72,6 +92,36 @@ def keep_alive():
             print(f"Lỗi khi thực hiện keep-alive ping: {e}")
         time.sleep(600)
 
+def update_expiration_in_sheet(target_id, expiration_date_str):
+    """Tìm và cập nhật hoặc thêm mới ID với ngày hết hạn trong Google Sheet."""
+    sheet = CLIENT.open(SHEET_NAME).worksheet(WORKSHEET_NAME_USERS)
+    all_ids = sheet.col_values(1)
+    try:
+        row_to_update = all_ids.index(target_id) + 1
+        sheet.update_cell(row_to_update, 2, expiration_date_str)
+        return "Cập nhật"
+    except ValueError:
+        sheet.append_row([target_id, expiration_date_str])
+        return "Thêm mới"
+
+def parse_duration(duration_str):
+    if duration_str == '0':
+        return relativedelta(years=999), "vĩnh viễn"
+
+    match = re.match(r"^(\d+)([dm])$", duration_str.lower())
+    if not match:
+        return None, None
+        
+    value = int(match.group(1))
+    unit = match.group(2)
+
+    if unit == 'd':
+        return relativedelta(days=value), f"{value} ngày"
+    elif unit == 'm':
+        return relativedelta(months=value), f"{value} tháng"
+    return None, None
+
+
 # --- CÁC HÀM XỬ LÝ DỮ LIỆU BÁO CÁO (Giữ nguyên) ---
 def parse_float_from_string(s):
     if s is None: return 0.0
@@ -81,7 +131,6 @@ def parse_float_from_string(s):
     try:
         return float(clean_s.replace(',', '.'))
     except ValueError: return 0.0
-
 def handle_percentage_string(percent_str):
     if not percent_str: return 0.0, "0%"
     clean_str = str(percent_str).strip().replace(',', '.')
@@ -95,7 +144,6 @@ def handle_percentage_string(percent_str):
             value = float(clean_str)
             return value, f"{round(value * 100)}%"
         except (ValueError, TypeError): return 0.0, "0%"
-
 def parse_competition_data(header_row, data_row):
     start_column_index = 6
     category_indices = collections.defaultdict(list)
@@ -113,7 +161,6 @@ def parse_competition_data(header_row, data_row):
             except (ValueError, TypeError, IndexError): continue
     results.sort(key=lambda x: x['percent_val'], reverse=True)
     return results
-
 def format_currency(value_str, remove_decimal=False):
     if not value_str or str(value_str).strip() == '-': return "-"
     try:
@@ -125,7 +172,6 @@ def format_currency(value_str, remove_decimal=False):
             if value >= 1000: return f"{round(value / 1000, 2)} Tỷ"
             return f"{round(value, 2)} Tr"
     except (ValueError, TypeError): return "-"
-
 def calculate_ranking(all_data, current_row):
     try:
         current_channel = (current_row[1] or "").strip()
@@ -145,7 +191,6 @@ def calculate_ranking(all_data, current_row):
         if rank != -1: return f"{rank}/{len(channel_stores)}"
         return "-/-"
     except (IndexError, ValueError, TypeError): return "-/-"
-
 def create_flex_message(store_data, competition_results, ranking):
     cum = store_data[0] or "-"
     kenh = (store_data[1] or "").strip()
@@ -184,10 +229,8 @@ def create_flex_message(store_data, competition_results, ranking):
         column_boxes = [{"type": "box", "layout": "vertical", "flex": 1, "contents": col} for col in columns]
         unsold_components.append({"type": "box", "layout": "horizontal", "margin": "md", "spacing": "md", "contents": column_boxes})
     percent_color = "#00B33C" if percent_float >= 1 else ("#FFC400" if percent_float > 0.7 else "#FF3B30")
-
     flex_json = {"type": "flex", "altText": f"Báo cáo cho {ten_sieu_thi_rut_gon}", "contents": { "type": "bubble", "size": "mega", "header": { "type": "box", "layout": "vertical", "paddingAll": "20px", "backgroundColor": style["bg"], "contents": [ {"type": "text", "text": "Báo cáo Realtime", "color": style["text"], "size": "md", "align": "center", "weight": "bold"}, {"type": "text", "text": f"🏪 {ten_sieu_thi_rut_gon.upper()}", "color": style["text"], "weight": "bold", "size": "lg", "align": "center", "margin": "md", "wrap": True}, {"type": "box", "layout": "vertical", "margin": "lg", "spacing": "sm", "contents": [ {"type": "text", "text": f"⭐ Cụm: {cum}", "size": "xs", "color": style["text"]}, {"type": "text", "text": f"🕒 Thời gian: {thoi_gian}", "size": "xs", "color": style["text"]}, {"type": "text", "text": f"🏆 NH thi đua đạt: {nh_thi_dua_dat}", "size": "xs", "color": style["text"]} ]} ] }, "body": { "type": "box", "layout": "vertical", "paddingAll": "20px", "backgroundColor": "#FFFFFF", "contents": [ {"type": "box", "layout": "horizontal", "contents": [ {"type": "box", "layout": "vertical", "flex": 1, "spacing": "sm", "contents": [ {"type": "text", "text": "💰 DOANH THU", "color": "#007BFF", "size": "sm", "align": "center", "weight":"bold"}, {"type": "text", "text": realtime_tong, "color": "#007BFF", "size": "xl", "weight": "bold", "align": "center"} ]}, {"type": "box", "layout": "vertical", "flex": 1, "spacing": "sm", "contents": [ {"type": "text", "text": "🎯 TARGET", "color": "#DC3545", "size": "sm", "align": "center", "weight":"bold"}, {"type": "text", "text": target_tong, "color": "#DC3545", "size": "xl", "weight": "bold", "align": "center"} ]} ]}, {"type": "text", "text": "% HOÀN THÀNH", "color": TEXT_COLOR, "size": "sm", "align": "center", "margin": "xl"}, {"type": "text", "text": percent_ht_tong, "color": percent_color, "size": "xxl", "weight": "bold", "align": "center"}, {"type": "box", "layout": "vertical", "backgroundColor": "#DDDDDD", "height": "8px", "cornerRadius": "md", "margin": "md", "contents": [ {"type": "box", "layout": "vertical", "backgroundColor": percent_color, "height": "8px", "cornerRadius": "md", "width": f"{min(100, round(percent_float * 100))}%"} ]}, {"type": "box", "layout": "horizontal", "margin": "xl", "contents": [{"type": "text", "text": "XH D.Thu Kênh", "size": "xs", "color": TEXT_COLOR, "align": "center", "flex": 1}]}, {"type": "box", "layout": "horizontal", "contents": [{"type": "text", "text": ranking, "weight": "bold", "size": "md", "color": TEXT_COLOR, "align": "center", "flex": 1}]}, {"type": "separator", "margin": "xl", "color": SEPARATOR_COLOR}, {"type": "box", "layout": "horizontal", "margin": "md", "contents": [{"type": "text", "text": "Ngành Hàng", "color": "#555555", "size": "xs", "flex": 4, "weight": "bold", "align": "center"}, {"type": "text", "text": "Realtime", "color": "#555555", "size": "xs", "flex": 2, "align": "center", "weight": "bold"}, {"type": "text", "text": "Target", "color": "#555555", "size": "xs", "flex": 2, "align": "center", "weight": "bold"}, {"type": "text", "text": "%HT", "color": "#555555", "size": "xs", "flex": 2, "align": "end", "weight": "bold"}]}, {"type": "separator", "margin": "md", "color": SEPARATOR_COLOR}, *sold_components, *unsold_components ] } }}
     return flex_json
-
 def create_summary_text_message(store_data, competition_results):
     try:
         target_val = parse_float_from_string(store_data[3])
@@ -226,7 +269,6 @@ def create_summary_text_message(store_data, competition_results):
     except Exception as e:
         print(f"Lỗi khi tạo tin nhắn tóm tắt: {e}")
         return None
-
 def create_leaderboard_flex_message(all_data, cluster_name=None, channel_filter=None):
     dmx_channels = ['ĐML', 'ĐMM', 'ĐMS']; tgdd_channels = ['TGD', 'AAR']
     dmx_stores, tgdd_stores = [], []
@@ -308,39 +350,132 @@ def callback():
 def ping():
     """Endpoint đơn giản để keep-alive và kiểm tra sức khỏe ứng dụng."""
     return "OK", 200
-    
-@app.route("/trigger-schedule", methods=['POST'])
-def trigger_schedule():
-    """Endpoint này không còn được khuyến khích sử dụng."""
+
+@app.route("/check-expirations", methods=['POST'])
+def check_expirations():
     incoming_secret = request.headers.get('X-Cron-Secret')
     if not CRON_SECRET_KEY or incoming_secret != CRON_SECRET_KEY:
         abort(403)
-    # ... logic xử lý nếu vẫn muốn giữ lại ...
-    return "Endpoint này không được khuyến khích sử dụng.", 200
+
+    print("Cron Job: Bắt đầu kiểm tra các ID sắp hết hạn...")
+    try:
+        sheet = CLIENT.open(SHEET_NAME).worksheet(WORKSHEET_NAME_USERS)
+        records = sheet.get_all_records()
+        today = datetime.now(pytz.timezone('Asia/Ho_Chi_Minh')).date()
+        
+        expiring_soon_users = []
+        for record in records:
+            user_id = record.get('id')
+            exp_date_str = record.get('expiration_date')
+
+            if not user_id or not exp_date_str: continue
+
+            try:
+                exp_date = datetime.strptime(exp_date_str, '%Y-%m-%d').date()
+                days_left = (exp_date - today).days
+
+                if 0 <= days_left <= 3:
+                    expiring_soon_users.append({
+                        "id": user_id,
+                        "days_left": days_left,
+                        "exp_date_str": exp_date.strftime('%d-%m-%Y')
+                    })
+            except ValueError:
+                continue
+
+        if expiring_soon_users:
+            components = []
+            for user in expiring_soon_users:
+                user_type_icon = "👤" if user['id'].startswith('U') else "👥"
+                days_left_text = f"Hết hạn hôm nay!" if user['days_left'] == 0 else f"Còn {user['days_left']} ngày"
+                
+                item_component = {
+                    "type": "box", "layout": "vertical", "spacing": "md", "margin": "lg",
+                    "contents": [
+                        {"type": "box", "layout": "horizontal", "spacing": "md", "contents": [
+                            {"type": "text", "text": user_type_icon, "flex": 0},
+                            {"type": "text", "text": user['id'], "size": "xxs", "wrap": True, "color": "#555555"}
+                        ]},
+                        {"type": "box", "layout": "horizontal", "spacing": "md", "contents": [
+                            {"type": "text", "text": "Hết hạn vào:", "size": "sm", "color": "#111111"},
+                            {"type": "text", "text": user['exp_date_str'], "size": "sm", "weight": "bold", "color": "#111111", "align": "end"}
+                        ]},
+                        {"type": "box", "layout": "horizontal", "spacing": "md", "contents": [
+                            {"type": "text", "text": "Trạng thái:", "size": "sm", "color": "#de2a2a"},
+                            {"type": "text", "text": days_left_text, "size": "sm", "weight": "bold", "color": "#de2a2a", "align": "end"}
+                        ]},
+                        {"type": "box", "layout": "horizontal", "spacing": "sm", "margin": "md", "contents": [
+                            {"type": "button", "action": {"type": "postback", "label": "+7 ngày", "data": f"action=renew&id={user['id']}&duration=7d"}, "style": "primary", "height": "sm"},
+                            {"type": "button", "action": {"type": "postback", "label": "+1 tháng", "data": f"action=renew&id={user['id']}&duration=1m"}, "style": "primary", "height": "sm"},
+                            {"type": "button", "action": {"type": "postback", "label": "+3 tháng", "data": f"action=renew&id={user['id']}&duration=3m"}, "style": "primary", "height": "sm"},
+                        ]},
+                        {"type": "separator", "margin": "lg"}
+                    ]
+                }
+                components.append(item_component)
+
+            flex_content = {
+                "type": "bubble", "size": "mega",
+                "header": {"type": "box", "layout": "horizontal", "spacing": "md", "alignItems": "center", "contents": [
+                    {"type": "text", "text": "🔔", "size": "xl"},
+                    {"type": "text", "text": "Cảnh Báo Hết Hạn", "weight": "bold", "color": "#FFFFFF"}
+                ], "backgroundColor": "#de2a2a"},
+                "body": {"type": "box", "layout": "vertical", "contents": components}
+            }
+            
+            line_bot_api.push_message(ADMIN_USER_ID, FlexSendMessage(alt_text="Có tài khoản sắp hết hạn!", contents=flex_content))
+            print(f"Cron Job: Đã gửi cảnh báo cho {len(expiring_soon_users)} ID sắp hết hạn.")
+        else:
+            print("Cron Job: Không có ID nào sắp hết hạn.")
+            
+        return "OK", 200
+    except Exception as e:
+        print(f"Lỗi nghiêm trọng trong Cron Job check_expirations: {e}")
+        return "Error", 500
 
 # --- XỬ LÝ SỰ KIỆN TỪ LINE ---
 
 @handler.add(PostbackEvent)
 def handle_postback(event):
-    """Xử lý các sự kiện postback, ví dụ như khi người dùng nhấn nút 'Hoàn tất'."""
     data_str = event.postback.data
-    # Phân tích dữ liệu postback thành dictionary
     data = dict(part.split('=') for part in data_str.split('&'))
     action = data.get('action')
+
+    if action == 'renew':
+        target_id = data.get('id')
+        duration_str = data.get('duration')
+        
+        delta, duration_text = parse_duration(duration_str)
+        if not delta:
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="Thời hạn gia hạn không hợp lệ."))
+            return
+
+        try:
+            start_date = datetime.now(pytz.timezone('Asia/Ho_Chi_Minh'))
+            new_expiration_date = start_date + delta
+            new_expiration_date_str = new_expiration_date.strftime('%Y-%m-%d')
+            
+            update_expiration_in_sheet(target_id, new_expiration_date_str)
+            load_allowed_ids()
+
+            reply_text = f"✅ Đã gia hạn thành công!\n- ID: {target_id}\n- Thêm: {duration_text}\n- Hạn mới: {new_expiration_date.strftime('%d-%m-%Y')}"
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
+
+        except Exception as e:
+            print(f"Lỗi khi gia hạn: {e}")
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="Có lỗi xảy ra khi gia hạn."))
+        return
 
     if action == 'complete_task':
         task_id = data.get('task_id')
         shift_type = data.get('shift')
-        # Lấy group_id từ nguồn của sự kiện
         group_id = event.source.group_id
         user_id = event.source.user_id
 
         try:
-            # Lấy thông tin người dùng để ghi nhận ai đã hoàn thành
             profile = line_bot_api.get_group_member_profile(group_id, user_id)
             user_name = profile.display_name
             
-            # Cập nhật trạng thái trong Google Sheet
             sheet = CLIENT.open(SHEET_NAME).worksheet(WORKSHEET_TRACKER_NAME)
             tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
             today_str = datetime.now(tz_vietnam).strftime('%Y-%m-%d')
@@ -348,57 +483,81 @@ def handle_postback(event):
             all_records = sheet.get_all_records()
             row_to_update = -1
             for i, record in enumerate(all_records):
-                if (record.get('group_id') == group_id and
+                if (str(record.get('group_id')) == group_id and
                     record.get('date') == today_str and
                     record.get('task_id') == task_id):
-                    # +2 vì get_all_records() bắt đầu từ 0 và sheet có tiêu đề
                     row_to_update = i + 2
                     break
             
             if row_to_update != -1:
-                # Cột F là status (thứ 6), G là completed_by (thứ 7)
                 sheet.update_cell(row_to_update, 6, 'complete')
                 sheet.update_cell(row_to_update, 7, user_name)
             
-            # TẠO LẠI VÀ GỬI LẠI TIN NHẮN FLEX ĐÃ CẬP NHẬT
             updated_flex_content = generate_checklist_flex(group_id, shift_type)
 
-            # --- SỬA LỖI TẠI ĐÂY ---
-            # Thay thế push_message (có phí, gây lỗi) bằng reply_message (miễn phí)
-            # Bot sẽ gửi một tin nhắn MỚI với checklist đã được cập nhật.
             line_bot_api.reply_message(
                 event.reply_token,
-                FlexSendMessage(
-                    alt_text=f"Cập nhật checklist ca {shift_type}",
-                    contents=updated_flex_content
-                )
+                FlexSendMessage(alt_text=f"Cập nhật checklist ca {shift_type}", contents=updated_flex_content)
             )
 
         except Exception as e:
             print(f"Lỗi nghiêm trọng khi xử lý postback hoàn thành công việc: {e}")
-            # Gửi thông báo lỗi bằng reply_message nếu có lỗi xảy ra trong quá trình
-            line_bot_api.reply_message(
-                event.reply_token,
-                TextSendMessage(text=f"Đã có lỗi xảy ra khi cập nhật công việc {task_id}.")
-            )
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"Đã có lỗi xảy ra khi cập nhật công việc {task_id}."))
 
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
-    """Xử lý tất cả các tin nhắn văn bản từ người dùng."""
     user_message = event.message.text.strip()
     user_msg_upper = user_message.upper()
     user_id = event.source.user_id
     source_id = getattr(event.source, 'group_id', user_id)
+    
+    if user_msg_upper.startswith('ADD '):
+        if user_id != ADMIN_USER_ID:
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="Bạn không có quyền thực hiện lệnh này."))
+            return
 
-    # --- KIỂM TRA QUYỀN TRUY CẬP ---
+        parts = user_message.split()
+        if len(parts) != 3:
+            reply = "Sai cú pháp. Sử dụng: add [ID] [thời hạn]\nVí dụ:\n- `add U... 3d` (3 ngày)\n- `add C... 1m` (1 tháng)\n- `add U... 0` (vĩnh viễn)"
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
+            return
+            
+        target_id = parts[1]
+        duration_str = parts[2]
+        
+        delta, duration_text = parse_duration(duration_str)
+        if not delta:
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="Thời hạn không hợp lệ. Dùng 'd' cho ngày, 'm' cho tháng (vd: 7d, 2m) hoặc 0 cho vĩnh viễn."))
+            return
+
+        try:
+            if duration_str == '0':
+                expiration_date_str = '9999-12-31'
+                reply_duration = "vĩnh viễn"
+            else:
+                start_date = datetime.now(pytz.timezone('Asia/Ho_Chi_Minh'))
+                expiration_date = start_date + delta
+                expiration_date_str = expiration_date.strftime('%Y-%m-%d')
+                reply_duration = f"{duration_text} (hết hạn ngày {expiration_date.strftime('%d-%m-%Y')})"
+        
+            action_text = update_expiration_in_sheet(target_id, expiration_date_str)
+            load_allowed_ids()
+            
+            reply_text = f"✅ {action_text} thành công!\n- ID: {target_id}\n- Thời hạn: {reply_duration}"
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
+            
+        except Exception as e:
+            print(f"Lỗi khi cập nhật Google Sheet: {e}")
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"Có lỗi xảy ra khi {action_text.lower()} ID."))
+        return
+
     is_controlled_environment = bool(allowed_ids_cache) and ADMIN_USER_ID
     if is_controlled_environment and source_id not in allowed_ids_cache:
         public_commands = ['ID', 'MENU BOT']
-        if user_msg_upper not in public_commands:
+        if user_msg_upper not in public_commands and user_id != ADMIN_USER_ID:
             print(f"Bỏ qua tin nhắn từ ID không được phép: {source_id}")
             return
 
-    # --- XỬ LÝ CÁC LỆNH TIỆN ÍCH ---
     if user_msg_upper == 'ID':
         reply_text = f'👤 User ID:\n{user_id}'
         if hasattr(event.source, 'group_id'):
@@ -433,7 +592,6 @@ def handle_message(event):
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=menu_text))
         return
 
-    # --- XỬ LÝ LỆNH CHECKLIST ---
     if user_msg_upper in ['SANG', 'CHIEU']:
         shift_type = 'sang' if user_msg_upper == 'SANG' else 'chieu'
         group_id = getattr(event.source, 'group_id', None)
@@ -457,7 +615,6 @@ def handle_message(event):
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text="Đã có lỗi xảy ra khi tạo checklist."))
         return
 
-    # --- XỬ LÝ LỆNH LỊCH LÀM VIỆC ---
     schedule_type_to_send = None
     if user_msg_upper == 'NV':
         schedule_type_to_send = 'employee'
@@ -484,7 +641,6 @@ def handle_message(event):
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text="Đã có lỗi xảy ra khi lấy lịch làm việc."))
         return
 
-    # --- XỬ LÝ CÁC LỆNH BÁO CÁO REALTIME ---
     try:
         sheet = CLIENT.open(SHEET_NAME).worksheet(WORKSHEET_NAME)
         all_data = sheet.get_all_values()
@@ -539,6 +695,28 @@ def handle_message(event):
 
     except Exception as e:
         print(f"!!! GẶP LỖI NGHIÊM TRỌNG KHI XỬ LÝ BÁO CÁO: {repr(e)}")
+
+# --- BỔ SUNG: Endpoint cho Cron Job gửi Checklist ---
+@app.route("/trigger-checklist", methods=['POST'])
+def trigger_checklist():
+    incoming_secret = request.headers.get('X-Cron-Secret')
+    if not CRON_SECRET_KEY or incoming_secret != CRON_SECRET_KEY:
+        abort(403)
+
+    data = request.get_json()
+    shift = data.get('shift')
+
+    if shift in ['sang', 'chieu']:
+        try:
+            print(f"Cron Job: Bắt đầu gửi checklist cho ca {shift}...")
+            send_initial_checklist(shift)
+            return f"Checklist ca {shift} đã được gửi.", 200
+        except Exception as e:
+            print(f"Lỗi khi Cron Job trigger checklist: {e}")
+            return "Error", 500
+    else:
+        return "Shift không hợp lệ.", 400
+
 
 # --- CHẠY ỨNG DỤNG ---
 if __name__ == "__main__":

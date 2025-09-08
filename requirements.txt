@@ -1,3 +1,4 @@
+# requirements.txt
 Flask
 line-bot-sdk
 gspread
@@ -7,3 +8,4 @@ pytz
 requests
 APScheduler
 pandas
+python-dateutil
