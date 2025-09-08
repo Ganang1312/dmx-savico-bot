@@ -65,7 +65,7 @@ def create_schedule_flex_message(schedule_type, schedule_text):
             "type": "box", "layout": "horizontal", "spacing": "md",
             "contents": [
                 {"type": "text", "text": icon, "flex": 0, "gravity": "center"},
-                {"type": "text", "text": shift_name, "weight": "bold", "color": "#111111", "size": "md"}
+                {"type": "text", "text": shift_name, "weight": "bold", "color": "#111111", "size": "sm"}
             ]
         }
         
@@ -84,8 +84,8 @@ def create_schedule_flex_message(schedule_type, schedule_text):
                 else:
                     regular_staff.append(staff)
 
-            col1 = [{"type": "text", "text": f"• {s}", "size": "sm", "wrap": True, "margin": "xs"} for s in special_staff]
-            col2 = [{"type": "text", "text": f"• {s}", "size": "sm", "wrap": True, "margin": "xs"} for s in regular_staff]
+            col1 = [{"type": "text", "text": f"• {s}", "size": "xs", "wrap": True, "margin": "xs"} for s in special_staff]
+            col2 = [{"type": "text", "text": f"• {s}", "size": "xs", "wrap": True, "margin": "xs"} for s in regular_staff]
             content_box = {
                 "type": "box", "layout": "horizontal", "spacing": "md", "margin": "md",
                 "contents": [
@@ -104,14 +104,14 @@ def create_schedule_flex_message(schedule_type, schedule_text):
             
             columns = []
             for chunk in chunks:
-                col_components = [{"type": "text", "text": f"• {s}", "size": "sm", "wrap": True, "margin": "xs"} for s in chunk]
+                col_components = [{"type": "text", "text": f"• {s}", "size": "xs", "wrap": True, "margin": "xs"} for s in chunk]
                 columns.append({"type": "box", "layout": "vertical", "flex": 1, "contents": col_components})
             
             content_box = {"type": "box", "layout": "horizontal", "spacing": "sm", "margin": "md", "contents": columns}
 
         # --- Giao diện mặc định cho các mục khác (Nghỉ,...) ---
         else:
-            content_box = {"type": "text", "text": staff_list_text, "wrap": True, "size": "sm", "color": "#555555", "margin": "md"}
+            content_box = {"type": "text", "text": staff_list_text, "wrap": True, "size": "xs", "color": "#555555", "margin": "md"}
 
         # --- Ghép các thành phần của một ca lại ---
         section_component = {
@@ -129,7 +129,7 @@ def create_schedule_flex_message(schedule_type, schedule_text):
         "type": "box", "layout": "horizontal", "alignItems": "center", "spacing": "md",
         "contents": [
           {"type": "text", "text": "📅", "flex": 0, "size": "xl"},
-          {"type": "text", "text": title, "color": "#FFFFFF", "weight": "bold", "size": "md", "wrap": True}
+          {"type": "text", "text": title, "color": "#FFFFFF", "weight": "bold", "size": "sm", "wrap": True}
         ],
         "backgroundColor": header_color, "paddingTop": "12px", "paddingBottom": "12px"
       },

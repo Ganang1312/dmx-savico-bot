@@ -127,7 +127,7 @@ def generate_checklist_flex(group_id, shift_type):
                             "text": task['name'],
                             "wrap": True,
                             "weight": "bold",
-                            "size": "md",
+                            "size": "sm",
                             "color": main_text_color,
                             "decoration": text_decoration
                         },
@@ -140,7 +140,7 @@ def generate_checklist_flex(group_id, shift_type):
                                     "type": "text",
                                     "text": "Deadline",
                                     "color": deadline_color,
-                                    "size": "sm",
+                                    "size": "xs",
                                     "flex": 0
                                 },
                                 {
@@ -148,7 +148,7 @@ def generate_checklist_flex(group_id, shift_type):
                                     "text": task['time'],
                                     "color": deadline_color,
                                     "weight": "bold",
-                                    "size": "sm",
+                                    "size": "xs",
                                     "flex": 0
                                 }
                             ]
@@ -194,7 +194,7 @@ def generate_checklist_flex(group_id, shift_type):
                     "type": "text",
                     "text": title,
                     "weight": "bold",
-                    "size": "xl",
+                    "size": "lg",
                     "color": "#FFFFFF",
                     "wrap": True
                 }
