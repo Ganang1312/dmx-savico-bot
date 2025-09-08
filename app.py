@@ -24,7 +24,6 @@ import pandas as pd
 from config import CLIENT, SHEET_NAME, WORKSHEET_NAME_USERS, WORKSHEET_NAME, WORKSHEET_TRACKER_NAME
 from schedule_handler import get_vietnamese_day_of_week, create_schedule_flex_message
 from flex_handler import initialize_daily_tasks, generate_checklist_flex
-# --- BỔ SUNG: Import hàm để cron job có thể gọi ---
 from checklist_scheduler import send_initial_checklist
 
 
@@ -580,8 +579,12 @@ def handle_message(event):
             "**📊 BÁO CÁO REALTIME:**\n"
             "• `ST [Mã ST]` - Báo cáo chi tiết.\n"
             "  ↳ Ví dụ: `ST 12345`\n"
-            "• `[Tên Cụm]` - BXH doanh thu cụm.\n"
-            "  ↳ Ví dụ: `CHG`\n"
+            "• `[Tên Cụm]` - BXH cả 2 kênh của cụm.\n"
+            "  ↳ Ví dụ: `HN4`\n"
+            "• `[Tên Cụm] 1` - BXH ĐMX của cụm.\n"
+            "  ↳ Ví dụ: `HN4 1`\n"
+            "• `[Tên Cụm] 2` - BXH TGDD của cụm.\n"
+            "  ↳ Ví dụ: `HN4 2`\n"
             "• `bxh` - Top 20 ĐMX & TGDD.\n"
             "• `bxh1` - Top 20 ĐMX.\n"
             "• `bxh2` - Top 20 TGDD.\n"
@@ -676,19 +679,38 @@ def handle_message(event):
             for flex_data in create_leaderboard_flex_message(all_data, channel_filter='tgdd'):
                 reply_messages.append(FlexSendMessage(alt_text=flex_data['altText'], contents=flex_data['contents']))
         
-        elif user_msg_upper in cluster_names:
-            for flex_data in create_leaderboard_flex_message(all_data, cluster_name=user_msg_upper):
-                reply_messages.append(FlexSendMessage(alt_text=flex_data['altText'], contents=flex_data['contents']))
-        
         else:
-            found_row = next((row for row in all_data[1:] if row and len(row) > 2 and row[2] and row[2].strip().split(' ')[0] == user_msg_upper), None)
-            if found_row:
-                ranking = calculate_ranking(all_data, found_row)
-                competition_results = parse_competition_data(header_row, found_row)
-                reply_messages.append(FlexSendMessage(alt_text='Báo cáo Realtime', contents=create_flex_message(found_row, competition_results, ranking)['contents']))
-                summary_message = create_summary_text_message(found_row, competition_results)
-                if summary_message:
-                    reply_messages.append(summary_message)
+            parts = user_message.split()
+            if len(parts) == 2 and parts[0].upper() in cluster_names:
+                cluster_name_cmd = parts[0].upper()
+                channel_choice = parts[1]
+                channel_filter = None
+                if channel_choice == '1':
+                    channel_filter = 'dmx'
+                elif channel_choice == '2':
+                    channel_filter = 'tgdd'
+                
+                if channel_filter:
+                    bxh_messages = create_leaderboard_flex_message(all_data, cluster_name=cluster_name_cmd, channel_filter=channel_filter)
+                    if not bxh_messages:
+                         reply_messages.append(TextSendMessage(text=f"Không có dữ liệu cho kênh bạn chọn trong cụm {cluster_name_cmd}."))
+                    else:
+                        for flex_data in bxh_messages:
+                            reply_messages.append(FlexSendMessage(alt_text=flex_data['altText'], contents=flex_data['contents']))
+
+            elif user_msg_upper in cluster_names:
+                for flex_data in create_leaderboard_flex_message(all_data, cluster_name=user_msg_upper):
+                    reply_messages.append(FlexSendMessage(alt_text=flex_data['altText'], contents=flex_data['contents']))
+            
+            else:
+                found_row = next((row for row in all_data[1:] if row and len(row) > 2 and row[2] and row[2].strip().split(' ')[0] == user_msg_upper), None)
+                if found_row:
+                    ranking = calculate_ranking(all_data, found_row)
+                    competition_results = parse_competition_data(header_row, found_row)
+                    reply_messages.append(FlexSendMessage(alt_text='Báo cáo Realtime', contents=create_flex_message(found_row, competition_results, ranking)['contents']))
+                    summary_message = create_summary_text_message(found_row, competition_results)
+                    if summary_message:
+                        reply_messages.append(summary_message)
         
         if reply_messages:
             line_bot_api.reply_message(event.reply_token, reply_messages)
@@ -696,7 +718,6 @@ def handle_message(event):
     except Exception as e:
         print(f"!!! GẶP LỖI NGHIÊM TRỌNG KHI XỬ LÝ BÁO CÁO: {repr(e)}")
 
-# --- BỔ SUNG: Endpoint cho Cron Job gửi Checklist ---
 @app.route("/trigger-checklist", methods=['POST'])
 def trigger_checklist():
     incoming_secret = request.headers.get('X-Cron-Secret')
