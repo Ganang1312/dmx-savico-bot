@@ -294,7 +294,22 @@ def create_leaderboard_flex_message(all_data, cluster_name=None, channel_filter=
         for i, store in enumerate(stores):
             name_parts = store['sieu_thi'].split(' - ', 1)
             short_name = name_parts[1] if len(name_parts) > 1 else store['sieu_thi']
-            row_component = {"type": "box", "layout": "horizontal", "margin": "md", "paddingTop":"sm", "paddingBottom":"sm", "contents": [{"type": "text", "text": str(i+1), "size": "xs", "color": text_color_body, "flex": 1, "gravity": "center", "align": "center"},{"type": "separator", "color": separator_color},{"type": "text", "text": store['kenh'], "size": "xs", "color": text_color_body, "flex": 2, "gravity": "center", "align": "center"},{"type": "separator", "color": separator_color},{"type": "text", "text": short_name, "size": "xxs", "color": text_color_body, "flex": 6, "wrap": True, "gravity": "center"},{"type": "separator", "color": separator_color},{"type": "text", "text": str(round(store['doanh_thu'])), "size": "xs", "color": text_color_body, "flex": 2, "align": "center", "gravity": "center"}]}
+            row_component = {
+                "type": "box", 
+                "layout": "horizontal", 
+                "margin": "md", 
+                "paddingTop":"sm", 
+                "paddingBottom":"sm", 
+                "contents": [
+                    {"type": "text", "text": str(i+1), "size": "xs", "color": text_color_body, "flex": 1, "gravity": "center", "align": "center"},
+                    {"type": "separator", "color": separator_color},
+                    {"type": "text", "text": store['kenh'], "size": "xs", "color": text_color_body, "flex": 2, "gravity": "center", "align": "center"},
+                    {"type": "separator", "color": separator_color},
+                    {"type": "text", "text": short_name, "size": "xxs", "color": text_color_body, "flex": 6, "wrap": True, "gravity": "center", "align": "center"},
+                    {"type": "separator", "color": separator_color},
+                    {"type": "text", "text": str(round(store['doanh_thu'])), "size": "xs", "color": text_color_body, "flex": 2, "align": "center", "gravity": "center"}
+                ]
+            }
             rows.append(row_component)
             if i < len(stores) -1: rows.append({"type": "separator", "margin": "sm", "color": separator_color})
         return {"type": "bubble", "size": "mega", "header": header, "body": { "type": "box", "layout": "vertical", "contents": rows, "paddingAll":"lg", "backgroundColor": body_bg_color }}
