@@ -137,23 +137,32 @@ def create_schedule_flex_message(schedule_type, schedule_text):
     }
     return flex_content
 
-def send_daily_schedule(schedule_type):
+# Cập nhật: Thêm tham số target_group_id_override để xử lý lệnh `nv`, `pg`
+def send_daily_schedule(schedule_type, target_group_id_override=None):
     """Hàm chính để tìm và gửi lịch làm việc hàng ngày."""
-    print(f"Bắt đầu gửi lịch làm việc cho nhóm: {schedule_type}")
     
-    if schedule_type == 'pg':
-        target_group_id = os.environ.get('PG_GROUP_ID')
-        column_to_read = 'pg_schedule'
-    elif schedule_type == 'employee':
-        target_group_id = os.environ.get('EMPLOYEE_GROUP_ID')
-        column_to_read = 'employee_schedule'
+    target_group_id = target_group_id_override
+    
+    # Nếu không có override, dùng ID từ biến môi trường cho tác vụ tự động
+    if not target_group_id:
+        if schedule_type == 'pg':
+            target_group_id = os.environ.get('PG_GROUP_ID')
+            column_to_read = 'pg_schedule'
+        elif schedule_type == 'employee':
+            target_group_id = os.environ.get('EMPLOYEE_GROUP_ID')
+            column_to_read = 'employee_schedule'
+        else:
+            print(f"Lỗi: Loại lịch '{schedule_type}' không hợp lệ."); return
+    # Nếu có override (người dùng gõ lệnh), vẫn cần biết cột nào để đọc
     else:
-        print(f"Lỗi: Loại lịch '{schedule_type}' không hợp lệ."); return
+        column_to_read = 'pg_schedule' if schedule_type == 'pg' else 'employee_schedule'
+
 
     if not target_group_id:
-        print(f"CẢNH BÁO: Bỏ qua gửi lịch vì biến môi trường cho '{schedule_type}' chưa được thiết lập."); return
+        print(f"CẢNH BÁO: Bỏ qua gửi lịch vì không có Group ID đích."); return
 
     try:
+        print(f"Bắt đầu gửi lịch '{schedule_type}' đến group: {target_group_id}")
         sheet = CLIENT.open(SHEET_NAME).worksheet(WORKSHEET_SCHEDULES_NAME)
         all_schedules = sheet.get_all_records()
         today_str = get_vietnamese_day_of_week()
@@ -161,7 +170,6 @@ def send_daily_schedule(schedule_type):
         schedule_text_today = next((row.get(column_to_read) for row in all_schedules if row.get('day_of_week') == today_str), None)
         
         if schedule_text_today:
-            print(f"Tìm thấy lịch cho {today_str}: {schedule_text_today}")
             flex_message_content = create_schedule_flex_message(schedule_type, schedule_text_today)
             message = FlexSendMessage(alt_text=f"Lịch làm việc hôm nay cho {schedule_type}", contents=flex_message_content)
             line_bot_api.push_message(target_group_id, message)
