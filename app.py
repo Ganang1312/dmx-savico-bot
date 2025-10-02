@@ -22,12 +22,12 @@ import pandas as pd
 
 # --- IMPORT TỪ CÁC FILE KHÁC CỦA BẠN ---
 from config import CLIENT, SHEET_NAME, WORKSHEET_NAME_USERS, WORKSHEET_NAME, WORKSHEET_TRACKER_NAME
-from schedule_handler import send_daily_schedule # Sửa đổi: import hàm gửi lịch
+from schedule_handler import send_daily_schedule
 from flex_handler import initialize_daily_tasks, generate_checklist_flex
 from checklist_scheduler import send_initial_checklist
-from thongbao_handler import send_thongbao_messages # Thêm mới: import hàm gửi thông báo
+# from thongbao_handler import send_thongbao_messages # ĐÃ XÓA THEO YÊU CẦU
 
-# --- PHẦN CẤU HÌNH: ĐỌC TỪ BIẾN MÔI TRƯỜNG ---
+# --- PHẦN CẤU HÌNH: ĐỌC TỪ BIẾN MÔI TRƯỢNG ---
 CHANNEL_ACCESS_TOKEN = os.environ.get('CHANNEL_ACCESS_TOKEN')
 CHANNEL_SECRET = os.environ.get('CHANNEL_SECRET')
 ADMIN_USER_ID = os.environ.get('ADMIN_USER_ID')
@@ -367,85 +367,7 @@ def ping():
 # --- VÔ HIỆU HÓA: Chức năng kiểm tra gia hạn đã được vô hiệu hóa theo yêu cầu ---
 # @app.route("/check-expirations", methods=['POST'])
 # def check_expirations():
-#     incoming_secret = request.headers.get('X-Cron-Secret')
-#     if not CRON_SECRET_KEY or incoming_secret != CRON_SECRET_KEY:
-#         abort(403)
-
-#     print("Cron Job: Bắt đầu kiểm tra các ID sắp hết hạn...")
-#     try:
-#         sheet = CLIENT.open(SHEET_NAME).worksheet(WORKSHEET_NAME_USERS)
-#         records = sheet.get_all_records()
-#         today = datetime.now(pytz.timezone('Asia/Ho_Chi_Minh')).date()
-        
-#         expiring_soon_users = []
-#         for record in records:
-#             user_id = record.get('id')
-#             exp_date_str = record.get('expiration_date')
-
-#             if not user_id or not exp_date_str: continue
-
-#             try:
-#                 exp_date = datetime.strptime(exp_date_str, '%Y-%m-%d').date()
-#                 days_left = (exp_date - today).days
-
-#                 if 0 <= days_left <= 3:
-#                     expiring_soon_users.append({
-#                         "id": user_id,
-#                         "days_left": days_left,
-#                         "exp_date_str": exp_date.strftime('%d-%m-%Y')
-#                     })
-#             except ValueError:
-#                 continue
-
-#         if expiring_soon_users:
-#             components = []
-#             for user in expiring_soon_users:
-#                 user_type_icon = "👤" if user['id'].startswith('U') else "👥"
-#                 days_left_text = f"Hết hạn hôm nay!" if user['days_left'] == 0 else f"Còn {user['days_left']} ngày"
-                
-#                 item_component = {
-#                     "type": "box", "layout": "vertical", "spacing": "md", "margin": "lg",
-#                     "contents": [
-#                         {"type": "box", "layout": "horizontal", "spacing": "md", "contents": [
-#                             {"type": "text", "text": user_type_icon, "flex": 0},
-#                             {"type": "text", "text": user['id'], "size": "xxs", "wrap": True, "color": "#555555"}
-#                         ]},
-#                         {"type": "box", "layout": "horizontal", "spacing": "md", "contents": [
-#                             {"type": "text", "text": "Hết hạn vào:", "size": "sm", "color": "#111111"},
-#                             {"type": "text", "text": user['exp_date_str'], "size": "sm", "weight": "bold", "color": "#111111", "align": "end"}
-#                         ]},
-#                         {"type": "box", "layout": "horizontal", "spacing": "md", "contents": [
-#                             {"type": "text", "text": "Trạng thái:", "size": "sm", "color": "#de2a2a"},
-#                             {"type": "text", "text": days_left_text, "size": "sm", "weight": "bold", "color": "#de2a2a", "align": "end"}
-#                         ]},
-#                         {"type": "box", "layout": "horizontal", "spacing": "sm", "margin": "md", "contents": [
-#                             {"type": "button", "action": {"type": "postback", "label": "+7 ngày", "data": f"action=renew&id={user['id']}&duration=7d"}, "style": "primary", "height": "sm"},
-#                             {"type": "button", "action": {"type": "postback", "label": "+1 tháng", "data": f"action=renew&id={user['id']}&duration=1m"}, "style": "primary", "height": "sm"},
-#                             {"type": "button", "action": {"type": "postback", "label": "+3 tháng", "data": f"action=renew&id={user['id']}&duration=3m"}, "style": "primary", "height": "sm"},
-#                         ]},
-#                         {"type": "separator", "margin": "lg"}
-#                     ]
-#                 }
-#                 components.append(item_component)
-
-#             flex_content = {
-#                 "type": "bubble", "size": "mega",
-#                 "header": {"type": "box", "layout": "horizontal", "spacing": "md", "alignItems": "center", "contents": [
-#                     {"type": "text", "text": "🔔", "size": "xl"},
-#                     {"type": "text", "text": "Cảnh Báo Hết Hạn", "weight": "bold", "color": "#FFFFFF"}
-#                 ], "backgroundColor": "#de2a2a"},
-#                 "body": {"type": "box", "layout": "vertical", "contents": components}
-#             }
-            
-#             line_bot_api.push_message(ADMIN_USER_ID, FlexSendMessage(alt_text="Có tài khoản sắp hết hạn!", contents=flex_content))
-#             print(f"Cron Job: Đã gửi cảnh báo cho {len(expiring_soon_users)} ID sắp hết hạn.")
-#         else:
-#             print("Cron Job: Không có ID nào sắp hết hạn.")
-            
-#         return "OK", 200
-#     except Exception as e:
-#         print(f"Lỗi nghiêm trọng trong Cron Job check_expirations: {e}")
-#         return "Error", 500
+# ...
 
 # --- XỬ LÝ SỰ KIỆN TỪ LINE ---
 
@@ -759,19 +681,21 @@ def trigger_afternoon_tasks():
         print(f"Lỗi khi chạy tác vụ buổi chiều: {e}")
         return "Error", 500
 
-@app.route("/trigger-thongbao", methods=['POST'])
-def trigger_thongbao():
-    incoming_secret = request.headers.get('X-Cron-Secret')
-    if not CRON_SECRET_KEY or incoming_secret != CRON_SECRET_KEY:
-        abort(403)
-    
-    print("Cron Job: Kiểm tra và gửi thông báo từ sheet...")
-    try:
-        send_thongbao_messages()
-        return "OK", 200
-    except Exception as e:
-        print(f"Lỗi khi gửi thông báo từ sheet: {e}")
-        return "Error", 500
+# --- ĐÃ XÓA THEO YÊU CẦU ---
+# @app.route("/trigger-thongbao", methods=['POST'])
+# def trigger_thongbao():
+#     incoming_secret = request.headers.get('X-Cron-Secret')
+#     if not CRON_SECRET_KEY or incoming_secret != CRON_SECRET_KEY:
+#         abort(403)
+#     
+#     print("Cron Job: Kiểm tra và gửi thông báo từ sheet...")
+#     try:
+#         send_thongbao_messages()
+#         return "OK", 200
+#     except Exception as e:
+#         print(f"Lỗi khi gửi thông báo từ sheet: {e}")
+#         return "Error", 500
+
 
 # --- CHẠY ỨNG DỤNG ---
 if __name__ == "__main__":
