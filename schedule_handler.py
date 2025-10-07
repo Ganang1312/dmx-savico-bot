@@ -137,32 +137,29 @@ def create_schedule_flex_message(schedule_type, schedule_text):
     }
     return flex_content
 
-# Cập nhật: Thêm tham số target_group_id_override để xử lý lệnh `nv`, `pg`
-def send_daily_schedule(schedule_type, target_group_id_override=None):
-    """Hàm chính để tìm và gửi lịch làm việc hàng ngày."""
+# === BẮT ĐẦU SỬA ĐỔI ===
+def send_daily_schedule(schedule_type, target_id, reply_token=None):
+    """
+    Hàm chính để tìm và gửi lịch làm việc hàng ngày.
+    Sẽ ưu tiên dùng reply_token nếu được cung cấp.
+    """
     
-    target_group_id = target_group_id_override
-    
-    # Nếu không có override, dùng ID từ biến môi trường cho tác vụ tự động
-    if not target_group_id:
+    # Xác định cột cần đọc trong Google Sheet dựa trên loại lịch
+    column_to_read = 'pg_schedule' if schedule_type == 'pg' else 'employee_schedule'
+
+    # Nếu target_id không được cung cấp (trường hợp cron job cũ), lấy từ biến môi trường
+    if not target_id:
         if schedule_type == 'pg':
-            target_group_id = os.environ.get('PG_GROUP_ID')
-            column_to_read = 'pg_schedule'
-        elif schedule_type == 'employee':
-            target_group_id = os.environ.get('EMPLOYEE_GROUP_ID')
-            column_to_read = 'employee_schedule'
-        else:
-            print(f"Lỗi: Loại lịch '{schedule_type}' không hợp lệ."); return
-    # Nếu có override (người dùng gõ lệnh), vẫn cần biết cột nào để đọc
-    else:
-        column_to_read = 'pg_schedule' if schedule_type == 'pg' else 'employee_schedule'
+            target_id = os.environ.get('PG_GROUP_ID')
+        else: # employee
+            target_id = os.environ.get('EMPLOYEE_GROUP_ID')
 
-
-    if not target_group_id:
-        print(f"CẢNH BÁO: Bỏ qua gửi lịch vì không có Group ID đích."); return
+    if not target_id:
+        print(f"CẢNH BÁO: Bỏ qua gửi lịch vì không có ID đích.")
+        return
 
     try:
-        print(f"Bắt đầu gửi lịch '{schedule_type}' đến group: {target_group_id}")
+        print(f"Bắt đầu xử lý lịch '{schedule_type}' cho ID: {target_id}")
         sheet = CLIENT.open(SHEET_NAME).worksheet(WORKSHEET_SCHEDULES_NAME)
         all_schedules = sheet.get_all_records()
         today_str = get_vietnamese_day_of_week()
@@ -172,11 +169,26 @@ def send_daily_schedule(schedule_type, target_group_id_override=None):
         if schedule_text_today:
             flex_message_content = create_schedule_flex_message(schedule_type, schedule_text_today)
             message = FlexSendMessage(alt_text=f"Lịch làm việc hôm nay cho {schedule_type}", contents=flex_message_content)
-            line_bot_api.push_message(target_group_id, message)
-            print(f"Gửi lịch thành công đến group ID: {target_group_id}")
+            
+            # Ưu tiên Reply (miễn phí) nếu có reply_token
+            if reply_token:
+                line_bot_api.reply_message(reply_token, message)
+                print(f"Đã trả lời (reply) lịch thành công đến: {target_id}")
+            else:
+                line_bot_api.push_message(target_id, message)
+                print(f"Đã đẩy (push) lịch thành công đến: {target_id}")
+
         else:
             print(f"Không tìm thấy lịch làm việc cho {today_str} trong sheet.")
-            line_bot_api.push_message(target_group_id, TextSendMessage(text=f"Không tìm thấy lịch làm việc cho hôm nay ({today_str})."))
+            error_message = TextSendMessage(text=f"Không tìm thấy lịch làm việc cho hôm nay ({today_str}).")
+            
+            # Tương tự, ưu tiên Reply cho tin nhắn lỗi
+            if reply_token:
+                line_bot_api.reply_message(reply_token, error_message)
+            else:
+                line_bot_api.push_message(target_id, error_message)
 
     except Exception as e:
         print(f"Lỗi nghiêm trọng khi gửi lịch làm việc: {e}")
+        # Cân nhắc gửi thông báo lỗi cho admin nếu cần
+# === KẾT THÚC SỬA ĐỔI ===

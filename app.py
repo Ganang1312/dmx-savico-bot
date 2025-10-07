@@ -555,6 +555,7 @@ def handle_message(event):
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text="Đã có lỗi xảy ra khi tạo checklist."))
         return
 
+    # === BẮT ĐẦU SỬA ĐỔI ===
     schedule_type_to_send = None
     if user_msg_upper == 'NV':
         schedule_type_to_send = 'employee'
@@ -563,12 +564,13 @@ def handle_message(event):
 
     if schedule_type_to_send:
         try:
-            # Sửa lỗi: Gọi hàm gửi lịch thay vì xử lý tại chỗ
-            send_daily_schedule(schedule_type_to_send, source_id)
+            # Truyền thêm event.reply_token để dùng tin nhắn trả lời (miễn phí)
+            send_daily_schedule(schedule_type_to_send, source_id, event.reply_token)
         except Exception as e:
             print(f"Lỗi khi lấy lịch làm việc: {e}")
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text="Đã có lỗi xảy ra khi lấy lịch làm việc."))
         return
+    # === KẾT THÚC SỬA ĐỔI ===
 
     try:
         sheet = CLIENT.open(SHEET_NAME).worksheet(WORKSHEET_NAME)
@@ -645,6 +647,7 @@ def handle_message(event):
         print(f"!!! GẶP LỖI NGHIÊM TRỌNG KHI XỬ LÝ BÁO CÁO: {repr(e)}")
 
 # --- ENDPOINTS MỚI DÀNH CHO CRON JOB ---
+# === BẮT ĐẦU SỬA ĐỔI ===
 @app.route("/trigger-morning-tasks", methods=['POST'])
 def trigger_morning_tasks():
     incoming_secret = request.headers.get('X-Cron-Secret')
@@ -653,10 +656,18 @@ def trigger_morning_tasks():
     
     print("Cron Job: Bắt đầu tác vụ buổi sáng (08:00)...")
     try:
-        # Gửi lịch làm việc PG vào nhóm PG
-        send_daily_schedule('pg')
-        # Gửi lịch làm việc Nhân viên vào nhóm NV
-        send_daily_schedule('employee')
+        # Lấy group ID từ biến môi trường
+        pg_group_id = os.environ.get('PG_GROUP_ID')
+        employee_group_id = os.environ.get('EMPLOYEE_GROUP_ID')
+        
+        # Gửi lịch làm việc PG vào nhóm PG (dùng push message)
+        if pg_group_id:
+            send_daily_schedule('pg', pg_group_id)
+        
+        # Gửi lịch làm việc Nhân viên vào nhóm NV (dùng push message)
+        if employee_group_id:
+            send_daily_schedule('employee', employee_group_id)
+        
         # Gửi checklist ca sáng vào nhóm NV
         send_initial_checklist('sang')
         return "OK", 200
@@ -672,30 +683,25 @@ def trigger_afternoon_tasks():
     
     print("Cron Job: Bắt đầu tác vụ buổi chiều (14:30)...")
     try:
-        # Gửi lịch làm việc Nhân viên vào nhóm NV
-        send_daily_schedule('employee')
+        # Lấy group ID từ biến môi trường
+        employee_group_id = os.environ.get('EMPLOYEE_GROUP_ID')
+        
+        # Gửi lịch làm việc Nhân viên vào nhóm NV (dùng push message)
+        if employee_group_id:
+            send_daily_schedule('employee', employee_group_id)
+
         # Gửi checklist ca chiều vào nhóm NV
         send_initial_checklist('chieu')
         return "OK", 200
     except Exception as e:
         print(f"Lỗi khi chạy tác vụ buổi chiều: {e}")
         return "Error", 500
+# === KẾT THÚC SỬA ĐỔI ===
 
 # --- ĐÃ XÓA THEO YÊU CẦU ---
 # @app.route("/trigger-thongbao", methods=['POST'])
-# def trigger_thongbao():
-#     incoming_secret = request.headers.get('X-Cron-Secret')
-#     if not CRON_SECRET_KEY or incoming_secret != CRON_SECRET_KEY:
-#         abort(403)
-#     
-#     print("Cron Job: Kiểm tra và gửi thông báo từ sheet...")
-#     try:
-#         send_thongbao_messages()
-#         return "OK", 200
-#     except Exception as e:
-#         print(f"Lỗi khi gửi thông báo từ sheet: {e}")
-#         return "Error", 500
-
+# def trigger-thongbao():
+# ...
 
 # --- CHẠY ỨNG DỤNG ---
 if __name__ == "__main__":
