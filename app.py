@@ -364,11 +364,6 @@ def ping():
     """Endpoint đơn giản để keep-alive và kiểm tra sức khỏe ứng dụng."""
     return "OK", 200
 
-# --- VÔ HIỆU HÓA: Chức năng kiểm tra gia hạn đã được vô hiệu hóa theo yêu cầu ---
-# @app.route("/check-expirations", methods=['POST'])
-# def check_expirations():
-# ...
-
 # --- XỬ LÝ SỰ KIỆN TỪ LINE ---
 
 @handler.add(PostbackEvent)
@@ -510,21 +505,20 @@ def handle_message(event):
             "• `chieu` - Lấy checklist ca chiều.\n"
             "\n"
             "**📅 LỊCH LÀM VIỆC:**\n"
-            "• `nv` - Xem lịch làm việc Nhân viên.\n"
-            "• `pg` - Xem lịch làm việc PG.\n"
+            "• `nv` / `pg` - Lịch làm việc hôm nay.\n"
+            "• `nv2`..`nv8` - Lịch NV theo thứ.\n"
+            "• `pg2`..`pg8` - Lịch PG theo thứ.\n"
+            "(Thứ 2 -> Chủ Nhật tương ứng 2 -> 8)\n"
             "\n"
             "**📊 BÁO CÁO REALTIME:**\n"
             "• `ST [Mã ST]` - Báo cáo chi tiết.\n"
             "  ↳ Ví dụ: `ST 12345`\n"
             "• `[Tên Cụm]` - BXH cả 2 kênh của cụm.\n"
             "  ↳ Ví dụ: `HN4`\n"
-            "• `[Tên Cụm] 1` - BXH ĐMX của cụm.\n"
-            "  ↳ Ví dụ: `HN4 1`\n"
-            "• `[Tên Cụm] 2` - BXH TGDD của cụm.\n"
-            "  ↳ Ví dụ: `HN4 2`\n"
+            "• `[Tên Cụm] 1` / `[Tên Cụm] 2`\n"
+            "  ↳ Ví dụ: `HN4 1` (ĐMX), `HN4 2` (TGDD)\n"
             "• `bxh` - Top 20 ĐMX & TGDD.\n"
-            "• `bxh1` - Top 20 ĐMX.\n"
-            "• `bxh2` - Top 20 TGDD.\n"
+            "• `bxh1` / `bxh2` - Top 20 ĐMX / TGDD.\n"
             "\n"
             "**⚙️ TIỆN ÍCH KHÁC:**\n"
             "• `id` - Lấy ID cá nhân & ID nhóm."
@@ -539,7 +533,6 @@ def handle_message(event):
         if not group_id:
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text="Lệnh này chỉ hoạt động trong nhóm chat."))
             return
-
         try:
             initialize_daily_tasks(group_id, shift_type)
             flex_content = generate_checklist_flex(group_id, shift_type)
@@ -555,21 +548,41 @@ def handle_message(event):
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text="Đã có lỗi xảy ra khi tạo checklist."))
         return
 
-    # === BẮT ĐẦU SỬA ĐỔI ===
-    schedule_type_to_send = None
-    if user_msg_upper == 'NV':
-        schedule_type_to_send = 'employee'
-    elif user_msg_upper == 'PG':
-        schedule_type_to_send = 'pg'
+    # === BẮT ĐẦU SỬA ĐỔI: Xử lý các lệnh lịch làm việc ===
 
-    if schedule_type_to_send:
+    # 1. Xử lý lệnh xem lịch theo ngày cụ thể (nv2, pg8, ...)
+    schedule_match = re.match(r"^(NV|PG)([2-8])$", user_msg_upper)
+    if schedule_match:
+        schedule_type_cmd = schedule_match.group(1)
+        day_number = int(schedule_match.group(2))
+
+        schedule_type = 'employee' if schedule_type_cmd == 'NV' else 'pg'
+        
+        days_map = {
+            2: "Thứ Hai", 3: "Thứ Ba", 4: "Thứ Tư",
+            5: "Thứ Năm", 6: "Thứ Sáu", 7: "Thứ Bảy", 8: "Chủ Nhật"
+        }
+        day_str = days_map.get(day_number)
+
         try:
-            # Truyền thêm event.reply_token để dùng tin nhắn trả lời (miễn phí)
-            send_daily_schedule(schedule_type_to_send, source_id, event.reply_token)
+            # Gọi hàm với ngày cụ thể được truyền vào
+            send_daily_schedule(schedule_type, source_id, event.reply_token, day_of_week_str=day_str)
         except Exception as e:
-            print(f"Lỗi khi lấy lịch làm việc: {e}")
+            print(f"Lỗi khi lấy lịch làm việc theo ngày: {e}")
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text="Đã có lỗi xảy ra khi lấy lịch làm việc."))
         return
+
+    # 2. Xử lý lệnh xem lịch hôm nay (nv, pg)
+    if user_msg_upper in ['NV', 'PG']:
+        schedule_type = 'employee' if user_msg_upper == 'NV' else 'pg'
+        try:
+            # Gọi hàm không có ngày cụ thể, nó sẽ tự lấy ngày hiện tại
+            send_daily_schedule(schedule_type, source_id, event.reply_token)
+        except Exception as e:
+            print(f"Lỗi khi lấy lịch làm việc hôm nay: {e}")
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="Đã có lỗi xảy ra khi lấy lịch làm việc."))
+        return
+        
     # === KẾT THÚC SỬA ĐỔI ===
 
     try:
@@ -647,7 +660,6 @@ def handle_message(event):
         print(f"!!! GẶP LỖI NGHIÊM TRỌNG KHI XỬ LÝ BÁO CÁO: {repr(e)}")
 
 # --- ENDPOINTS MỚI DÀNH CHO CRON JOB ---
-# === BẮT ĐẦU SỬA ĐỔI ===
 @app.route("/trigger-morning-tasks", methods=['POST'])
 def trigger_morning_tasks():
     incoming_secret = request.headers.get('X-Cron-Secret')
@@ -656,19 +668,14 @@ def trigger_morning_tasks():
     
     print("Cron Job: Bắt đầu tác vụ buổi sáng (08:00)...")
     try:
-        # Lấy group ID từ biến môi trường
         pg_group_id = os.environ.get('PG_GROUP_ID')
         employee_group_id = os.environ.get('EMPLOYEE_GROUP_ID')
         
-        # Gửi lịch làm việc PG vào nhóm PG (dùng push message)
         if pg_group_id:
             send_daily_schedule('pg', pg_group_id)
-        
-        # Gửi lịch làm việc Nhân viên vào nhóm NV (dùng push message)
         if employee_group_id:
             send_daily_schedule('employee', employee_group_id)
         
-        # Gửi checklist ca sáng vào nhóm NV
         send_initial_checklist('sang')
         return "OK", 200
     except Exception as e:
@@ -683,25 +690,15 @@ def trigger_afternoon_tasks():
     
     print("Cron Job: Bắt đầu tác vụ buổi chiều (14:30)...")
     try:
-        # Lấy group ID từ biến môi trường
         employee_group_id = os.environ.get('EMPLOYEE_GROUP_ID')
-        
-        # Gửi lịch làm việc Nhân viên vào nhóm NV (dùng push message)
         if employee_group_id:
             send_daily_schedule('employee', employee_group_id)
-
-        # Gửi checklist ca chiều vào nhóm NV
+        
         send_initial_checklist('chieu')
         return "OK", 200
     except Exception as e:
         print(f"Lỗi khi chạy tác vụ buổi chiều: {e}")
         return "Error", 500
-# === KẾT THÚC SỬA ĐỔI ===
-
-# --- ĐÃ XÓA THEO YÊU CẦU ---
-# @app.route("/trigger-thongbao", methods=['POST'])
-# def trigger-thongbao():
-# ...
 
 # --- CHẠY ỨNG DỤNG ---
 if __name__ == "__main__":
