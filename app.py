@@ -27,7 +27,7 @@ from flex_handler import initialize_daily_tasks, generate_checklist_flex
 from checklist_scheduler import send_initial_checklist
 # from thongbao_handler import send_thongbao_messages # ĐÃ XÓA THEO YÊU CẦU
 
-# --- PHẦN CẤU HÌNH: ĐỌC TỪ BIẾN MÔI TRƯỢNG ---
+# --- PHẦN CẤU HÌNH: ĐỌC TỪ BIẾN MÔI TRƯỜNG ---
 CHANNEL_ACCESS_TOKEN = os.environ.get('CHANNEL_ACCESS_TOKEN')
 CHANNEL_SECRET = os.environ.get('CHANNEL_SECRET')
 ADMIN_USER_ID = os.environ.get('ADMIN_USER_ID')
@@ -411,20 +411,40 @@ def handle_postback(event):
             tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
             today_str = datetime.now(tz_vietnam).strftime('%Y-%m-%d')
             
+            # === BẮT ĐẦU TỐI ƯU HÓA ===
+            
+            # 1. API Call 1: Đọc (Giữ nguyên)
             all_records = sheet.get_all_records()
             row_to_update = -1
+            target_record = None # Dùng để cập nhật bản ghi nội bộ
+            
             for i, record in enumerate(all_records):
                 if (str(record.get('group_id')) == group_id and
                     record.get('date') == today_str and
                     record.get('task_id') == task_id):
                     row_to_update = i + 2
+                    target_record = record # Lưu lại bản ghi tìm thấy
                     break
             
             if row_to_update != -1:
-                sheet.update_cell(row_to_update, 6, 'complete')
-                sheet.update_cell(row_to_update, 7, user_name)
+                # 2. API Call 2: Ghi (Gộp 2 lệnh ghi thành 1)
+                # Cập nhật 2 ô F (status) và G (user_name) cùng lúc
+                range_to_update = f'F{row_to_update}:G{row_to_update}'
+                # Sử dụng sheet.update_values thay vì sheet.update_cell
+                sheet.update_values(range_to_update, [['complete', user_name]], value_input_option='USER_ENTERED')
+                
+                # 3. Cập nhật dữ liệu all_records tại chỗ
+                # Điều này đảm bảo generate_checklist_flex có dữ liệu mới nhất
+                # mà không cần đọc lại từ sheet
+                if target_record:
+                    target_record['status'] = 'complete'
+                    target_record['user_name'] = user_name
             
-            updated_flex_content = generate_checklist_flex(group_id, shift_type)
+            # 4. Loại bỏ hoàn toàn API Call 3 và 4
+            # Truyền dữ liệu 'all_records' đã được đọc và cập nhật tại chỗ
+            updated_flex_content = generate_checklist_flex(group_id, shift_type, all_records_prefetched=all_records)
+            
+            # === KẾT THÚC TỐI ƯU HÓA ===
 
             line_bot_api.reply_message(
                 event.reply_token,
@@ -535,6 +555,7 @@ def handle_message(event):
             return
         try:
             initialize_daily_tasks(group_id, shift_type)
+            # Ở đây không cần truyền all_records vì đây là lần tạo mới
             flex_content = generate_checklist_flex(group_id, shift_type)
             
             if flex_content:

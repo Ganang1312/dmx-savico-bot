@@ -62,13 +62,17 @@ def initialize_daily_tasks(group_id, shift_type):
         print(f"Lỗi khi khởi tạo công việc: {e}")
         return False
 
-def get_tasks_status_from_sheet(group_id, shift_type):
+# === SỬA ĐỔI: Thêm all_records=None ===
+def get_tasks_status_from_sheet(group_id, shift_type, all_records=None):
     try:
-        sheet = CLIENT.open(SHEET_NAME).worksheet(WORKSHEET_TRACKER_NAME)
+        # === SỬA ĐỔI: Chỉ đọc sheet nếu all_records không được cung cấp ===
+        if all_records is None:
+            sheet = CLIENT.open(SHEET_NAME).worksheet(WORKSHEET_TRACKER_NAME)
+            all_records = sheet.get_all_records()
+        
         tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
         today_str = datetime.now(tz_vietnam).strftime('%Y-%m-%d')
         
-        all_records = sheet.get_all_records()
         task_statuses = {}
         
         for record in all_records:
@@ -81,11 +85,14 @@ def get_tasks_status_from_sheet(group_id, shift_type):
         print(f"Lỗi khi lấy trạng thái công việc: {e}")
         return {}
 
-def generate_checklist_flex(group_id, shift_type):
+# === SỬA ĐỔI: Thêm all_records_prefetched=None ===
+def generate_checklist_flex(group_id, shift_type, all_records_prefetched=None):
     """
     Tạo nội dung Flex Message với giao diện được thiết kế lại.
     """
-    task_statuses = get_tasks_status_from_sheet(group_id, shift_type)
+    # === SỬA ĐỔI: Truyền all_records_prefetched xuống hàm con ===
+    task_statuses = get_tasks_status_from_sheet(group_id, shift_type, all_records=all_records_prefetched)
+    
     if not task_statuses:
         task_statuses = {task['id']: 'incomplete' for task in TASKS.get(shift_type, [])}
 
@@ -215,3 +222,4 @@ def generate_checklist_flex(group_id, shift_type):
     }
     
     return flex_content
+}
