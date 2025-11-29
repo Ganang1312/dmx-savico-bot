@@ -3,7 +3,7 @@ import pytz
 # Import từ file cấu hình trung tâm
 from config import CLIENT, SHEET_NAME, WORKSHEET_TRACKER_NAME
 
-# --- CẬP NHẬT: Thêm icon vào danh sách công việc ---
+# --- Danh sách công việc ---
 TASKS = {
     'sang': [
         {'id': 'sang_1', 'icon': '📦', 'name': 'Check lệnh chuyển kho online', 'time': '09:15'},
@@ -27,31 +27,33 @@ TASKS = {
 
 def initialize_daily_tasks(group_id, shift_type):
     """
-    Reset và khởi tạo lại danh sách công việc của một ca trong Google Sheet.
-    CẬP NHẬT: Xóa sạch dữ liệu cũ (chế độ không lưu lịch sử) trước khi tạo mới.
+    Reset và khởi tạo lại danh sách công việc.
+    CẬP NHẬT: Xóa trắng 100% sheet và TẠO LẠI HEADER để tránh lỗi đọc dữ liệu.
     """
     print(f"Bắt đầu reset và khởi tạo công việc ca {shift_type} cho group {group_id}...")
     try:
         sheet = CLIENT.open(SHEET_NAME).worksheet(WORKSHEET_TRACKER_NAME)
         
-        # === CẬP NHẬT QUAN TRỌNG ===
-        # Thay vì tìm dòng cũ để xóa, ta xóa sạch nội dung từ dòng 2 đến dòng 1000.
-        # Giữ lại dòng tiêu đề (Header row 1).
-        # Điều này đảm bảo file sheet không bao giờ lưu lịch sử rác.
-        sheet.batch_clear(['A2:G1000'])
+        # 1. Xóa sạch toàn bộ dữ liệu trong Sheet (Clear All)
+        sheet.clear()
+        
+        # 2. Tạo lại dòng Tiêu Đề (Header) chuẩn xác
+        # App.py dựa vào các tên cột này để tìm dòng cần update, sai tên là lỗi ngay.
+        headers = ['group_id', 'date', 'task_id', 'name', 'time', 'status', 'user_name']
+        sheet.append_row(headers)
         
         tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
         today_str = datetime.now(tz_vietnam).strftime('%Y-%m-%d')
         
         tasks_to_add = []
         for task in TASKS.get(shift_type, []):
-            # Cấu trúc: [Group ID, Date, Task ID, Task Name, Time, Status, User Name]
+            # Cấu trúc dữ liệu khớp với Header ở trên
             new_row = [group_id, today_str, task['id'], task['name'], task['time'], 'incomplete', '']
             tasks_to_add.append(new_row)
 
         if tasks_to_add:
             sheet.append_rows(tasks_to_add, value_input_option='USER_ENTERED')
-            print(f"Đã khởi tạo mới {len(tasks_to_add)} công việc thành công (Clean Mode).")
+            print(f"Đã tạo Header mới và {len(tasks_to_add)} công việc thành công.")
         return True
     except Exception as e:
         print(f"Lỗi khi khởi tạo công việc: {e}")
@@ -59,7 +61,6 @@ def initialize_daily_tasks(group_id, shift_type):
 
 def get_tasks_status_from_sheet(group_id, shift_type, all_records=None):
     try:
-        # Tối ưu: Chỉ đọc sheet nếu all_records không được cung cấp (giảm API call)
         if all_records is None:
             sheet = CLIENT.open(SHEET_NAME).worksheet(WORKSHEET_TRACKER_NAME)
             all_records = sheet.get_all_records()
@@ -70,7 +71,7 @@ def get_tasks_status_from_sheet(group_id, shift_type, all_records=None):
         task_statuses = {}
         
         for record in all_records:
-            # Chỉ lấy trạng thái của đúng ngày hôm nay và đúng group
+            # Code dùng .get() nên nếu Header sai tên, nó sẽ ra None và không tìm thấy task
             if str(record.get('group_id')) == group_id and record.get('date') == today_str:
                 task_id = record.get('task_id')
                 if task_id and task_id.startswith(shift_type):
@@ -81,13 +82,8 @@ def get_tasks_status_from_sheet(group_id, shift_type, all_records=None):
         return {}
 
 def generate_checklist_flex(group_id, shift_type, all_records_prefetched=None):
-    """
-    Tạo nội dung Flex Message với giao diện được thiết kế lại.
-    """
-    # Truyền all_records_prefetched xuống hàm con để tận dụng cache
     task_statuses = get_tasks_status_from_sheet(group_id, shift_type, all_records=all_records_prefetched)
     
-    # Nếu không tìm thấy trạng thái (do mới tạo hoặc lỗi), mặc định là chưa xong
     if not task_statuses:
         task_statuses = {task['id']: 'incomplete' for task in TASKS.get(shift_type, [])}
 
@@ -173,7 +169,6 @@ def generate_checklist_flex(group_id, shift_type, all_records_prefetched=None):
         task_components.append(task_component)
         task_components.append({"type": "separator"})
 
-    # Xóa separator cuối cùng để đẹp hơn
     if task_components:
         task_components.pop()
 
@@ -215,5 +210,4 @@ def generate_checklist_flex(group_id, shift_type, all_records_prefetched=None):
             "contents": task_components
         }
     }
-    
     return flex_content
