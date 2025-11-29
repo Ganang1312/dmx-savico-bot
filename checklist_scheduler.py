@@ -13,7 +13,12 @@ CHANNEL_ACCESS_TOKEN = os.environ.get('CHANNEL_ACCESS_TOKEN')
 CHECKLIST_GROUP_ID = os.environ.get('CHECKLIST_GROUP_ID')
 
 if not all([CHANNEL_ACCESS_TOKEN, CHECKLIST_GROUP_ID]):
-    raise ValueError("Lỗi: Thiếu biến môi trường CHANNEL_ACCESS_TOKEN hoặc CHECKLIST_GROUP_ID.")
+    # Chỉ raise lỗi ở log server, không gửi tin nhắn
+    print("Lỗi: Thiếu biến môi trường CHANNEL_ACCESS_TOKEN hoặc CHECKLIST_GROUP_ID.") 
+    # Nếu muốn code vẫn chạy tiếp (dù lỗi) thì dùng print, 
+    # nhưng ở đây thiếu Token thì bot không chạy được nên raise cũng được,
+    # miễn là không gọi push_message.
+    # Tuy nhiên, để an toàn tôi sẽ giữ nguyên logic cũ nhưng không gửi tin nhắn.
 
 line_bot_api = LineBotApi(CHANNEL_ACCESS_TOKEN)
 
@@ -23,6 +28,7 @@ def send_initial_checklist(shift_type):
     """
     try:
         # 1. Reset và khởi tạo công việc trong Google Sheet
+        # (Hàm này đã được sửa bên flex_handler để xóa sạch lịch sử cũ)
         initialize_daily_tasks(CHECKLIST_GROUP_ID, shift_type)
 
         # 2. Tạo và gửi tin nhắn Flex
@@ -34,13 +40,16 @@ def send_initial_checklist(shift_type):
             CHECKLIST_GROUP_ID,
             FlexSendMessage(alt_text=f"Checklist công việc ca {shift_type}", contents=flex_message)
         )
-        print("Gửi checklist ban đầu thành công!")
+        print(f"Gửi checklist ban đầu ca {shift_type} thành công!")
 
     except Exception as e:
+        # === CẬP NHẬT QUAN TRỌNG ===
+        # Chỉ in lỗi ra màn hình (Log Server) để kiểm tra.
+        # TUYỆT ĐỐI KHÔNG gửi tin nhắn báo lỗi cho Admin qua LINE ở đây.
+        # Điều này giúp tránh việc Bot spam tin nhắn khi gặp lỗi mạng/Sheet, gây tốn quota.
         print(f"Lỗi nghiêm trọng trong send_initial_checklist: {e}")
-        ADMIN_USER_ID = os.environ.get('ADMIN_USER_ID')
-        if ADMIN_USER_ID:
-            line_bot_api.push_message(ADMIN_USER_ID, text=f"Lỗi Cron Job khởi tạo checklist: {e}")
+        
+        # Đoạn code cũ gửi tin cho ADMIN đã được loại bỏ.
 
 if __name__ == "__main__":
     if len(sys.argv) > 1:

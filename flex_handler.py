@@ -28,44 +28,38 @@ TASKS = {
 def initialize_daily_tasks(group_id, shift_type):
     """
     Reset và khởi tạo lại danh sách công việc của một ca trong Google Sheet.
+    CẬP NHẬT: Xóa sạch dữ liệu cũ (chế độ không lưu lịch sử) trước khi tạo mới.
     """
     print(f"Bắt đầu reset và khởi tạo công việc ca {shift_type} cho group {group_id}...")
     try:
         sheet = CLIENT.open(SHEET_NAME).worksheet(WORKSHEET_TRACKER_NAME)
+        
+        # === CẬP NHẬT QUAN TRỌNG ===
+        # Thay vì tìm dòng cũ để xóa, ta xóa sạch nội dung từ dòng 2 đến dòng 1000.
+        # Giữ lại dòng tiêu đề (Header row 1).
+        # Điều này đảm bảo file sheet không bao giờ lưu lịch sử rác.
+        sheet.batch_clear(['A2:G1000'])
+        
         tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
         today_str = datetime.now(tz_vietnam).strftime('%Y-%m-%d')
         
-        all_records = sheet.get_all_records()
-        rows_to_delete = []
-        for i, record in enumerate(all_records):
-            task_id = record.get('task_id', '')
-            if (str(record.get('group_id')) == group_id and
-                record.get('date') == today_str and
-                task_id.startswith(shift_type)):
-                rows_to_delete.append(i + 2)
-
-        if rows_to_delete:
-            print(f"Tìm thấy {len(rows_to_delete)} công việc cũ, đang xóa...")
-            for row_num in sorted(rows_to_delete, reverse=True):
-                sheet.delete_rows(row_num)
-        
         tasks_to_add = []
         for task in TASKS.get(shift_type, []):
+            # Cấu trúc: [Group ID, Date, Task ID, Task Name, Time, Status, User Name]
             new_row = [group_id, today_str, task['id'], task['name'], task['time'], 'incomplete', '']
             tasks_to_add.append(new_row)
 
         if tasks_to_add:
             sheet.append_rows(tasks_to_add, value_input_option='USER_ENTERED')
-            print(f"Đã khởi tạo mới {len(tasks_to_add)} công việc thành công.")
+            print(f"Đã khởi tạo mới {len(tasks_to_add)} công việc thành công (Clean Mode).")
         return True
     except Exception as e:
         print(f"Lỗi khi khởi tạo công việc: {e}")
         return False
 
-# === SỬA ĐỔI: Thêm all_records=None ===
 def get_tasks_status_from_sheet(group_id, shift_type, all_records=None):
     try:
-        # === SỬA ĐỔI: Chỉ đọc sheet nếu all_records không được cung cấp ===
+        # Tối ưu: Chỉ đọc sheet nếu all_records không được cung cấp (giảm API call)
         if all_records is None:
             sheet = CLIENT.open(SHEET_NAME).worksheet(WORKSHEET_TRACKER_NAME)
             all_records = sheet.get_all_records()
@@ -76,23 +70,24 @@ def get_tasks_status_from_sheet(group_id, shift_type, all_records=None):
         task_statuses = {}
         
         for record in all_records:
-            if str(record['group_id']) == group_id and record['date'] == today_str:
-                task_id = record['task_id']
-                if task_id.startswith(shift_type):
-                    task_statuses[task_id] = record['status']
+            # Chỉ lấy trạng thái của đúng ngày hôm nay và đúng group
+            if str(record.get('group_id')) == group_id and record.get('date') == today_str:
+                task_id = record.get('task_id')
+                if task_id and task_id.startswith(shift_type):
+                    task_statuses[task_id] = record.get('status')
         return task_statuses
     except Exception as e:
         print(f"Lỗi khi lấy trạng thái công việc: {e}")
         return {}
 
-# === SỬA ĐỔI: Thêm all_records_prefetched=None ===
 def generate_checklist_flex(group_id, shift_type, all_records_prefetched=None):
     """
     Tạo nội dung Flex Message với giao diện được thiết kế lại.
     """
-    # === SỬA ĐỔI: Truyền all_records_prefetched xuống hàm con ===
+    # Truyền all_records_prefetched xuống hàm con để tận dụng cache
     task_statuses = get_tasks_status_from_sheet(group_id, shift_type, all_records=all_records_prefetched)
     
+    # Nếu không tìm thấy trạng thái (do mới tạo hoặc lỗi), mặc định là chưa xong
     if not task_statuses:
         task_statuses = {task['id']: 'incomplete' for task in TASKS.get(shift_type, [])}
 
@@ -222,4 +217,3 @@ def generate_checklist_flex(group_id, shift_type, all_records_prefetched=None):
     }
     
     return flex_content
-}
