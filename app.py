@@ -25,7 +25,6 @@ from config import CLIENT, SHEET_NAME, WORKSHEET_NAME_USERS, WORKSHEET_NAME, WOR
 from schedule_handler import send_daily_schedule
 from flex_handler import initialize_daily_tasks, generate_checklist_flex
 from checklist_scheduler import send_initial_checklist
-# from thongbao_handler import send_thongbao_messages # ĐÃ XÓA THEO YÊU CẦU
 
 # --- PHẦN CẤU HÌNH: ĐỌC TỪ BIẾN MÔI TRƯỜNG ---
 CHANNEL_ACCESS_TOKEN = os.environ.get('CHANNEL_ACCESS_TOKEN')
@@ -120,7 +119,7 @@ def parse_duration(duration_str):
         return relativedelta(months=value), f"{value} tháng"
     return None, None
 
-# --- CÁC HÀM XỬ LÝ DỮ LIỆU BÁO CÁO (Giữ nguyên, không thay đổi) ---
+# --- CÁC HÀM XỬ LÝ DỮ LIỆU BÁO CÁO (Giữ nguyên) ---
 def parse_float_from_string(s):
     if s is None: return 0.0
     if not isinstance(s, str): s = str(s)
@@ -411,40 +410,34 @@ def handle_postback(event):
             tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
             today_str = datetime.now(tz_vietnam).strftime('%Y-%m-%d')
             
-            # === BẮT ĐẦU TỐI ƯU HÓA ===
-            
-            # 1. API Call 1: Đọc (Giữ nguyên)
+            # 1. API Call 1: Đọc
             all_records = sheet.get_all_records()
             row_to_update = -1
-            target_record = None # Dùng để cập nhật bản ghi nội bộ
+            target_record = None
             
             for i, record in enumerate(all_records):
+                # Vì dùng get_all_records() với Header chuẩn, ta truy cập bằng tên cột
                 if (str(record.get('group_id')) == group_id and
                     record.get('date') == today_str and
                     record.get('task_id') == task_id):
-                    row_to_update = i + 2
-                    target_record = record # Lưu lại bản ghi tìm thấy
+                    row_to_update = i + 2 # +2 vì index bắt đầu từ 0 và có 1 dòng header
+                    target_record = record
                     break
             
             if row_to_update != -1:
-                # 2. API Call 2: Ghi (Gộp 2 lệnh ghi thành 1)
-                # Cập nhật 2 ô F (status) và G (user_name) cùng lúc
+                # 2. API Call 2: Ghi (SỬA LỖI TẠI ĐÂY)
                 range_to_update = f'F{row_to_update}:G{row_to_update}'
-                # Sử dụng sheet.update_values thay vì sheet.update_cell
-                sheet.update_values(range_to_update, [['complete', user_name]], value_input_option='USER_ENTERED')
                 
-                # 3. Cập nhật dữ liệu all_records tại chỗ
-                # Điều này đảm bảo generate_checklist_flex có dữ liệu mới nhất
-                # mà không cần đọc lại từ sheet
+                # --- SỬA ĐỔI: Dùng sheet.update() thay vì sheet.update_values() ---
+                sheet.update(range_name=range_to_update, values=[['complete', user_name]])
+                
+                # 3. Cập nhật dữ liệu cục bộ để vẽ lại Flex Message
                 if target_record:
                     target_record['status'] = 'complete'
                     target_record['user_name'] = user_name
             
-            # 4. Loại bỏ hoàn toàn API Call 3 và 4
-            # Truyền dữ liệu 'all_records' đã được đọc và cập nhật tại chỗ
+            # 4. Tạo Flex Message mới từ dữ liệu đã cập nhật
             updated_flex_content = generate_checklist_flex(group_id, shift_type, all_records_prefetched=all_records)
-            
-            # === KẾT THÚC TỐI ƯU HÓA ===
 
             line_bot_api.reply_message(
                 event.reply_token,
@@ -453,7 +446,7 @@ def handle_postback(event):
 
         except Exception as e:
             print(f"Lỗi nghiêm trọng khi xử lý postback hoàn thành công việc: {e}")
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"Đã có lỗi xảy ra khi cập nhật công việc {task_id}."))
+            # line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"Đã có lỗi xảy ra khi cập nhật công việc {task_id}."))
 
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
@@ -569,7 +562,7 @@ def handle_message(event):
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text="Đã có lỗi xảy ra khi tạo checklist."))
         return
 
-    # === BẮT ĐẦU SỬA ĐỔI: Xử lý các lệnh lịch làm việc ===
+    # === Xử lý các lệnh lịch làm việc ===
 
     # 1. Xử lý lệnh xem lịch theo ngày cụ thể (nv2, pg8, ...)
     schedule_match = re.match(r"^(NV|PG)([2-8])$", user_msg_upper)
@@ -604,7 +597,6 @@ def handle_message(event):
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text="Đã có lỗi xảy ra khi lấy lịch làm việc."))
         return
         
-    # === KẾT THÚC SỬA ĐỔI ===
 
     try:
         sheet = CLIENT.open(SHEET_NAME).worksheet(WORKSHEET_NAME)
