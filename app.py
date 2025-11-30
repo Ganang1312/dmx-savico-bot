@@ -20,15 +20,14 @@ from linebot.models import (
 )
 import pandas as pd
 
-# --- IMPORT TỪ CÁC FILE KHÁC ---
+# --- IMPORT ---
 from config import CLIENT, SHEET_NAME, WORKSHEET_NAME_USERS, WORKSHEET_NAME, WORKSHEET_TRACKER_NAME
 from schedule_handler import send_daily_schedule
 from flex_handler import initialize_daily_tasks, generate_checklist_flex
 from checklist_scheduler import send_initial_checklist
-# === IMPORT MỚI ===
 from meal_handler import generate_meal_flex, update_meal_status
 
-# --- PHẦN CẤU HÌNH ---
+# --- CẤU HÌNH ---
 CHANNEL_ACCESS_TOKEN = os.environ.get('CHANNEL_ACCESS_TOKEN')
 CHANNEL_SECRET = os.environ.get('CHANNEL_SECRET')
 ADMIN_USER_ID = os.environ.get('ADMIN_USER_ID')
@@ -42,11 +41,10 @@ app = Flask(__name__)
 line_bot_api = LineBotApi(CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(CHANNEL_SECRET)
 
-# --- CÁC HÀM TIỆN ÍCH (Giữ nguyên) ---
+# --- UTILS ---
 def load_allowed_ids():
     global allowed_ids_cache
     try:
-        print("Đang tải danh sách ID được phép...")
         sheet = CLIENT.open(SHEET_NAME).worksheet(WORKSHEET_NAME_USERS)
         records = sheet.get_all_records()
         new_allowed_ids = set()
@@ -93,7 +91,7 @@ def parse_duration(duration_str):
     if unit == 'm': return relativedelta(months=value), f"{value} tháng"
     return None, None
 
-# --- CÁC HÀM XỬ LÝ DỮ LIỆU BÁO CÁO (Logic cũ giữ nguyên để tránh lỗi) ---
+# --- REPORT UTILS ---
 def parse_float_from_string(s):
     if s is None: return 0.0
     if not isinstance(s, str): s = str(s)
@@ -116,40 +114,9 @@ def handle_percentage_string(percent_str):
             return value, f"{round(value * 100)}%"
         except: return 0.0, "0%"
 
-def parse_competition_data(header_row, data_row):
-    start_column_index = 6
-    category_indices = collections.defaultdict(list)
-    for i, header in enumerate(header_row[start_column_index:], start=start_column_index):
-        if header: category_indices[header].append(i)
-    results = []
-    for category_name, indices in category_indices.items():
-        if len(indices) == 3:
-            try:
-                percent_ht_val = data_row[indices[0]]
-                realtime_val_str = data_row[indices[1]] if data_row[indices[1]] and data_row[indices[1]].strip() != '-' else "0"
-                target_val_str = data_row[indices[2]] if data_row[indices[2]] and data_row[indices[2]].strip() != '-' else "0"
-                percent_float, percent_ht_formatted = handle_percentage_string(percent_ht_val)
-                results.append({"name": category_name, "realtime": parse_float_from_string(realtime_val_str), "target": target_val_str, "percent_ht": percent_ht_formatted, "percent_val": percent_float})
-            except (ValueError, TypeError, IndexError): continue
-    results.sort(key=lambda x: x['percent_val'], reverse=True)
-    return results
-
-def format_currency(value_str, remove_decimal=False):
-    if not value_str or str(value_str).strip() == '-': return "-"
-    try:
-        value = parse_float_from_string(value_str)
-        if remove_decimal:
-            if value >= 1000: return f"{math.floor(value / 1000)} Tỷ"
-            return f"{math.floor(value)} Tr"
-        else:
-            if value >= 1000: return f"{round(value / 1000, 2)} Tỷ"
-            return f"{round(value, 2)} Tr"
-    except (ValueError, TypeError): return "-"
-
 def calculate_ranking(all_data, current_row):
     try:
         current_channel = (current_row[1] or "").strip()
-        current_revenue = parse_float_from_string(current_row[4])
         channel_stores = []
         for row in all_data[1:]:
             if len(row) > 4 and (row[1] or "").strip() == current_channel:
@@ -164,7 +131,37 @@ def calculate_ranking(all_data, current_row):
                 rank = i + 1; break
         if rank != -1: return f"{rank}/{len(channel_stores)}"
         return "-/-"
-    except (IndexError, ValueError, TypeError): return "-/-"
+    except: return "-/-"
+
+def parse_competition_data(header_row, data_row):
+    start_column_index = 6
+    category_indices = collections.defaultdict(list)
+    for i, header in enumerate(header_row[start_column_index:], start=start_column_index):
+        if header: category_indices[header].append(i)
+    results = []
+    for category_name, indices in category_indices.items():
+        if len(indices) == 3:
+            try:
+                percent_ht_val = data_row[indices[0]]
+                realtime_val_str = data_row[indices[1]] if data_row[indices[1]] and data_row[indices[1]].strip() != '-' else "0"
+                target_val_str = data_row[indices[2]] if data_row[indices[2]] and data_row[indices[2]].strip() != '-' else "0"
+                percent_float, percent_ht_formatted = handle_percentage_string(percent_ht_val)
+                results.append({"name": category_name, "realtime": parse_float_from_string(realtime_val_str), "target": target_val_str, "percent_ht": percent_ht_formatted, "percent_val": percent_float})
+            except: continue
+    results.sort(key=lambda x: x['percent_val'], reverse=True)
+    return results
+
+def format_currency(value_str, remove_decimal=False):
+    if not value_str or str(value_str).strip() == '-': return "-"
+    try:
+        value = parse_float_from_string(value_str)
+        if remove_decimal:
+            if value >= 1000: return f"{math.floor(value / 1000)} Tỷ"
+            return f"{math.floor(value)} Tr"
+        else:
+            if value >= 1000: return f"{round(value / 1000, 2)} Tỷ"
+            return f"{round(value, 2)} Tr"
+    except: return "-"
 
 def create_flex_message(store_data, competition_results, ranking):
     cum = store_data[0] or "-"
@@ -336,7 +333,7 @@ def callback():
 @app.route("/ping")
 def ping(): return "OK", 200
 
-# --- SỰ KIỆN POSTBACK (NÚT BẤM) ---
+# --- SỰ KIỆN POSTBACK ---
 @handler.add(PostbackEvent)
 def handle_postback(event):
     data_str = event.postback.data
@@ -357,7 +354,7 @@ def handle_postback(event):
         except: line_bot_api.reply_message(event.reply_token, TextSendMessage(text="Lỗi gia hạn."))
         return
 
-    # 2. Hoàn thành Task công việc (Sang/Chieu)
+    # 2. Hoàn thành Task
     if action == 'complete_task':
         task_id = data.get('task_id')
         shift_type = data.get('shift')
@@ -381,19 +378,16 @@ def handle_postback(event):
         except Exception as e: print(f"Error task: {e}")
         return
 
-    # === 3. XỬ LÝ CHECK-IN ĂN SÁNG/CHIỀU (MỚI) ===
+    # 3. Check-in Ăn
     if action == 'meal_checkin':
         session_type = data.get('session')
         staff_name = data.get('name')
         group_id = getattr(event.source, 'group_id', None)
         
         if not group_id: return
-
-        # Update Google Sheet
         success, time_str = update_meal_status(group_id, session_type, staff_name)
         
         if success:
-            # Vẽ lại Flex Message để hiển thị giờ
             updated_flex = generate_meal_flex(group_id, session_type)
             if updated_flex:
                 line_bot_api.reply_message(
@@ -401,10 +395,10 @@ def handle_postback(event):
                     FlexSendMessage(alt_text=f"Checklist ăn {session_type} updated", contents=updated_flex)
                 )
         else:
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ Lỗi: Không tìm thấy tên hoặc lỗi cập nhật."))
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ Lỗi cập nhật."))
         return
 
-# --- SỰ KIỆN TIN NHẮN TEXT ---
+# --- SỰ KIỆN MESSAGE ---
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
     user_message = event.message.text.strip()
@@ -412,12 +406,12 @@ def handle_message(event):
     user_id = event.source.user_id
     source_id = getattr(event.source, 'group_id', user_id)
     
-    # 1. Logic ADD User (Admin)
+    # 1. ADD User
     if user_msg_upper.startswith('ADD '):
         if user_id != ADMIN_USER_ID: return
         parts = user_message.split()
         if len(parts) != 3:
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="Sai cú pháp: add [ID] [hạn]"))
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="Sai cú pháp."))
             return
         target_id, duration_str = parts[1], parts[2]
         delta, duration_text = parse_duration(duration_str)
@@ -427,46 +421,62 @@ def handle_message(event):
             res = update_expiration_in_sheet(target_id, exp_str)
             load_allowed_ids()
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"✅ {res} thành công."))
-        except: line_bot_api.reply_message(event.reply_token, TextSendMessage(text="Lỗi update sheet."))
+        except: pass
         return
 
-    # 2. Check quyền truy cập
+    # 2. Check quyền
     is_controlled = bool(allowed_ids_cache) and ADMIN_USER_ID
     if is_controlled and source_id not in allowed_ids_cache:
         if user_msg_upper not in ['ID', 'MENU BOT'] and user_id != ADMIN_USER_ID: return
 
-    # 3. Các lệnh cơ bản
+    # 3. ID & MENU
     if user_msg_upper == 'ID':
         reply = f'User: {user_id}\nGroup: {source_id}' if hasattr(event.source, 'group_id') else f'User: {user_id}'
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
         return
 
     if user_msg_upper == 'MENU BOT':
-        menu = "🤖 MENU\n- `ansang`/`anchieu`: Điểm danh ăn.\n- `sang`/`chieu`: Checklist công việc.\n- `nv`/`pg`: Xem lịch.\n- `st [mã]`: Báo cáo ST."
+        menu = "🤖 MENU\n- `ăn`: Điểm danh ăn (tự động theo giờ).\n- `ansang`/`anchieu`: Điểm danh thủ công.\n- `sang`/`chieu`: Checklist công việc.\n- `nv`/`pg`: Xem lịch."
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=menu))
         return
 
-    # === 4. LỆNH ĂN SÁNG / ĂN CHIỀU (MỚI & SỬA LỖI CHỮ HOA/THƯỜNG) ===
-    # Loại bỏ dấu cách, chuyển về IN HOA để so sánh (VD: "An sang" -> "ANSANG")
-    normalized_msg = user_msg_upper.replace(" ", "")
+    # === 4. LỆNH ĂN SÁNG / ĂN CHIỀU (ĐÃ CẬP NHẬT) ===
+    # Kiểm tra lệnh không phân biệt hoa thường
+    cmd_lower = user_message.lower() # chuyển về chữ thường
     
-    if normalized_msg in ['ANSANG', 'ANCHIEU']:
+    # Mảng các từ khóa chấp nhận
+    accepted_cmds = ['ansang', 'anchieu', 'an', 'ăn']
+    
+    if cmd_lower in accepted_cmds:
         if not hasattr(event.source, 'group_id'):
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="⚠️ Lệnh này chỉ hoạt động trong nhóm."))
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="⚠️ Chỉ dùng trong nhóm."))
             return
 
-        session_type = normalized_msg.lower() # 'ansang' hoặc 'anchieu'
-        
-        try:
-            flex_content = generate_meal_flex(source_id, session_type)
-            if flex_content:
-                alt = "Check list ăn trưa" if session_type == 'ansang' else "Check list ăn tối"
-                line_bot_api.reply_message(event.reply_token, FlexSendMessage(alt_text=alt, contents=flex_content))
-            else:
-                line_bot_api.reply_message(event.reply_token, TextSendMessage(text="⚠️ Không tìm thấy dữ liệu hoặc toàn bộ nhân sự OFF."))
-        except Exception as e:
-            print(f"Lỗi ansang/anchieu: {e}")
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ Lỗi hệ thống."))
+        session_type = None
+
+        # Logic chọn ca
+        if cmd_lower == 'ansang':
+            session_type = 'ansang'
+        elif cmd_lower == 'anchieu':
+            session_type = 'anchieu'
+        elif cmd_lower in ['an', 'ăn']:
+            # Tự động chọn theo giờ
+            tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
+            current_hour = datetime.now(tz_vietnam).hour
+            # Trước 15h là Trưa, từ 15h là Tối
+            session_type = 'ansang' if current_hour < 15 else 'anchieu'
+
+        if session_type:
+            try:
+                flex_content = generate_meal_flex(source_id, session_type)
+                if flex_content:
+                    alt = "Check list ăn trưa" if session_type == 'ansang' else "Check list ăn tối"
+                    line_bot_api.reply_message(event.reply_token, FlexSendMessage(alt_text=alt, contents=flex_content))
+                else:
+                    line_bot_api.reply_message(event.reply_token, TextSendMessage(text="⚠️ Không tìm thấy dữ liệu hoặc toàn bộ nhân sự OFF."))
+            except Exception as e:
+                print(f"Lỗi tạo meal flex: {e}")
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ Lỗi hệ thống."))
         return
 
     # 5. Logic checklist công việc (SANG/CHIEU)

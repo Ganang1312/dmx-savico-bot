@@ -16,23 +16,28 @@ def get_vietnamese_day_of_week():
 
 def clean_staff_name(name):
     """
-    Làm sạch tên nhân viên:
-    - Loại bỏ: (11 NV):, (2 PG):
-    - Loại bỏ các ký tự đầu dòng như: -, +, •
+    Làm sạch tên nhân viên.
+    Ví dụ: "(11 NV): Thảo" -> "Thảo", "(5) Hùng" -> "Hùng"
     """
-    name = re.sub(r'^\(\d+\s*(NV|PG)\):\s*', '', name, flags=re.IGNORECASE)
-    name = re.sub(r'^[•\-\+]\s*', '', name)
+    # Bước 1: Loại bỏ các cụm từ trong ngoặc đầu dòng như (11 NV), (2 PG), (5)
+    # Regex này tìm các cụm bắt đầu bằng ( và kết thúc bằng ) hoặc ): kèm theo số
+    name = re.sub(r'^\(\d+.*?\):?\s*', '', name)
+    
+    # Bước 2: Loại bỏ các ký tự đặc biệt đầu dòng như -, +, •, :
+    name = re.sub(r'^[•\-\+:\.]\s*', '', name)
+    
     return name.strip()
 
 def get_working_staff(session_type):
     """
     Lọc danh sách nhân viên từ lịch làm việc.
-    session_type: 'ansang' -> Lấy Ca Sáng (Ăn trưa), loại 'off ca 3'
-    session_type: 'anchieu' -> Lấy Ca Chiều (Ăn tối), loại 'off ca 4'
+    session_type: 'ansang' -> Lấy Ca Sáng, loại 'off ca 3'
+    session_type: 'anchieu' -> Lấy Ca Chiều, loại 'off ca 4'
     """
     day_str = get_vietnamese_day_of_week()
     target_shift_name = "Ca Sáng" if session_type == 'ansang' else "Ca Chiều"
     
+    # Regex tìm từ khóa OFF (chấp nhận off ca3, off ca 3, OFF CA 3...)
     exclude_pattern = r'off\s*ca\s*3' if session_type == 'ansang' else r'off\s*ca\s*4'
     
     try:
@@ -48,6 +53,7 @@ def get_working_staff(session_type):
         for staff_type, col_name in [('NV', 'employee_schedule'), ('PG', 'pg_schedule')]:
             raw_text = today_schedule.get(col_name, "")
             
+            # Regex lấy nội dung trong Ca Sáng hoặc Ca Chiều
             pattern = f"{target_shift_name}(.*?)(Ca Chiều|Nghỉ|Vệ Sinh|$)"
             match = re.search(pattern, raw_text, re.DOTALL | re.IGNORECASE)
             
@@ -55,12 +61,18 @@ def get_working_staff(session_type):
                 staff_block = match.group(1).strip()
                 staff_block = staff_block.lstrip(':').lstrip(';').strip()
                 
+                # Tách tên bằng dấu phẩy hoặc xuống dòng
                 raw_names = re.split(r'[,\n]', staff_block)
                 
                 for name in raw_names:
                     clean_name = clean_staff_name(name)
-                    if not clean_name: continue
                     
+                    # === LỌC KỸ ===
+                    # 1. Nếu tên rỗng -> bỏ qua
+                    if not clean_name: continue
+                    # 2. Nếu tên chỉ toàn số (do lỗi tách chuỗi "(5)") -> bỏ qua
+                    if clean_name.isdigit(): continue
+                    # 3. Nếu tên chứa "off ca..." -> bỏ qua
                     if re.search(exclude_pattern, clean_name, re.IGNORECASE):
                         continue
                         
@@ -124,13 +136,16 @@ def update_meal_status(group_id, session_type, staff_name):
         time_now = datetime.now(tz_vietnam).strftime('%H:%M')
 
         row_index = -1
+        # Duyệt tìm dòng cần update (Bỏ header)
         for i, row in enumerate(all_values[1:], start=2):
+            # Cấu trúc: group_id(0), date(1), session(2), type(3), name(4)
             if (str(row[0]) == group_id and row[1] == today_str and 
                 row[2] == session_type and row[4] == staff_name):
                 row_index = i
                 break
         
         if row_index != -1:
+            # Cập nhật cột Status (6) và Time (7)
             sheet.update_cell(row_index, 6, 'done')
             sheet.update_cell(row_index, 7, time_now)
             return True, time_now
@@ -140,7 +155,7 @@ def update_meal_status(group_id, session_type, staff_name):
         return False, None
 
 def generate_meal_flex(group_id, session_type):
-    """Tạo Flex Message chia cột thông minh."""
+    """Tạo Flex Message."""
     data = sync_meal_sheet(group_id, session_type)
     if not data: return None
 
@@ -155,13 +170,15 @@ def generate_meal_flex(group_id, session_type):
     body_contents = []
 
     def create_staff_row(index, item):
-        """Tạo 1 dòng chứa: STT. Tên + Nút bấm (hoặc giờ)"""
+        """Tạo 1 dòng chứa: STT. Tên + Nút bấm"""
         is_done = item.get('status') == 'done'
         time_val = item.get('time_clicked', '')
         name = item.get('name')
         
-        display_name = (name[:14] + '..') if len(name) > 15 else name
+        # Cắt tên ngắn lại để không đẩy nút ra ngoài
+        display_name = (name[:10] + '..') if len(name) > 10 else name
 
+        # Phần Tên: Chiếm 6 phần không gian
         left_side = {
             "type": "text", 
             "text": f"{index}. {display_name}", 
@@ -172,6 +189,7 @@ def generate_meal_flex(group_id, session_type):
             "wrap": False
         }
 
+        # Phần Nút: Chiếm 4 phần không gian
         if is_done:
             right_side = {
                 "type": "text", "text": f"✅ {time_val}", 
@@ -179,13 +197,14 @@ def generate_meal_flex(group_id, session_type):
                 "color": "#2E7D32", "gravity": "center", "weight": "bold"
             }
         else:
+            # Giao diện nút Check: style secondary, height sm, flex 4
             right_side = {
                 "type": "button",
                 "style": "secondary",
-                "height": "sm",
+                "height": "sm", 
                 "action": {
                     "type": "postback",
-                    "label": "🍽️ Đi ăn", 
+                    "label": "CHECK", 
                     "data": f"action=meal_checkin&session={session_type}&name={name}"
                 },
                 "flex": 4,
@@ -195,7 +214,7 @@ def generate_meal_flex(group_id, session_type):
         return {"type": "box", "layout": "horizontal", "contents": [left_side, right_side], "margin": "xs", "alignItems": "center"}
 
     def create_section_grid(title, items, icon):
-        """Chia danh sách thành các cột, tối đa 5 người/cột."""
+        """Chia danh sách thành cột."""
         if not items: return None
         
         header = {
@@ -216,23 +235,23 @@ def generate_meal_flex(group_id, session_type):
                 col_contents.append(create_staff_row(global_idx, item))
                 global_idx += 1
             
-            # Tạo cột
+            # Tạo Box cột dọc
             columns.append({
                 "type": "box", 
                 "layout": "vertical", 
                 "flex": 1, 
                 "contents": col_contents
             })
-            # === KHẮC PHỤC LỖI: Không thêm spacer kiểu component nữa ===
-
+            
         # Grid Container chứa các cột
+        # LƯU Ý: alignItems phải là 'flex-start', spacing tạo khoảng cách
         grid_container = {
             "type": "box",
             "layout": "horizontal",
             "contents": columns,
             "margin": "sm",
-            "alignItems": "flex-start", # Căn lề trên
-            "spacing": "md" # === SỬA LỖI: Dùng spacing để tạo khoảng cách giữa các cột ===
+            "alignItems": "flex-start",
+            "spacing": "md"
         }
 
         return {"type": "box", "layout": "vertical", "contents": [header, {"type": "separator", "margin": "sm"}, grid_container]}
