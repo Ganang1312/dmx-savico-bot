@@ -31,6 +31,7 @@ def get_working_staff(session_type):
     day_str = get_vietnamese_day_of_week()
     target_shift_name = "Ca Sáng" if session_type == 'ansang' else "Ca Chiều"
     
+    # Regex lọc thông minh: "off ca 3", "off ca3"
     exclude_pattern = r'off\s*ca\s*3' if session_type == 'ansang' else r'off\s*ca\s*4'
     
     try:
@@ -52,13 +53,14 @@ def get_working_staff(session_type):
             if match:
                 staff_block = match.group(1).strip()
                 staff_block = staff_block.lstrip(':').lstrip(';').strip()
+                
                 raw_names = re.split(r'[,\n]', staff_block)
                 
                 for name in raw_names:
                     clean_name = clean_staff_name(name)
                     
                     if not clean_name: continue
-                    if clean_name.isdigit(): continue
+                    if clean_name.isdigit(): continue # Bỏ nếu tên chỉ toàn số
                     if re.search(exclude_pattern, clean_name, re.IGNORECASE):
                         continue
                         
@@ -158,42 +160,43 @@ def generate_meal_flex(group_id, session_type):
         time_val = item.get('time_clicked', '')
         name = item.get('name')
         
-        # Cắt tên: Vì font nhỏ nên cho phép hiển thị dài hơn 1 chút (12 ký tự)
+        # Tên dài thì cắt bớt, nhưng font nhỏ nên hiển thị được khá nhiều
         display_name = (name[:12] + '..') if len(name) > 13 else name
 
-        # === CẤU HÌNH TÊN (BÊN TRÁI) ===
-        # Sử dụng size "xxs" (cực nhỏ) để tiết kiệm không gian
-        # Tăng flex lên 3 để chiếm 75% chiều rộng cột
+        # === PHẦN TÊN (BÊN TRÁI) ===
+        # Sử dụng size "xxs" để hiển thị được nhiều tên
+        # Flex 7: Chiếm 70% chiều ngang
         left_side = {
             "type": "text", 
             "text": f"{index}. {display_name}", 
-            "size": "xxs",  # <--- GIẢM SIZE CHỮ
+            "size": "xxs", 
             "color": "#111111", 
-            "flex": 3,      # <--- TĂNG DIỆN TÍCH CHO TÊN
+            "flex": 7, 
             "gravity": "center",
             "wrap": False
         }
 
-        # === CẤU HÌNH NÚT (BÊN PHẢI) ===
+        # === PHẦN NÚT (BÊN PHẢI) ===
+        # Flex 3: Chiếm 30% chiều ngang
         if is_done:
             right_side = {
                 "type": "text", "text": f"{time_val}", 
-                "flex": 1, "align": "end", "size": "xxs", 
+                "flex": 3, "align": "center", "size": "xxs", 
                 "color": "#2E7D32", "gravity": "center", "weight": "bold"
             }
         else:
-            # Thay chữ "CHECK" thành icon "🍽️"
-            # Giảm flex xuống 1 (chiếm 25% chiều rộng cột)
+            # Dùng icon 🍲 thay cho chữ CHECK
+            # Layout nút sẽ gọn gàng hơn
             right_side = {
                 "type": "button",
                 "style": "secondary",
                 "height": "sm", 
                 "action": {
                     "type": "postback",
-                    "label": "🍽️",  # <--- DÙNG ICON ĐỂ KHÔNG BỊ CẮT CHỮ
+                    "label": "🍲", 
                     "data": f"action=meal_checkin&session={session_type}&name={name}"
                 },
-                "flex": 1, # <--- GIẢM DIỆN TÍCH NÚT
+                "flex": 3,
                 "margin": "xs"
             }
             
@@ -209,6 +212,7 @@ def generate_meal_flex(group_id, session_type):
             "weight": "bold", "size": "sm", "color": "#555555", "margin": "lg"
         }
         
+        # Chia 5 người / cột
         chunk_size = 5
         chunks = [items[i:i + chunk_size] for i in range(0, len(items), chunk_size)]
         
@@ -221,7 +225,6 @@ def generate_meal_flex(group_id, session_type):
                 col_contents.append(create_staff_row(global_idx, item))
                 global_idx += 1
             
-            # Tạo Box cột dọc
             columns.append({
                 "type": "box", 
                 "layout": "vertical", 
@@ -229,8 +232,6 @@ def generate_meal_flex(group_id, session_type):
                 "contents": col_contents
             })
             
-        # Grid Container chứa các cột
-        # alignItems phải là 'flex-start' để tránh lỗi Bad Request
         grid_container = {
             "type": "box",
             "layout": "horizontal",

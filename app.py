@@ -25,7 +25,7 @@ from config import CLIENT, SHEET_NAME, WORKSHEET_NAME_USERS, WORKSHEET_NAME, WOR
 from schedule_handler import send_daily_schedule
 from flex_handler import initialize_daily_tasks, generate_checklist_flex
 from checklist_scheduler import send_initial_checklist
-# Import module xử lý ăn uống mới
+# Import module xử lý ăn uống (MỚI)
 from meal_handler import generate_meal_flex, update_meal_status
 
 # --- PHẦN CẤU HÌNH ---
