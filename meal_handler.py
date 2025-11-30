@@ -36,6 +36,7 @@ def get_working_staff(session_type):
     target_shift_name = "Ca Sáng" if session_type == 'ansang' else "Ca Chiều"
     
     # Regex lọc thông minh: Chấp nhận "off ca3", "off ca 3", "OFF CA 3"...
+    # \s* nghĩa là có hoặc không có khoảng trắng đều bắt được
     exclude_pattern = r'off\s*ca\s*3' if session_type == 'ansang' else r'off\s*ca\s*4'
     
     try:
@@ -51,21 +52,24 @@ def get_working_staff(session_type):
         for staff_type, col_name in [('NV', 'employee_schedule'), ('PG', 'pg_schedule')]:
             raw_text = today_schedule.get(col_name, "")
             
-            # Regex tìm nội dung trong ca
+            # Regex tìm nội dung trong ca: Lấy từ tên Ca hiện tại đến khi gặp tên Ca tiếp theo hoặc hết dòng
             pattern = f"{target_shift_name}(.*?)(Ca Chiều|Nghỉ|Vệ Sinh|$)"
             match = re.search(pattern, raw_text, re.DOTALL | re.IGNORECASE)
             
             if match:
                 staff_block = match.group(1).strip()
+                # Xóa các ký tự thừa đầu dòng cụm
                 staff_block = staff_block.lstrip(':').lstrip(';').strip()
                 
+                # Tách tên bằng dấu phẩy hoặc xuống dòng
                 raw_names = re.split(r'[,\n]', staff_block)
                 
                 for name in raw_names:
                     clean_name = clean_staff_name(name)
                     if not clean_name: continue
                     
-                    # LOGIC LỌC
+                    # === LOGIC LỌC MỚI ===
+                    # Nếu tìm thấy cụm "off ca 3" (bất kể hoa thường, dính liền hay cách) -> Bỏ qua
                     if re.search(exclude_pattern, clean_name, re.IGNORECASE):
                         continue
                         
@@ -131,12 +135,14 @@ def update_meal_status(group_id, session_type, staff_name):
         row_index = -1
         # Tìm dòng cần update (Bỏ qua header)
         for i, row in enumerate(all_values[1:], start=2):
+            # Cấu trúc: group_id(0), date(1), session(2), type(3), name(4)
             if (str(row[0]) == group_id and row[1] == today_str and 
                 row[2] == session_type and row[4] == staff_name):
                 row_index = i
                 break
         
         if row_index != -1:
+            # Cập nhật cột Status (6) và Time (7)
             sheet.update_cell(row_index, 6, 'done')
             sheet.update_cell(row_index, 7, time_now)
             return True, time_now
@@ -153,6 +159,7 @@ def generate_meal_flex(group_id, session_type):
     # --- CẤU HÌNH GIAO DIỆN ---
     is_lunch = (session_type == 'ansang')
     title_text = "🍱 CHECK LIST ĂN TRƯA" if is_lunch else "🍲 CHECK LIST ĂN TỐI"
+    # Màu header: Cam cho trưa, Xanh đậm cho tối
     header_color = "#FFA000" if is_lunch else "#303F9F" 
     
     nv_list = [d for d in data if d['type'] == 'NV']
@@ -166,8 +173,10 @@ def generate_meal_flex(group_id, session_type):
         time_val = item.get('time_clicked', '')
         name = item.get('name')
         
+        # Cắt tên nếu quá dài (trên 15 ký tự) để không vỡ layout
         display_name = (name[:14] + '..') if len(name) > 15 else name
 
+        # Phần bên trái: Tên
         left_side = {
             "type": "text", 
             "text": f"{index}. {display_name}", 
@@ -178,6 +187,7 @@ def generate_meal_flex(group_id, session_type):
             "wrap": False
         }
 
+        # Phần bên phải: Nút bấm hoặc Giờ
         if is_done:
             right_side = {
                 "type": "text", "text": f"✅ {time_val}", 
@@ -191,7 +201,7 @@ def generate_meal_flex(group_id, session_type):
                 "height": "sm",
                 "action": {
                     "type": "postback",
-                    "label": "🍽️ Đi ăn", 
+                    "label": "🍽️ Đi ăn", # Text mới theo yêu cầu
                     "data": f"action=meal_checkin&session={session_type}&name={name}"
                 },
                 "flex": 4,
@@ -204,18 +214,19 @@ def generate_meal_flex(group_id, session_type):
         """Chia danh sách thành các cột, tối đa 5 người/cột."""
         if not items: return None
         
+        # Tiêu đề Section có kèm số lượng
         header = {
             "type": "text", 
             "text": f"{icon} {title} ({len(items)})", 
             "weight": "bold", "size": "sm", "color": "#555555", "margin": "lg"
         }
         
-        # CHUNKING
+        # --- THUẬT TOÁN CHIA CỘT (CHUNKING) ---
         chunk_size = 5
         chunks = [items[i:i + chunk_size] for i in range(0, len(items), chunk_size)]
         
         columns = []
-        global_idx = 1
+        global_idx = 1 # Số thứ tự liên tục
         
         for chunk in chunks:
             col_contents = []
@@ -223,31 +234,34 @@ def generate_meal_flex(group_id, session_type):
                 col_contents.append(create_staff_row(global_idx, item))
                 global_idx += 1
             
+            # Tạo Box cột dọc
             columns.append({
                 "type": "box", 
                 "layout": "vertical", 
                 "flex": 1, 
                 "contents": col_contents
             })
+            # Thêm khoảng trắng (spacer) giữa các cột để thoáng mắt
             columns.append({"type": "spacer", "size": "md"})
 
-        if columns: columns.pop()
+        if columns: columns.pop() # Bỏ spacer cuối cùng thừa ra
 
         # Grid Container chứa các cột
-        # --- SỬA LỖI TẠI ĐÂY: alignItems phải là flex-start ---
         grid_container = {
             "type": "box",
             "layout": "horizontal",
             "contents": columns,
             "margin": "sm",
-            "alignItems": "flex-start" 
+            "alignItems": "start" # Căn lề trên cùng
         }
 
         return {"type": "box", "layout": "vertical", "contents": [header, {"type": "separator", "margin": "sm"}, grid_container]}
 
+    # Tạo Grid cho NV
     nv_section = create_section_grid("NHÂN VIÊN", nv_list, "👨‍💼")
     if nv_section: body_contents.append(nv_section)
 
+    # Tạo Grid cho PG
     pg_section = create_section_grid("ĐỘI NGŨ PG", pg_list, "👩‍💼")
     if pg_section: body_contents.append(pg_section)
 
@@ -256,11 +270,12 @@ def generate_meal_flex(group_id, session_type):
 
     flex_msg = {
         "type": "bubble",
-        "size": "mega", 
+        "size": "mega", # Tăng độ rộng bubble để chứa nhiều cột
         "header": {
             "type": "box", "layout": "vertical", "backgroundColor": header_color, "paddingAll": "md",
             "contents": [
                 {"type": "text", "text": title_text, "weight": "bold", "size": "md", "color": "#FFFFFF", "align": "center"},
+                # Thu nhỏ text hướng dẫn
                 {"type": "text", "text": "(Bấm nút bên dưới khi đi ăn)", "size": "xxs", "color": "#FFFFFF", "align": "center", "margin": "xs", "alpha": 0.8}
             ]
         },
