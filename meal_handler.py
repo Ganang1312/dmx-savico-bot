@@ -17,27 +17,20 @@ def get_vietnamese_day_of_week():
 def clean_staff_name(name):
     """
     Làm sạch tên nhân viên.
-    Ví dụ: "(11 NV): Thảo" -> "Thảo", "(5) Hùng" -> "Hùng"
     """
-    # Bước 1: Loại bỏ các cụm từ trong ngoặc đầu dòng như (11 NV), (2 PG), (5)
-    # Regex này tìm các cụm bắt đầu bằng ( và kết thúc bằng ) hoặc ): kèm theo số
+    # Bỏ các cụm từ trong ngoặc đầu dòng như (11 NV), (2 PG), (5)
     name = re.sub(r'^\(\d+.*?\):?\s*', '', name)
-    
-    # Bước 2: Loại bỏ các ký tự đặc biệt đầu dòng như -, +, •, :
+    # Bỏ các ký tự đặc biệt đầu dòng
     name = re.sub(r'^[•\-\+:\.]\s*', '', name)
-    
     return name.strip()
 
 def get_working_staff(session_type):
     """
     Lọc danh sách nhân viên từ lịch làm việc.
-    session_type: 'ansang' -> Lấy Ca Sáng, loại 'off ca 3'
-    session_type: 'anchieu' -> Lấy Ca Chiều, loại 'off ca 4'
     """
     day_str = get_vietnamese_day_of_week()
     target_shift_name = "Ca Sáng" if session_type == 'ansang' else "Ca Chiều"
     
-    # Regex tìm từ khóa OFF (chấp nhận off ca3, off ca 3, OFF CA 3...)
     exclude_pattern = r'off\s*ca\s*3' if session_type == 'ansang' else r'off\s*ca\s*4'
     
     try:
@@ -53,26 +46,19 @@ def get_working_staff(session_type):
         for staff_type, col_name in [('NV', 'employee_schedule'), ('PG', 'pg_schedule')]:
             raw_text = today_schedule.get(col_name, "")
             
-            # Regex lấy nội dung trong Ca Sáng hoặc Ca Chiều
             pattern = f"{target_shift_name}(.*?)(Ca Chiều|Nghỉ|Vệ Sinh|$)"
             match = re.search(pattern, raw_text, re.DOTALL | re.IGNORECASE)
             
             if match:
                 staff_block = match.group(1).strip()
                 staff_block = staff_block.lstrip(':').lstrip(';').strip()
-                
-                # Tách tên bằng dấu phẩy hoặc xuống dòng
                 raw_names = re.split(r'[,\n]', staff_block)
                 
                 for name in raw_names:
                     clean_name = clean_staff_name(name)
                     
-                    # === LỌC KỸ ===
-                    # 1. Nếu tên rỗng -> bỏ qua
                     if not clean_name: continue
-                    # 2. Nếu tên chỉ toàn số (do lỗi tách chuỗi "(5)") -> bỏ qua
                     if clean_name.isdigit(): continue
-                    # 3. Nếu tên chứa "off ca..." -> bỏ qua
                     if re.search(exclude_pattern, clean_name, re.IGNORECASE):
                         continue
                         
@@ -126,7 +112,7 @@ def sync_meal_sheet(group_id, session_type):
         return []
 
 def update_meal_status(group_id, session_type, staff_name):
-    """Cập nhật trạng thái check-in vào Google Sheet."""
+    """Cập nhật trạng thái check-in."""
     try:
         sheet = CLIENT.open(SHEET_NAME).worksheet(WORKSHEET_MEAL_TRACKER_NAME)
         all_values = sheet.get_all_values()
@@ -136,16 +122,13 @@ def update_meal_status(group_id, session_type, staff_name):
         time_now = datetime.now(tz_vietnam).strftime('%H:%M')
 
         row_index = -1
-        # Duyệt tìm dòng cần update (Bỏ header)
         for i, row in enumerate(all_values[1:], start=2):
-            # Cấu trúc: group_id(0), date(1), session(2), type(3), name(4)
             if (str(row[0]) == group_id and row[1] == today_str and 
                 row[2] == session_type and row[4] == staff_name):
                 row_index = i
                 break
         
         if row_index != -1:
-            # Cập nhật cột Status (6) và Time (7)
             sheet.update_cell(row_index, 6, 'done')
             sheet.update_cell(row_index, 7, time_now)
             return True, time_now
@@ -175,39 +158,42 @@ def generate_meal_flex(group_id, session_type):
         time_val = item.get('time_clicked', '')
         name = item.get('name')
         
-        # Cắt tên ngắn lại để không đẩy nút ra ngoài
-        display_name = (name[:10] + '..') if len(name) > 10 else name
+        # Cắt tên: Vì font nhỏ nên cho phép hiển thị dài hơn 1 chút (12 ký tự)
+        display_name = (name[:12] + '..') if len(name) > 13 else name
 
-        # Phần Tên: Chiếm 6 phần không gian
+        # === CẤU HÌNH TÊN (BÊN TRÁI) ===
+        # Sử dụng size "xxs" (cực nhỏ) để tiết kiệm không gian
+        # Tăng flex lên 3 để chiếm 75% chiều rộng cột
         left_side = {
             "type": "text", 
             "text": f"{index}. {display_name}", 
-            "size": "xs", 
+            "size": "xxs",  # <--- GIẢM SIZE CHỮ
             "color": "#111111", 
-            "flex": 6, 
+            "flex": 3,      # <--- TĂNG DIỆN TÍCH CHO TÊN
             "gravity": "center",
             "wrap": False
         }
 
-        # Phần Nút: Chiếm 4 phần không gian
+        # === CẤU HÌNH NÚT (BÊN PHẢI) ===
         if is_done:
             right_side = {
-                "type": "text", "text": f"✅ {time_val}", 
-                "flex": 4, "align": "end", "size": "xxs", 
+                "type": "text", "text": f"{time_val}", 
+                "flex": 1, "align": "end", "size": "xxs", 
                 "color": "#2E7D32", "gravity": "center", "weight": "bold"
             }
         else:
-            # Giao diện nút Check: style secondary, height sm, flex 4
+            # Thay chữ "CHECK" thành icon "🍽️"
+            # Giảm flex xuống 1 (chiếm 25% chiều rộng cột)
             right_side = {
                 "type": "button",
                 "style": "secondary",
                 "height": "sm", 
                 "action": {
                     "type": "postback",
-                    "label": "CHECK", 
+                    "label": "🍽️",  # <--- DÙNG ICON ĐỂ KHÔNG BỊ CẮT CHỮ
                     "data": f"action=meal_checkin&session={session_type}&name={name}"
                 },
-                "flex": 4,
+                "flex": 1, # <--- GIẢM DIỆN TÍCH NÚT
                 "margin": "xs"
             }
             
@@ -244,7 +230,7 @@ def generate_meal_flex(group_id, session_type):
             })
             
         # Grid Container chứa các cột
-        # LƯU Ý: alignItems phải là 'flex-start', spacing tạo khoảng cách
+        # alignItems phải là 'flex-start' để tránh lỗi Bad Request
         grid_container = {
             "type": "box",
             "layout": "horizontal",
