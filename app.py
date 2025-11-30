@@ -20,15 +20,14 @@ from linebot.models import (
 )
 import pandas as pd
 
-# --- IMPORT TỪ CÁC FILE KHÁC ---
+# --- IMPORT ---
 from config import CLIENT, SHEET_NAME, WORKSHEET_NAME_USERS, WORKSHEET_NAME, WORKSHEET_TRACKER_NAME
 from schedule_handler import send_daily_schedule
 from flex_handler import initialize_daily_tasks, generate_checklist_flex
 from checklist_scheduler import send_initial_checklist
-# Import module xử lý ăn uống (MỚI)
 from meal_handler import generate_meal_flex, update_meal_status
 
-# --- PHẦN CẤU HÌNH ---
+# --- CẤU HÌNH ---
 CHANNEL_ACCESS_TOKEN = os.environ.get('CHANNEL_ACCESS_TOKEN')
 CHANNEL_SECRET = os.environ.get('CHANNEL_SECRET')
 ADMIN_USER_ID = os.environ.get('ADMIN_USER_ID')
@@ -42,12 +41,10 @@ app = Flask(__name__)
 line_bot_api = LineBotApi(CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(CHANNEL_SECRET)
 
-# --- CÁC HÀM TIỆN ÍCH ---
-
+# --- UTILS ---
 def load_allowed_ids():
     global allowed_ids_cache
     try:
-        print("Đang tải danh sách ID được phép...")
         sheet = CLIENT.open(SHEET_NAME).worksheet(WORKSHEET_NAME_USERS)
         records = sheet.get_all_records()
         new_allowed_ids = set()
@@ -61,7 +58,6 @@ def load_allowed_ids():
                 if exp_date >= today: new_allowed_ids.add(str(user_id))
             except ValueError: continue
         allowed_ids_cache = new_allowed_ids
-        print(f"Đã tải {len(allowed_ids_cache)} ID hợp lệ.")
     except Exception as e:
         print(f"Lỗi tải danh sách ID: {e}")
         allowed_ids_cache = set()
@@ -95,7 +91,7 @@ def parse_duration(duration_str):
     if unit == 'm': return relativedelta(months=value), f"{value} tháng"
     return None, None
 
-# --- CÁC HÀM XỬ LÝ DỮ LIỆU BÁO CÁO (REALTIME, BXH) ---
+# --- REPORT UTILS ---
 def parse_float_from_string(s):
     if s is None: return 0.0
     if not isinstance(s, str): s = str(s)
@@ -118,40 +114,9 @@ def handle_percentage_string(percent_str):
             return value, f"{round(value * 100)}%"
         except: return 0.0, "0%"
 
-def parse_competition_data(header_row, data_row):
-    start_column_index = 6
-    category_indices = collections.defaultdict(list)
-    for i, header in enumerate(header_row[start_column_index:], start=start_column_index):
-        if header: category_indices[header].append(i)
-    results = []
-    for category_name, indices in category_indices.items():
-        if len(indices) == 3:
-            try:
-                percent_ht_val = data_row[indices[0]]
-                realtime_val_str = data_row[indices[1]] if data_row[indices[1]] and data_row[indices[1]].strip() != '-' else "0"
-                target_val_str = data_row[indices[2]] if data_row[indices[2]] and data_row[indices[2]].strip() != '-' else "0"
-                percent_float, percent_ht_formatted = handle_percentage_string(percent_ht_val)
-                results.append({"name": category_name, "realtime": parse_float_from_string(realtime_val_str), "target": target_val_str, "percent_ht": percent_ht_formatted, "percent_val": percent_float})
-            except (ValueError, TypeError, IndexError): continue
-    results.sort(key=lambda x: x['percent_val'], reverse=True)
-    return results
-
-def format_currency(value_str, remove_decimal=False):
-    if not value_str or str(value_str).strip() == '-': return "-"
-    try:
-        value = parse_float_from_string(value_str)
-        if remove_decimal:
-            if value >= 1000: return f"{math.floor(value / 1000)} Tỷ"
-            return f"{math.floor(value)} Tr"
-        else:
-            if value >= 1000: return f"{round(value / 1000, 2)} Tỷ"
-            return f"{round(value, 2)} Tr"
-    except (ValueError, TypeError): return "-"
-
 def calculate_ranking(all_data, current_row):
     try:
         current_channel = (current_row[1] or "").strip()
-        current_revenue = parse_float_from_string(current_row[4])
         channel_stores = []
         for row in all_data[1:]:
             if len(row) > 4 and (row[1] or "").strip() == current_channel:
@@ -166,7 +131,37 @@ def calculate_ranking(all_data, current_row):
                 rank = i + 1; break
         if rank != -1: return f"{rank}/{len(channel_stores)}"
         return "-/-"
-    except (IndexError, ValueError, TypeError): return "-/-"
+    except: return "-/-"
+
+def parse_competition_data(header_row, data_row):
+    start_column_index = 6
+    category_indices = collections.defaultdict(list)
+    for i, header in enumerate(header_row[start_column_index:], start=start_column_index):
+        if header: category_indices[header].append(i)
+    results = []
+    for category_name, indices in category_indices.items():
+        if len(indices) == 3:
+            try:
+                percent_ht_val = data_row[indices[0]]
+                realtime_val_str = data_row[indices[1]] if data_row[indices[1]] and data_row[indices[1]].strip() != '-' else "0"
+                target_val_str = data_row[indices[2]] if data_row[indices[2]] and data_row[indices[2]].strip() != '-' else "0"
+                percent_float, percent_ht_formatted = handle_percentage_string(percent_ht_val)
+                results.append({"name": category_name, "realtime": parse_float_from_string(realtime_val_str), "target": target_val_str, "percent_ht": percent_ht_formatted, "percent_val": percent_float})
+            except: continue
+    results.sort(key=lambda x: x['percent_val'], reverse=True)
+    return results
+
+def format_currency(value_str, remove_decimal=False):
+    if not value_str or str(value_str).strip() == '-': return "-"
+    try:
+        value = parse_float_from_string(value_str)
+        if remove_decimal:
+            if value >= 1000: return f"{math.floor(value / 1000)} Tỷ"
+            return f"{math.floor(value)} Tr"
+        else:
+            if value >= 1000: return f"{round(value / 1000, 2)} Tỷ"
+            return f"{round(value, 2)} Tr"
+    except: return "-"
 
 def create_flex_message(store_data, competition_results, ranking):
     cum = store_data[0] or "-"

@@ -53,14 +53,13 @@ def get_working_staff(session_type):
             if match:
                 staff_block = match.group(1).strip()
                 staff_block = staff_block.lstrip(':').lstrip(';').strip()
-                
                 raw_names = re.split(r'[,\n]', staff_block)
                 
                 for name in raw_names:
                     clean_name = clean_staff_name(name)
                     
                     if not clean_name: continue
-                    if clean_name.isdigit(): continue # Bỏ nếu tên chỉ toàn số
+                    if clean_name.isdigit(): continue 
                     if re.search(exclude_pattern, clean_name, re.IGNORECASE):
                         continue
                         
@@ -160,43 +159,44 @@ def generate_meal_flex(group_id, session_type):
         time_val = item.get('time_clicked', '')
         name = item.get('name')
         
-        # Tên dài thì cắt bớt, nhưng font nhỏ nên hiển thị được khá nhiều
-        display_name = (name[:12] + '..') if len(name) > 13 else name
+        # Cắt tên: Cho phép dài hơn vì nút đã thu nhỏ (15 ký tự)
+        display_name = (name[:15] + '..') if len(name) > 16 else name
 
         # === PHẦN TÊN (BÊN TRÁI) ===
-        # Sử dụng size "xxs" để hiển thị được nhiều tên
-        # Flex 7: Chiếm 70% chiều ngang
+        # flex=1: Chiếm toàn bộ không gian còn lại
         left_side = {
             "type": "text", 
             "text": f"{index}. {display_name}", 
             "size": "xxs", 
             "color": "#111111", 
-            "flex": 7, 
+            "flex": 1, 
             "gravity": "center",
             "wrap": False
         }
 
         # === PHẦN NÚT (BÊN PHẢI) ===
-        # Flex 3: Chiếm 30% chiều ngang
         if is_done:
+            # Nếu đã xong, hiện giờ. Dùng width cố định để thẳng hàng
             right_side = {
                 "type": "text", "text": f"{time_val}", 
-                "flex": 3, "align": "center", "size": "xxs", 
+                "flex": 0, # Không co giãn
+                "width": "40px", # Cố định chiều rộng bằng nút
+                "align": "end", "size": "xxs", 
                 "color": "#2E7D32", "gravity": "center", "weight": "bold"
             }
         else:
-            # Dùng icon 🍲 thay cho chữ CHECK
-            # Layout nút sẽ gọn gàng hơn
+            # === SỬA LỖI TRÀN: Dùng width cố định 40px và flex=0 ===
             right_side = {
                 "type": "button",
                 "style": "secondary",
                 "height": "sm", 
                 "action": {
                     "type": "postback",
-                    "label": "🍲", 
+                    "label": "🍜", 
                     "data": f"action=meal_checkin&session={session_type}&name={name}"
                 },
-                "flex": 3,
+                "flex": 0,       # Không cho phép nút tự giãn
+                "width": "40px", # Cố định chiều rộng nhỏ nhất có thể
                 "margin": "xs"
             }
             
@@ -212,7 +212,6 @@ def generate_meal_flex(group_id, session_type):
             "weight": "bold", "size": "sm", "color": "#555555", "margin": "lg"
         }
         
-        # Chia 5 người / cột
         chunk_size = 5
         chunks = [items[i:i + chunk_size] for i in range(0, len(items), chunk_size)]
         
