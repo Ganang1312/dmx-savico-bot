@@ -20,7 +20,9 @@ def clean_staff_name(name):
     - Loại bỏ: (11 NV):, (2 PG):
     - Loại bỏ các ký tự đầu dòng như: -, +, •
     """
+    # Bỏ tiền tố dạng "(11 NV):", "(2 PG):"
     name = re.sub(r'^\(\d+\s*(NV|PG)\):\s*', '', name, flags=re.IGNORECASE)
+    # Bỏ ký tự đầu dòng
     name = re.sub(r'^[•\-\+]\s*', '', name)
     return name.strip()
 
@@ -33,6 +35,7 @@ def get_working_staff(session_type):
     day_str = get_vietnamese_day_of_week()
     target_shift_name = "Ca Sáng" if session_type == 'ansang' else "Ca Chiều"
     
+    # Regex lọc thông minh: Chấp nhận "off ca3", "off ca 3", "OFF CA 3"...
     exclude_pattern = r'off\s*ca\s*3' if session_type == 'ansang' else r'off\s*ca\s*4'
     
     try:
@@ -48,6 +51,7 @@ def get_working_staff(session_type):
         for staff_type, col_name in [('NV', 'employee_schedule'), ('PG', 'pg_schedule')]:
             raw_text = today_schedule.get(col_name, "")
             
+            # Regex tìm nội dung trong ca
             pattern = f"{target_shift_name}(.*?)(Ca Chiều|Nghỉ|Vệ Sinh|$)"
             match = re.search(pattern, raw_text, re.DOTALL | re.IGNORECASE)
             
@@ -61,6 +65,7 @@ def get_working_staff(session_type):
                     clean_name = clean_staff_name(name)
                     if not clean_name: continue
                     
+                    # LOGIC LỌC
                     if re.search(exclude_pattern, clean_name, re.IGNORECASE):
                         continue
                         
@@ -124,6 +129,7 @@ def update_meal_status(group_id, session_type, staff_name):
         time_now = datetime.now(tz_vietnam).strftime('%H:%M')
 
         row_index = -1
+        # Tìm dòng cần update (Bỏ qua header)
         for i, row in enumerate(all_values[1:], start=2):
             if (str(row[0]) == group_id and row[1] == today_str and 
                 row[2] == session_type and row[4] == staff_name):
@@ -204,6 +210,7 @@ def generate_meal_flex(group_id, session_type):
             "weight": "bold", "size": "sm", "color": "#555555", "margin": "lg"
         }
         
+        # CHUNKING
         chunk_size = 5
         chunks = [items[i:i + chunk_size] for i in range(0, len(items), chunk_size)]
         
@@ -226,12 +233,13 @@ def generate_meal_flex(group_id, session_type):
 
         if columns: columns.pop()
 
+        # Grid Container chứa các cột
+        # --- SỬA LỖI TẠI ĐÂY: alignItems phải là flex-start ---
         grid_container = {
             "type": "box",
             "layout": "horizontal",
             "contents": columns,
             "margin": "sm",
-            # --- SỬA LỖI TẠI ĐÂY: Dùng flex-start thay vì start ---
             "alignItems": "flex-start" 
         }
 
