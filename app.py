@@ -25,6 +25,7 @@ from config import CLIENT, SHEET_NAME, WORKSHEET_NAME_USERS, WORKSHEET_NAME, WOR
 from schedule_handler import send_daily_schedule
 from flex_handler import initialize_daily_tasks, generate_checklist_flex
 from checklist_scheduler import send_initial_checklist
+# Import Mới
 from meal_handler import generate_meal_flex, update_meal_status
 
 # --- CẤU HÌNH ---
@@ -426,8 +427,16 @@ def handle_postback(event):
         
         if not group_id: return
 
+        # === CẬP NHẬT MỚI: Lấy tên người bấm ===
+        try:
+            user_id = event.source.user_id
+            profile = line_bot_api.get_group_member_profile(group_id, user_id)
+            clicker_name = profile.display_name
+        except:
+            clicker_name = "Unknown"
+
         # Cập nhật Sheet
-        success, time_str = update_meal_status(group_id, session_type, staff_name)
+        success, time_str = update_meal_status(group_id, session_type, staff_name, clicker_name)
         
         if success:
             # Tạo lại Flex Message mới (đã tick xanh)

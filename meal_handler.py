@@ -7,6 +7,9 @@ from linebot.models import FlexSendMessage
 # Import từ file cấu hình trung tâm
 from config import CLIENT, SHEET_NAME, WORKSHEET_SCHEDULES_NAME, WORKSHEET_MEAL_TRACKER_NAME
 
+# Định nghĩa Header chuẩn cho Sheet Meal
+MEAL_HEADERS = ['group_id', 'date', 'session', 'type', 'name', 'status', 'time_clicked', 'clicked_by']
+
 def get_vietnamese_day_of_week():
     """Lấy tên thứ tiếng Việt để tra cứu lịch."""
     tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
@@ -15,38 +18,25 @@ def get_vietnamese_day_of_week():
     return days[weekday]
 
 def clean_staff_name(name):
-    """
-    Làm sạch tên nhân viên.
-    """
-    # Bỏ các cụm từ trong ngoặc đầu dòng như (11 NV), (2 PG), (5)
     name = re.sub(r'^\(\d+.*?\):?\s*', '', name)
-    # Bỏ các ký tự đặc biệt đầu dòng
     name = re.sub(r'^[•\-\+:\.]\s*', '', name)
     return name.strip()
 
 def get_working_staff(session_type):
-    """
-    Lọc danh sách nhân viên từ lịch làm việc.
-    """
     day_str = get_vietnamese_day_of_week()
     target_shift_name = "Ca Sáng" if session_type == 'ansang' else "Ca Chiều"
-    
-    # Regex lọc thông minh: "off ca 3", "off ca3"
     exclude_pattern = r'off\s*ca\s*3' if session_type == 'ansang' else r'off\s*ca\s*4'
     
     try:
         sheet = CLIENT.open(SHEET_NAME).worksheet(WORKSHEET_SCHEDULES_NAME)
         records = sheet.get_all_records()
-        
         today_schedule = next((row for row in records if row.get('day_of_week') == day_str), None)
-        if not today_schedule:
-            return {}
+        if not today_schedule: return {}
 
         results = {'NV': [], 'PG': []}
         
         for staff_type, col_name in [('NV', 'employee_schedule'), ('PG', 'pg_schedule')]:
             raw_text = today_schedule.get(col_name, "")
-            
             pattern = f"{target_shift_name}(.*?)(Ca Chiều|Nghỉ|Vệ Sinh|$)"
             match = re.search(pattern, raw_text, re.DOTALL | re.IGNORECASE)
             
@@ -57,29 +47,42 @@ def get_working_staff(session_type):
                 
                 for name in raw_names:
                     clean_name = clean_staff_name(name)
-                    
-                    if not clean_name: continue
-                    if clean_name.isdigit(): continue 
-                    if re.search(exclude_pattern, clean_name, re.IGNORECASE):
-                        continue
-                        
+                    if not clean_name or clean_name.isdigit(): continue
+                    if re.search(exclude_pattern, clean_name, re.IGNORECASE): continue
                     results[staff_type].append(clean_name)
-                    
         return results
-
     except Exception as e:
-        print(f"Lỗi khi lấy danh sách nhân sự đi ăn: {e}")
+        print(f"Lỗi lấy lịch: {e}")
         return {}
 
 def sync_meal_sheet(group_id, session_type):
-    """Đồng bộ danh sách từ Lịch -> Sheet Meal Tracker."""
+    """
+    Đồng bộ và TỰ ĐỘNG XÓA dữ liệu ngày cũ.
+    """
     try:
         sheet = CLIENT.open(SHEET_NAME).worksheet(WORKSHEET_MEAL_TRACKER_NAME)
-        all_records = sheet.get_all_records()
         
         tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
         today_str = datetime.now(tz_vietnam).strftime('%Y-%m-%d')
         
+        # 1. Kiểm tra dữ liệu cũ để xóa
+        # Lấy dòng dữ liệu đầu tiên (dòng 2) để check ngày
+        first_data_date = None
+        try:
+            val = sheet.acell('B2').value # Cột B là date
+            if val: first_data_date = val
+        except: pass
+
+        # Nếu có dữ liệu và ngày khác hôm nay -> Xóa sạch, tạo lại Header
+        if first_data_date and first_data_date != today_str:
+            print(f"Phát hiện dữ liệu cũ ({first_data_date}), tiến hành xóa...")
+            sheet.clear()
+            sheet.append_row(MEAL_HEADERS)
+            all_records = [] # Reset local records
+        else:
+            all_records = sheet.get_all_records()
+
+        # 2. Đồng bộ dữ liệu mới
         existing_entries = {}
         for row in all_records:
             if (str(row.get('group_id')) == group_id and 
@@ -96,11 +99,12 @@ def sync_meal_sheet(group_id, session_type):
                 if name in existing_entries:
                     final_data.append(existing_entries[name])
                 else:
+                    # Thêm cột clicked_by rỗng vào cuối
                     entry = {
                         'group_id': group_id, 'date': today_str, 'session': session_type,
-                        'type': s_type, 'name': name, 'status': 'waiting', 'time_clicked': ''
+                        'type': s_type, 'name': name, 'status': 'waiting', 'time_clicked': '', 'clicked_by': ''
                     }
-                    new_rows.append([group_id, today_str, session_type, s_type, name, 'waiting', ''])
+                    new_rows.append([group_id, today_str, session_type, s_type, name, 'waiting', '', ''])
                     final_data.append(entry)
         
         if new_rows:
@@ -109,11 +113,13 @@ def sync_meal_sheet(group_id, session_type):
         return final_data
 
     except Exception as e:
-        print(f"Lỗi khi đồng bộ meal sheet: {e}")
+        print(f"Lỗi sync sheet: {e}")
         return []
 
-def update_meal_status(group_id, session_type, staff_name):
-    """Cập nhật trạng thái check-in."""
+def update_meal_status(group_id, session_type, staff_name, clicker_name):
+    """
+    Cập nhật trạng thái + Người bấm (clicker_name).
+    """
     try:
         sheet = CLIENT.open(SHEET_NAME).worksheet(WORKSHEET_MEAL_TRACKER_NAME)
         all_values = sheet.get_all_values()
@@ -130,20 +136,24 @@ def update_meal_status(group_id, session_type, staff_name):
                 break
         
         if row_index != -1:
-            sheet.update_cell(row_index, 6, 'done')
-            sheet.update_cell(row_index, 7, time_now)
+            # Cập nhật: Status(6), Time(7), ClickedBy(8)
+            # update_cells hiệu quả hơn update từng cái
+            cell_list = [
+                gspread.Cell(row_index, 6, 'done'),
+                gspread.Cell(row_index, 7, time_now),
+                gspread.Cell(row_index, 8, clicker_name) # Cột người bấm
+            ]
+            sheet.update_cells(cell_list)
             return True, time_now
         return False, None
     except Exception as e:
-        print(f"Lỗi update meal status: {e}")
+        print(f"Lỗi update status: {e}")
         return False, None
 
 def generate_meal_flex(group_id, session_type):
-    """Tạo Flex Message."""
     data = sync_meal_sheet(group_id, session_type)
     if not data: return None
 
-    # --- CẤU HÌNH GIAO DIỆN ---
     is_lunch = (session_type == 'ansang')
     title_text = "🍱 CHECK LIST ĂN TRƯA" if is_lunch else "🍲 CHECK LIST ĂN TỐI"
     header_color = "#FFA000" if is_lunch else "#303F9F" 
@@ -154,92 +164,49 @@ def generate_meal_flex(group_id, session_type):
     body_contents = []
 
     def create_staff_row(index, item):
-        """Tạo 1 dòng chứa: STT. Tên + Nút bấm"""
         is_done = item.get('status') == 'done'
         time_val = item.get('time_clicked', '')
         name = item.get('name')
         
-        # Cắt tên: Cho phép dài hơn vì nút đã thu nhỏ (15 ký tự)
         display_name = (name[:15] + '..') if len(name) > 16 else name
 
-        # === PHẦN TÊN (BÊN TRÁI) ===
-        # flex=1: Chiếm toàn bộ không gian còn lại
         left_side = {
-            "type": "text", 
-            "text": f"{index}. {display_name}", 
-            "size": "xxs", 
-            "color": "#111111", 
-            "flex": 1, 
-            "gravity": "center",
-            "wrap": False
+            "type": "text", "text": f"{index}. {display_name}", 
+            "size": "xxs", "color": "#111111", "flex": 1, "gravity": "center", "wrap": False
         }
 
-        # === PHẦN NÚT (BÊN PHẢI) ===
         if is_done:
-            # Nếu đã xong, hiện giờ. Dùng width cố định để thẳng hàng
             right_side = {
                 "type": "text", "text": f"{time_val}", 
-                "flex": 0, # Không co giãn
-                "width": "40px", # Cố định chiều rộng bằng nút
-                "align": "end", "size": "xxs", 
+                "flex": 0, "width": "40px", "align": "end", "size": "xxs", 
                 "color": "#2E7D32", "gravity": "center", "weight": "bold"
             }
         else:
-            # === SỬA LỖI TRÀN: Dùng width cố định 40px và flex=0 ===
             right_side = {
-                "type": "button",
-                "style": "secondary",
-                "height": "sm", 
-                "action": {
-                    "type": "postback",
-                    "label": "🍜", 
-                    "data": f"action=meal_checkin&session={session_type}&name={name}"
-                },
-                "flex": 0,       # Không cho phép nút tự giãn
-                "width": "40px", # Cố định chiều rộng nhỏ nhất có thể
-                "margin": "xs"
+                "type": "button", "style": "secondary", "height": "sm", 
+                "action": {"type": "postback", "label": "🍜", "data": f"action=meal_checkin&session={session_type}&name={name}"},
+                "flex": 0, "width": "40px", "margin": "xs"
             }
             
         return {"type": "box", "layout": "horizontal", "contents": [left_side, right_side], "margin": "xs", "alignItems": "center"}
 
     def create_section_grid(title, items, icon):
-        """Chia danh sách thành cột."""
         if not items: return None
-        
-        header = {
-            "type": "text", 
-            "text": f"{icon} {title} ({len(items)})", 
-            "weight": "bold", "size": "sm", "color": "#555555", "margin": "lg"
-        }
+        header = {"type": "text", "text": f"{icon} {title} ({len(items)})", "weight": "bold", "size": "sm", "color": "#555555", "margin": "lg"}
         
         chunk_size = 5
         chunks = [items[i:i + chunk_size] for i in range(0, len(items), chunk_size)]
         
         columns = []
         global_idx = 1
-        
         for chunk in chunks:
             col_contents = []
             for item in chunk:
                 col_contents.append(create_staff_row(global_idx, item))
                 global_idx += 1
+            columns.append({"type": "box", "layout": "vertical", "flex": 1, "contents": col_contents})
             
-            columns.append({
-                "type": "box", 
-                "layout": "vertical", 
-                "flex": 1, 
-                "contents": col_contents
-            })
-            
-        grid_container = {
-            "type": "box",
-            "layout": "horizontal",
-            "contents": columns,
-            "margin": "sm",
-            "alignItems": "flex-start",
-            "spacing": "md"
-        }
-
+        grid_container = {"type": "box", "layout": "horizontal", "contents": columns, "margin": "sm", "alignItems": "flex-start", "spacing": "md"}
         return {"type": "box", "layout": "vertical", "contents": [header, {"type": "separator", "margin": "sm"}, grid_container]}
 
     nv_section = create_section_grid("NHÂN VIÊN", nv_list, "👨‍💼")
@@ -252,8 +219,7 @@ def generate_meal_flex(group_id, session_type):
         body_contents.append({"type": "text", "text": "Không có lịch hoặc mọi người đều OFF.", "align": "center", "size": "xs", "color": "#999999", "margin": "md"})
 
     flex_msg = {
-        "type": "bubble",
-        "size": "mega", 
+        "type": "bubble", "size": "mega", 
         "header": {
             "type": "box", "layout": "vertical", "backgroundColor": header_color, "paddingAll": "md",
             "contents": [
@@ -261,8 +227,6 @@ def generate_meal_flex(group_id, session_type):
                 {"type": "text", "text": "(Bấm nút bên dưới khi đi ăn)", "size": "xxs", "color": "#FFFFFF", "align": "center", "margin": "xs", "alpha": 0.8}
             ]
         },
-        "body": {
-            "type": "box", "layout": "vertical", "contents": body_contents, "paddingAll": "md"
-        }
+        "body": {"type": "box", "layout": "vertical", "contents": body_contents, "paddingAll": "md"}
     }
     return flex_msg
