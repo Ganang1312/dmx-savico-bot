@@ -2,22 +2,30 @@ import re
 import math
 from datetime import datetime
 import pytz
+import unicodedata
+import gspread
 from linebot.models import FlexSendMessage
 
 # Import từ file cấu hình trung tâm
 from config import CLIENT, SHEET_NAME, WORKSHEET_SCHEDULES_NAME, WORKSHEET_MEAL_TRACKER_NAME
 
-# Định nghĩa Header chuẩn cho Sheet Meal
+# Định nghĩa Header chuẩn (8 cột)
 MEAL_HEADERS = ['group_id', 'date', 'session', 'type', 'name', 'status', 'time_clicked', 'clicked_by']
 
+def normalize_text(text):
+    """Chuẩn hóa chuỗi để so sánh chính xác."""
+    if not text: return ""
+    text = str(text).strip().lower()
+    return unicodedata.normalize('NFC', text)
+
 def get_vietnamese_day_of_week():
-    """Lấy tên thứ tiếng Việt để tra cứu lịch."""
     tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
     weekday = datetime.now(tz_vietnam).weekday()
     days = ["Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ Bảy", "Chủ Nhật"]
     return days[weekday]
 
 def clean_staff_name(name):
+    # Loại bỏ các ký tự thừa
     name = re.sub(r'^\(\d+.*?\):?\s*', '', name)
     name = re.sub(r'^[•\-\+:\.]\s*', '', name)
     return name.strip()
@@ -56,39 +64,34 @@ def get_working_staff(session_type):
         return {}
 
 def sync_meal_sheet(group_id, session_type):
-    """
-    Đồng bộ và TỰ ĐỘNG XÓA dữ liệu ngày cũ.
-    """
     try:
         sheet = CLIENT.open(SHEET_NAME).worksheet(WORKSHEET_MEAL_TRACKER_NAME)
-        
         tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
         today_str = datetime.now(tz_vietnam).strftime('%Y-%m-%d')
         
-        # 1. Kiểm tra dữ liệu cũ để xóa
-        # Lấy dòng dữ liệu đầu tiên (dòng 2) để check ngày
+        # 1. Kiểm tra ngày để reset sheet
         first_data_date = None
         try:
-            val = sheet.acell('B2').value # Cột B là date
+            val = sheet.acell('B2').value 
             if val: first_data_date = val
         except: pass
 
-        # Nếu có dữ liệu và ngày khác hôm nay -> Xóa sạch, tạo lại Header
         if first_data_date and first_data_date != today_str:
-            print(f"Phát hiện dữ liệu cũ ({first_data_date}), tiến hành xóa...")
+            print(f"Ngày mới! Xóa dữ liệu cũ ({first_data_date})...")
             sheet.clear()
             sheet.append_row(MEAL_HEADERS)
-            all_records = [] # Reset local records
+            all_records = []
         else:
             all_records = sheet.get_all_records()
 
-        # 2. Đồng bộ dữ liệu mới
+        # 2. Đồng bộ
         existing_entries = {}
         for row in all_records:
+            key_name = normalize_text(row.get('name'))
             if (str(row.get('group_id')) == group_id and 
                 row.get('date') == today_str and 
                 row.get('session') == session_type):
-                existing_entries[row.get('name')] = row
+                existing_entries[key_name] = row
 
         staff_lists = get_working_staff(session_type)
         final_data = [] 
@@ -96,10 +99,12 @@ def sync_meal_sheet(group_id, session_type):
 
         for s_type in ['NV', 'PG']:
             for name in staff_lists.get(s_type, []):
-                if name in existing_entries:
-                    final_data.append(existing_entries[name])
+                norm_name = normalize_text(name)
+                
+                if norm_name in existing_entries:
+                    final_data.append(existing_entries[norm_name])
                 else:
-                    # Thêm cột clicked_by rỗng vào cuối
+                    # Tạo dòng mới, cột clicked_by để trống
                     entry = {
                         'group_id': group_id, 'date': today_str, 'session': session_type,
                         'type': s_type, 'name': name, 'status': 'waiting', 'time_clicked': '', 'clicked_by': ''
@@ -118,7 +123,7 @@ def sync_meal_sheet(group_id, session_type):
 
 def update_meal_status(group_id, session_type, staff_name, clicker_name):
     """
-    Cập nhật trạng thái + Người bấm (clicker_name).
+    Cập nhật trạng thái và Nick LINE người bấm.
     """
     try:
         sheet = CLIENT.open(SHEET_NAME).worksheet(WORKSHEET_MEAL_TRACKER_NAME)
@@ -128,23 +133,42 @@ def update_meal_status(group_id, session_type, staff_name, clicker_name):
         today_str = datetime.now(tz_vietnam).strftime('%Y-%m-%d')
         time_now = datetime.now(tz_vietnam).strftime('%H:%M')
 
+        target_name_norm = normalize_text(staff_name)
+        target_group_id = str(group_id).strip()
+
         row_index = -1
+        # Tìm dòng tương ứng
         for i, row in enumerate(all_values[1:], start=2):
-            if (str(row[0]) == group_id and row[1] == today_str and 
-                row[2] == session_type and row[4] == staff_name):
+            if len(row) < 5: continue
+            
+            row_group = str(row[0]).strip()
+            row_date = str(row[1]).strip()
+            row_session = str(row[2]).strip()
+            row_name_norm = normalize_text(row[4])
+
+            if (row_group == target_group_id and 
+                row_date == today_str and 
+                row_session == session_type and 
+                row_name_norm == target_name_norm):
                 row_index = i
                 break
         
         if row_index != -1:
-            # Cập nhật: Status(6), Time(7), ClickedBy(8)
-            # update_cells hiệu quả hơn update từng cái
-            cell_list = [
+            # Ghi dữ liệu vào 3 cột:
+            # Cột 6 (F): Status -> 'done'
+            # Cột 7 (G): Time -> Giờ hiện tại
+            # Cột 8 (H): Clicked By -> Nick Line người bấm
+            
+            # Sử dụng update_cells để tối ưu
+            cells = [
                 gspread.Cell(row_index, 6, 'done'),
                 gspread.Cell(row_index, 7, time_now),
-                gspread.Cell(row_index, 8, clicker_name) # Cột người bấm
+                gspread.Cell(row_index, 8, clicker_name)
             ]
-            sheet.update_cells(cell_list)
+            sheet.update_cells(cells)
             return True, time_now
+        
+        print(f"Không tìm thấy dòng khớp cho: {staff_name}")
         return False, None
     except Exception as e:
         print(f"Lỗi update status: {e}")
@@ -168,6 +192,7 @@ def generate_meal_flex(group_id, session_type):
         time_val = item.get('time_clicked', '')
         name = item.get('name')
         
+        # Cắt tên ngắn gọn (15 ký tự)
         display_name = (name[:15] + '..') if len(name) > 16 else name
 
         left_side = {
@@ -176,15 +201,17 @@ def generate_meal_flex(group_id, session_type):
         }
 
         if is_done:
+            # Nếu đã xong thì hiện giờ
             right_side = {
                 "type": "text", "text": f"{time_val}", 
                 "flex": 0, "width": "40px", "align": "end", "size": "xxs", 
                 "color": "#2E7D32", "gravity": "center", "weight": "bold"
             }
         else:
+            # Nút bấm hình bát phở 🍲
             right_side = {
                 "type": "button", "style": "secondary", "height": "sm", 
-                "action": {"type": "postback", "label": "🍜", "data": f"action=meal_checkin&session={session_type}&name={name}"},
+                "action": {"type": "postback", "label": "🍲", "data": f"action=meal_checkin&session={session_type}&name={name}"},
                 "flex": 0, "width": "40px", "margin": "xs"
             }
             

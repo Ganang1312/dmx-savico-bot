@@ -92,7 +92,7 @@ def parse_duration(duration_str):
     if unit == 'm': return relativedelta(months=value), f"{value} tháng"
     return None, None
 
-# --- REPORT UTILS ---
+# --- REPORT UTILS (Giữ nguyên) ---
 def parse_float_from_string(s):
     if s is None: return 0.0
     if not isinstance(s, str): s = str(s)
@@ -427,13 +427,18 @@ def handle_postback(event):
         
         if not group_id: return
 
-        # === CẬP NHẬT MỚI: Lấy tên người bấm ===
+        # === LẤY TÊN NGƯỜI BẤM (NICK LINE) ===
         try:
             user_id = event.source.user_id
             profile = line_bot_api.get_group_member_profile(group_id, user_id)
             clicker_name = profile.display_name
         except:
-            clicker_name = "Unknown"
+            # Fallback nếu không lấy được (ví dụ chat 1-1 hoặc lỗi mạng)
+            try:
+                profile = line_bot_api.get_profile(user_id)
+                clicker_name = profile.display_name
+            except:
+                clicker_name = "Unknown"
 
         # Cập nhật Sheet
         success, time_str = update_meal_status(group_id, session_type, staff_name, clicker_name)
