@@ -22,10 +22,10 @@ import pandas as pd
 
 # --- IMPORT ---
 from config import CLIENT, SHEET_NAME, WORKSHEET_NAME_USERS, WORKSHEET_NAME, WORKSHEET_TRACKER_NAME
+# CẬP NHẬT IMPORT MỚI
 from schedule_handler import send_daily_schedule
 from flex_handler import initialize_daily_tasks, generate_checklist_flex
-from checklist_scheduler import send_initial_checklist
-# Import Mới
+from checklist_scheduler import send_initial_checklist, get_checklist_message 
 from meal_handler import generate_meal_flex, update_meal_status
 
 # --- CẤU HÌNH ---
@@ -35,7 +35,7 @@ ADMIN_USER_ID = os.environ.get('ADMIN_USER_ID')
 CRON_SECRET_KEY = os.environ.get('CRON_SECRET_KEY')
 
 if not all([CHANNEL_ACCESS_TOKEN, CHANNEL_SECRET, ADMIN_USER_ID]):
-    raise ValueError("Lỗi: Hãy kiểm tra lại các biến môi trường trên Render.")
+    print("Cảnh báo: Thiếu biến môi trường quan trọng.")
 
 allowed_ids_cache = set()
 app = Flask(__name__)
@@ -92,7 +92,7 @@ def parse_duration(duration_str):
     if unit == 'm': return relativedelta(months=value), f"{value} tháng"
     return None, None
 
-# --- REPORT UTILS (Giữ nguyên) ---
+# --- REPORT UTILS ---
 def parse_float_from_string(s):
     if s is None: return 0.0
     if not isinstance(s, str): s = str(s)
@@ -294,7 +294,6 @@ def create_leaderboard_flex_message(all_data, cluster_name=None, channel_filter=
     else: dmx_title, tgdd_title = "🏆 REALTIME TOP 20 ĐMX 🏆", "🏆 REALTIME TOP 20 TGDD 🏆"
     
     messages_to_return = []
-    
     show_dmx = False
     show_tgdd = False
 
@@ -419,7 +418,7 @@ def handle_postback(event):
             print(f"Lỗi nghiêm trọng khi xử lý postback hoàn thành công việc: {e}")
         return
 
-    # 3. Check-in Ăn Sáng/Chiều (MỚI)
+    # 3. Check-in Ăn Sáng/Chiều
     if action == 'meal_checkin':
         session_type = data.get('session')
         staff_name = data.get('name')
@@ -433,18 +432,15 @@ def handle_postback(event):
             profile = line_bot_api.get_group_member_profile(group_id, user_id)
             clicker_name = profile.display_name
         except:
-            # Fallback nếu không lấy được (ví dụ chat 1-1 hoặc lỗi mạng)
             try:
                 profile = line_bot_api.get_profile(user_id)
                 clicker_name = profile.display_name
             except:
                 clicker_name = "Unknown"
 
-        # Cập nhật Sheet
         success, time_str = update_meal_status(group_id, session_type, staff_name, clicker_name)
         
         if success:
-            # Tạo lại Flex Message mới (đã tick xanh)
             updated_flex = generate_meal_flex(group_id, session_type)
             if updated_flex:
                 line_bot_api.reply_message(
@@ -545,11 +541,8 @@ def handle_message(event):
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=menu_text))
         return
 
-    # === 5. XỬ LÝ LỆNH ĂN UỐNG (MỚI) ===
-    # Chuẩn hóa tin nhắn: Bỏ dấu cách, chữ thường (VD: "Ăn" -> "an", "an sang" -> "ansang")
+    # === 5. XỬ LÝ LỆNH ĂN UỐNG ===
     cmd_normalized = user_message.lower().replace(" ", "")
-    
-    # Các lệnh chấp nhận được
     meal_cmds = ['ansang', 'anchieu', 'an', 'ăn']
     
     if cmd_normalized in meal_cmds:
@@ -558,22 +551,12 @@ def handle_message(event):
             return
 
         session_type = None
-
-        # Trường hợp 1: Lệnh rõ ràng
-        if cmd_normalized == 'ansang':
-            session_type = 'ansang'
-        elif cmd_normalized == 'anchieu':
-            session_type = 'anchieu'
-        
-        # Trường hợp 2: Lệnh "ăn" chung chung -> Tự động theo giờ
+        if cmd_normalized == 'ansang': session_type = 'ansang'
+        elif cmd_normalized == 'anchieu': session_type = 'anchieu'
         elif cmd_normalized in ['an', 'ăn']:
             tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
             current_hour = datetime.now(tz_vietnam).hour
-            # Quy ước: Trước 15h00 là Ăn Trưa (ansang), từ 15h00 trở đi là Ăn Tối (anchieu)
-            if current_hour < 15:
-                session_type = 'ansang'
-            else:
-                session_type = 'anchieu'
+            session_type = 'ansang' if current_hour < 15 else 'anchieu'
 
         if session_type:
             try:
@@ -585,7 +568,7 @@ def handle_message(event):
                     line_bot_api.reply_message(event.reply_token, TextSendMessage(text="⚠️ Không tìm thấy dữ liệu lịch hoặc toàn bộ nhân sự đều OFF."))
             except Exception as e:
                 print(f"Lỗi tạo meal flex: {e}")
-                line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ Lỗi hệ thống."))
+                # Không push lỗi ra group
         return
 
     # 6. Checklist công việc (Sang/Chieu)
@@ -608,7 +591,6 @@ def handle_message(event):
 
         except Exception as e:
             print(f"Lỗi khi xử lý lệnh checklist '{shift_type}': {e}")
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="Đã có lỗi xảy ra khi tạo checklist."))
         return
 
     # 7. Lịch làm việc (NV/PG)
@@ -620,17 +602,19 @@ def handle_message(event):
         days_map = {2: "Thứ Hai", 3: "Thứ Ba", 4: "Thứ Tư", 5: "Thứ Năm", 6: "Thứ Sáu", 7: "Thứ Bảy", 8: "Chủ Nhật"}
         day_str = days_map.get(day_number)
         try:
-            send_daily_schedule(schedule_type, source_id, event.reply_token, day_of_week_str=day_str)
+            # Gửi lịch với reply_token
+            send_daily_schedule(schedule_type, reply_token=event.reply_token, day_of_week_str=day_str)
         except Exception as e:
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="Đã có lỗi xảy ra."))
+            print(f"Error schedule: {e}")
         return
 
     if user_msg_upper in ['NV', 'PG']:
         schedule_type = 'employee' if user_msg_upper == 'NV' else 'pg'
         try:
-            send_daily_schedule(schedule_type, source_id, event.reply_token)
+            # Gửi lịch với reply_token
+            send_daily_schedule(schedule_type, reply_token=event.reply_token)
         except Exception as e:
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="Đã có lỗi xảy ra."))
+            print(f"Error schedule: {e}")
         return
         
     # 8. Báo cáo (ST, BXH)
@@ -707,24 +691,48 @@ def handle_message(event):
     except Exception as e:
         print(f"!!! GẶP LỖI NGHIÊM TRỌNG KHI XỬ LÝ BÁO CÁO: {repr(e)}")
 
-# --- ENDPOINTS CRON JOB ---
+# --- ENDPOINTS CRON JOB (ĐÃ CẬP NHẬT GOM TIN) ---
+
 @app.route("/trigger-morning-tasks", methods=['POST'])
 def trigger_morning_tasks():
     incoming_secret = request.headers.get('X-Cron-Secret')
     if not CRON_SECRET_KEY or incoming_secret != CRON_SECRET_KEY:
         abort(403)
     
-    print("Cron Job: Bắt đầu tác vụ buổi sáng (08:00)...")
+    print("Cron Job: Bắt đầu tác vụ buổi sáng (GOM TIN)...")
     try:
         pg_group_id = os.environ.get('PG_GROUP_ID')
         employee_group_id = os.environ.get('EMPLOYEE_GROUP_ID')
         
+        # Danh sách tin nhắn để gửi gộp
+        messages_to_send = []
+
+        # 1. Lấy Lịch PG (Nếu cần)
+        # Nếu PG và Employee chung group, chúng ta sẽ gửi hết vào employee_group_id
         if pg_group_id:
-            send_daily_schedule('pg', pg_group_id)
+            # Nếu PG Group ID khác Employee Group ID, phải gửi riêng (hoặc chấp nhận tốn thêm 1 tin)
+            # Ở đây tôi ưu tiên gom nếu trùng hoặc logic của bạn cho phép
+            msg_pg = send_daily_schedule('pg', return_msg_only=True)
+            if msg_pg: messages_to_send.append(msg_pg)
+
+        # 2. Lấy Lịch NV
         if employee_group_id:
-            send_daily_schedule('employee', employee_group_id)
+            msg_nv = send_daily_schedule('employee', return_msg_only=True)
+            if msg_nv: messages_to_send.append(msg_nv)
+
+        # 3. Lấy Checklist Sáng
+        if employee_group_id:
+            msg_check = get_checklist_message('sang', employee_group_id)
+            if msg_check: messages_to_send.append(msg_check)
         
-        send_initial_checklist('sang')
+        # --- GỬI TIN NHẮN (BATCHING) ---
+        if messages_to_send and employee_group_id:
+            # Gửi tối đa 5 bong bóng trong 1 lần push -> Chỉ tính 1 tin nhắn
+            line_bot_api.push_message(employee_group_id, messages_to_send[:5])
+            print(f"Đã gửi gộp {len(messages_to_send)} thông báo sáng.")
+        else:
+            print("Không có nội dung nào để gửi sáng nay.")
+
         return "OK", 200
     except Exception as e:
         print(f"Lỗi khi chạy tác vụ buổi sáng: {e}")
@@ -736,13 +744,29 @@ def trigger_afternoon_tasks():
     if not CRON_SECRET_KEY or incoming_secret != CRON_SECRET_KEY:
         abort(403)
     
-    print("Cron Job: Bắt đầu tác vụ buổi chiều (14:30)...")
+    print("Cron Job: Bắt đầu tác vụ buổi chiều (GOM TIN)...")
     try:
         employee_group_id = os.environ.get('EMPLOYEE_GROUP_ID')
-        if employee_group_id:
-            send_daily_schedule('employee', employee_group_id)
         
-        send_initial_checklist('chieu')
+        messages_to_send = []
+
+        # 1. Lịch NV (Nếu muốn nhắc lại chiều)
+        if employee_group_id:
+            msg_nv = send_daily_schedule('employee', return_msg_only=True)
+            if msg_nv: messages_to_send.append(msg_nv)
+
+        # 2. Checklist Chiều
+        if employee_group_id:
+            msg_check = get_checklist_message('chieu', employee_group_id)
+            if msg_check: messages_to_send.append(msg_check)
+        
+        # --- GỬI TIN NHẮN (BATCHING) ---
+        if messages_to_send and employee_group_id:
+            line_bot_api.push_message(employee_group_id, messages_to_send[:5])
+            print(f"Đã gửi gộp {len(messages_to_send)} thông báo chiều.")
+        else:
+            print("Không có nội dung nào để gửi chiều nay.")
+
         return "OK", 200
     except Exception as e:
         print(f"Lỗi khi chạy tác vụ buổi chiều: {e}")

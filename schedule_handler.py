@@ -11,8 +11,10 @@ from config import CLIENT, SHEET_NAME, WORKSHEET_SCHEDULES_NAME
 # Khởi tạo LineBotApi
 CHANNEL_ACCESS_TOKEN = os.environ.get('CHANNEL_ACCESS_TOKEN')
 if not CHANNEL_ACCESS_TOKEN:
-    raise ValueError("Lỗi: Biến môi trường CHANNEL_ACCESS_TOKEN không được thiết lập.")
-line_bot_api = LineBotApi(CHANNEL_ACCESS_TOKEN)
+    # Chỉ print warning, không raise error để tránh crash app nếu config lỗi nhẹ
+    print("Cảnh báo: Biến môi trường CHANNEL_ACCESS_TOKEN chưa được thiết lập.")
+
+line_bot_api = LineBotApi(CHANNEL_ACCESS_TOKEN) if CHANNEL_ACCESS_TOKEN else None
 
 def get_vietnamese_day_of_week():
     """Lấy tên ngày trong tuần bằng tiếng Việt cho ngày hiện tại."""
@@ -39,9 +41,8 @@ def parse_schedule_text(schedule_text):
     return schedule_parts
 
 def create_schedule_flex_message(schedule_type, schedule_text, schedule_day_str):
-    """Tạo tin nhắn Flex Message cho lịch làm việc với giao diện cột mới."""
+    """Tạo tin nhắn Flex Message cho lịch làm việc."""
     if schedule_type == 'pg':
-        # === SỬA ĐỔI: Thêm ngày vào tiêu đề ===
         title = f"LỊCH LÀM VIỆC PG - {schedule_day_str.upper()}"
         header_color = "#FF6B6B"
     else: # employee
@@ -70,8 +71,8 @@ def create_schedule_flex_message(schedule_type, schedule_text, schedule_day_str)
         if schedule_type == 'employee' and shift_name in ["Ca Sáng", "Ca Chiều"]:
             special_roles = ['(ERP)', '(GH1)', '(GH2)']
             special_staff, regular_staff = [], []
-            staff_list_text = re.sub(r'\(\d+\s*NV\):\s*', '', staff_list_text)
-            all_staff = [s.strip() for s in staff_list_text.split(',') if s.strip()]
+            staff_list_text_clean = re.sub(r'\(\d+\s*NV\):\s*', '', staff_list_text)
+            all_staff = [s.strip() for s in staff_list_text_clean.split(',') if s.strip()]
 
             for staff in all_staff:
                 if any(role in staff for role in special_roles):
@@ -90,8 +91,8 @@ def create_schedule_flex_message(schedule_type, schedule_text, schedule_day_str)
             }
         
         elif schedule_type == 'pg' and shift_name in ["Ca Sáng", "Ca Chiều"]:
-            staff_list_text = re.sub(r'\(\d+\):\s*', '', staff_list_text)
-            all_staff = [s.strip() for s in staff_list_text.split('\n') if s.strip()]
+            staff_list_text_clean = re.sub(r'\(\d+\):\s*', '', staff_list_text)
+            all_staff = [s.strip() for s in staff_list_text_clean.split('\n') if s.strip()]
             
             pgs_per_column = 3
             chunks = [all_staff[i:i + pgs_per_column] for i in range(0, len(all_staff), pgs_per_column)]
@@ -129,30 +130,23 @@ def create_schedule_flex_message(schedule_type, schedule_text, schedule_day_str)
     }
     return flex_content
 
-# === BẮT ĐẦU SỬA ĐỔI ===
-def send_daily_schedule(schedule_type, target_id, reply_token=None, day_of_week_str=None):
+def send_daily_schedule(schedule_type, target_id=None, reply_token=None, day_of_week_str=None, return_msg_only=False):
     """
     Hàm chính để tìm và gửi lịch làm việc.
-    - Sẽ ưu tiên dùng reply_token nếu được cung cấp.
-    - Sẽ dùng day_of_week_str nếu được cung cấp, nếu không sẽ lấy ngày hiện tại.
+    CẬP NHẬT: Thêm return_msg_only để gom tin nhắn và TẮT push báo lỗi.
     """
     column_to_read = 'pg_schedule' if schedule_type == 'pg' else 'employee_schedule'
 
-    if not target_id:
+    # Nếu không có target_id và không phải chế độ lấy tin thì tự tìm ID từ env
+    if not target_id and not return_msg_only and not reply_token:
         if schedule_type == 'pg':
             target_id = os.environ.get('PG_GROUP_ID')
         else:
             target_id = os.environ.get('EMPLOYEE_GROUP_ID')
 
-    if not target_id:
-        print(f"CẢNH BÁO: Bỏ qua gửi lịch vì không có ID đích.")
-        return
-
     try:
-        # Nếu không có ngày cụ thể được truyền vào, lấy ngày hiện tại
         schedule_day_str = day_of_week_str if day_of_week_str else get_vietnamese_day_of_week()
         
-        print(f"Bắt đầu xử lý lịch '{schedule_type}' cho ngày '{schedule_day_str}' đến ID: {target_id}")
         sheet = CLIENT.open(SHEET_NAME).worksheet(WORKSHEET_SCHEDULES_NAME)
         all_schedules = sheet.get_all_records()
         
@@ -160,27 +154,33 @@ def send_daily_schedule(schedule_type, target_id, reply_token=None, day_of_week_
         
         if schedule_text_for_day:
             flex_message_content = create_schedule_flex_message(schedule_type, schedule_text_for_day, schedule_day_str)
-            # Alt text cũng được cập nhật để rõ ràng hơn
             alt_text = f"Lịch làm việc {schedule_day_str} cho {schedule_type}"
             message = FlexSendMessage(alt_text=alt_text, contents=flex_message_content)
             
+            # --- LOGIC MỚI: Chỉ trả về message object để gom (Tiết kiệm tin nhắn) ---
+            if return_msg_only:
+                return message
+
+            # Logic cũ: Gửi ngay (Dùng cho lệnh chat thủ công "NV", "PG")
             if reply_token:
                 line_bot_api.reply_message(reply_token, message)
-                print(f"Đã trả lời (reply) lịch thành công đến: {target_id}")
-            else:
+                print(f"Đã trả lời (reply) lịch thành công.")
+            elif target_id:
                 line_bot_api.push_message(target_id, message)
                 print(f"Đã đẩy (push) lịch thành công đến: {target_id}")
+            return message
         else:
-            # Tin nhắn lỗi cũng được cập nhật
+            # --- CẬP NHẬT QUAN TRỌNG: KHÔNG PUSH LỖI ---
+            # Chỉ gửi tin báo lỗi nếu là người dùng chat hỏi (có reply_token)
+            # Nếu là Cron Job chạy tự động thì IM LẶNG để tránh tốn tiền.
             error_text = f"Không tìm thấy lịch làm việc cho {schedule_day_str}."
-            print(error_text)
-            error_message = TextSendMessage(text=error_text)
+            print(f"[LOG] {error_text}") 
             
             if reply_token:
-                line_bot_api.reply_message(reply_token, error_message)
-            else:
-                line_bot_api.push_message(target_id, error_message)
+                line_bot_api.reply_message(reply_token, TextSendMessage(text=error_text))
+            return None
 
     except Exception as e:
-        print(f"Lỗi nghiêm trọng khi gửi lịch làm việc: {e}")
-# === KẾT THÚC SỬA ĐỔI ===
+        print(f"[ERROR] Lỗi nghiêm trọng khi lấy lịch {schedule_type}: {e}")
+        # Tuyệt đối không gửi tin nhắn báo lỗi qua Push
+        return None

@@ -12,44 +12,52 @@ from flex_handler import initialize_daily_tasks, generate_checklist_flex
 CHANNEL_ACCESS_TOKEN = os.environ.get('CHANNEL_ACCESS_TOKEN')
 CHECKLIST_GROUP_ID = os.environ.get('CHECKLIST_GROUP_ID')
 
-if not all([CHANNEL_ACCESS_TOKEN, CHECKLIST_GROUP_ID]):
-    # Chỉ raise lỗi ở log server, không gửi tin nhắn
-    print("Lỗi: Thiếu biến môi trường CHANNEL_ACCESS_TOKEN hoặc CHECKLIST_GROUP_ID.") 
-    # Nếu muốn code vẫn chạy tiếp (dù lỗi) thì dùng print, 
-    # nhưng ở đây thiếu Token thì bot không chạy được nên raise cũng được,
-    # miễn là không gọi push_message.
-    # Tuy nhiên, để an toàn tôi sẽ giữ nguyên logic cũ nhưng không gửi tin nhắn.
+if CHANNEL_ACCESS_TOKEN:
+    line_bot_api = LineBotApi(CHANNEL_ACCESS_TOKEN)
 
-line_bot_api = LineBotApi(CHANNEL_ACCESS_TOKEN)
+def get_checklist_message(shift_type, group_id):
+    """
+    Hàm mới: Chỉ khởi tạo công việc và TRẢ VỀ đối tượng tin nhắn (Message Object).
+    KHÔNG thực hiện gửi tin nhắn. Dùng để gom tin nhắn (Batching).
+    """
+    try:
+        if not group_id:
+            print("Lỗi: Không có Group ID để tạo checklist.")
+            return None
+
+        # 1. Reset và khởi tạo công việc trong Google Sheet
+        initialize_daily_tasks(group_id, shift_type)
+
+        # 2. Tạo nội dung Flex
+        flex_content = generate_checklist_flex(group_id, shift_type)
+        if flex_content:
+            return FlexSendMessage(
+                alt_text=f"Checklist công việc ca {shift_type}", 
+                contents=flex_content
+            )
+        return None
+    except Exception as e:
+        # Chỉ in lỗi ra log server, không gửi tin nhắn báo lỗi
+        print(f"Lỗi tạo checklist message ca {shift_type}: {e}")
+        return None
 
 def send_initial_checklist(shift_type):
     """
-    Hàm được kích hoạt bởi webhook để bắt đầu checklist hàng ngày.
+    Hàm cũ (Legacy): Vẫn giữ lại để tương thích nếu cần gọi đơn lẻ, 
+    nhưng Cron Job nên chuyển sang dùng get_checklist_message ở app.py
     """
     try:
-        # 1. Reset và khởi tạo công việc trong Google Sheet
-        # (Hàm này đã được sửa bên flex_handler để xóa sạch lịch sử cũ)
-        initialize_daily_tasks(CHECKLIST_GROUP_ID, shift_type)
+        if not CHECKLIST_GROUP_ID: 
+            print("Thiếu CHECKLIST_GROUP_ID")
+            return
 
-        # 2. Tạo và gửi tin nhắn Flex
-        flex_message = generate_checklist_flex(CHECKLIST_GROUP_ID, shift_type)
-        if not flex_message:
-            raise Exception("Không thể tạo Flex Message.")
-
-        line_bot_api.push_message(
-            CHECKLIST_GROUP_ID,
-            FlexSendMessage(alt_text=f"Checklist công việc ca {shift_type}", contents=flex_message)
-        )
-        print(f"Gửi checklist ban đầu ca {shift_type} thành công!")
-
+        msg = get_checklist_message(shift_type, CHECKLIST_GROUP_ID)
+        if msg:
+            line_bot_api.push_message(CHECKLIST_GROUP_ID, msg)
+            print(f"Gửi checklist ban đầu ca {shift_type} thành công!")
+            
     except Exception as e:
-        # === CẬP NHẬT QUAN TRỌNG ===
-        # Chỉ in lỗi ra màn hình (Log Server) để kiểm tra.
-        # TUYỆT ĐỐI KHÔNG gửi tin nhắn báo lỗi cho Admin qua LINE ở đây.
-        # Điều này giúp tránh việc Bot spam tin nhắn khi gặp lỗi mạng/Sheet, gây tốn quota.
-        print(f"Lỗi nghiêm trọng trong send_initial_checklist: {e}")
-        
-        # Đoạn code cũ gửi tin cho ADMIN đã được loại bỏ.
+        print(f"Lỗi trong send_initial_checklist: {e}")
 
 if __name__ == "__main__":
     if len(sys.argv) > 1:
