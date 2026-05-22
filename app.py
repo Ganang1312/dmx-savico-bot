@@ -94,6 +94,7 @@ def parse_duration(duration_str):
 GAS_URL = "https://script.google.com/macros/s/AKfycbxjTGuxxRiX1zY78pRkZ55qhJQF5om1Vht_kC3exy5JsYVBwjH1u7G2crr6dwbFz0lj/exec"
 
 def handle_auto_sync_command(event, cmd_type):
+    from flask import request
     source_id = getattr(event.source, 'group_id', event.source.user_id)
     cmd_name = {
         "RT": "Realtime",
@@ -101,12 +102,14 @@ def handle_auto_sync_command(event, cmd_type):
         "NV0": "Nhân Viên"
     }.get(cmd_type, cmd_type)
     
+    host_url = request.url_root.replace('https://', '').replace('http://', '').strip('/')
+    
     line_bot_api.reply_message(
         event.reply_token,
         TextSendMessage(text=f"⏳ Đang xếp hàng lệnh đổ số {cmd_name}.\nTrình duyệt trên máy tính sẽ tự động cào số và gửi báo cáo sau ít phút...")
     )
     
-    threading.Thread(target=async_process_bot_command, args=(source_id, cmd_type, cmd_name)).start()
+    threading.Thread(target=async_process_bot_command, args=(source_id, cmd_type, cmd_name, host_url)).start()
 
 def post_to_gas(payload):
     try:
@@ -119,10 +122,10 @@ def post_to_gas(payload):
         print(f"Error in post_to_gas: {e}")
         raise e
 
-def async_process_bot_command(source_id, cmd_type, cmd_name):
+def async_process_bot_command(source_id, cmd_type, cmd_name, host_url=""):
     import uuid
-    # Mã hóa source_id vào cmd_id bằng dấu phân tách __ để stateless và tránh truy vấn DB/Sheets phức tạp
-    cmd_id = f"{cmd_type}_{int(time.time())}_{uuid.uuid4().hex[:6]}__{source_id}"
+    # Mã hóa source_id và host_url vào cmd_id bằng dấu phân tách __ để stateless và tránh truy vấn DB/Sheets phức tạp
+    cmd_id = f"{cmd_type}_{int(time.time())}_{uuid.uuid4().hex[:6]}__{source_id}__{host_url}"
     
     try:
         payload = {
