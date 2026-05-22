@@ -166,14 +166,44 @@ def async_process_bot_command(source_id, cmd_type, cmd_name):
                 img_msg
             ])
         except Exception as e:
-            print(f"Lỗi khi gửi ảnh báo cáo: {e}")
-            line_bot_api.push_message(source_id, TextSendMessage(text=f"❌ Lỗi gửi ảnh báo cáo {cmd_name} qua Line, vui lòng thử lại."))
+            error_msg = str(e)
+            print(f"Lỗi khi gửi ảnh báo cáo: {error_msg}")
+            
+            # Ghi lỗi trực tiếp lên Google Sheet để phục vụ việc debug
+            try:
+                sheet = CLIENT.open(SHEET_NAME).worksheet('bot_commands')
+                records = sheet.get_all_values()
+                for idx, row in enumerate(records):
+                    if row[0] == cmd_id:
+                        sheet.update_cell(idx + 1, 3, "LINE_ERROR")
+                        sheet.update_cell(idx + 1, 4, error_msg[:200])
+                        break
+            except Exception as sheet_err:
+                print(f"Lỗi ghi log lên sheet: {sheet_err}")
+                
+            try:
+                line_bot_api.push_message(source_id, TextSendMessage(text=f"❌ Lỗi gửi ảnh báo cáo {cmd_name} qua Line: {error_msg[:100]}"))
+            except Exception as push_err:
+                print(f"Lỗi khi gửi tin nhắn báo lỗi qua LINE: {push_err}")
     else:
-        line_bot_api.push_message(
-            source_id, 
-            TextSendMessage(text=f"❌ Lệnh đổ số {cmd_name} thất bại hoặc hết thời gian chờ (45 giây).\n"
-                                 f"Vui lòng đảm bảo máy tính của bạn đã bật và đang mở trình duyệt đã đăng nhập sẵn trang BI.")
-        )
+        try:
+            line_bot_api.push_message(
+                source_id, 
+                TextSendMessage(text=f"❌ Lệnh đổ số {cmd_name} thất bại hoặc hết thời gian chờ (45 giây).\n"
+                                     f"Vui lòng đảm bảo máy tính của bạn đã bật và đang mở trình duyệt đã đăng nhập sẵn trang BI.")
+            )
+        except Exception as e:
+            print(f"Lỗi gửi tin nhắn timeout qua LINE: {e}")
+            try:
+                sheet = CLIENT.open(SHEET_NAME).worksheet('bot_commands')
+                records = sheet.get_all_values()
+                for idx, row in enumerate(records):
+                    if row[0] == cmd_id:
+                        sheet.update_cell(idx + 1, 3, "TIMEOUT_ERROR")
+                        sheet.update_cell(idx + 1, 4, str(e)[:200])
+                        break
+            except Exception as sheet_err:
+                print(f"Lỗi ghi log timeout lên sheet: {sheet_err}")
 
 # --- REPORT UTILS ---
 def parse_float_from_string(s):
