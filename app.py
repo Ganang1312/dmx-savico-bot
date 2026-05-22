@@ -16,7 +16,7 @@ from linebot import (
 )
 from linebot.exceptions import InvalidSignatureError
 from linebot.models import (
-    MessageEvent, TextMessage, TextSendMessage, FlexSendMessage, PostbackEvent
+    MessageEvent, TextMessage, TextSendMessage, FlexSendMessage, PostbackEvent, ImageSendMessage
 )
 import pandas as pd
 
@@ -90,7 +90,90 @@ def parse_duration(duration_str):
     unit = match.group(2)
     if unit == 'd': return relativedelta(days=value), f"{value} ngày"
     if unit == 'm': return relativedelta(months=value), f"{value} tháng"
-    return None, None
+    # --- AUTO SYNC UTILS ---
+GAS_URL = "https://script.google.com/macros/s/AKfycbxjTGuxxRiX1zY78pRkZ55qhJQF5om1Vht_kC3exy5JsYVBwjH1u7G2crr6dwbFz0lj/exec"
+
+def handle_auto_sync_command(event, cmd_type):
+    source_id = getattr(event.source, 'group_id', event.source.user_id)
+    cmd_name = {
+        "RT": "Realtime",
+        "LK": "Lũy Kế",
+        "NV0": "Nhân Viên"
+    }.get(cmd_type, cmd_type)
+    
+    line_bot_api.reply_message(
+        event.reply_token,
+        TextSendMessage(text=f"⏳ Đang xếp hàng lệnh đổ số {cmd_name}.\nTrình duyệt trên máy tính sẽ tự động cào số và gửi báo cáo sau ít phút...")
+    )
+    
+    threading.Thread(target=async_process_bot_command, args=(source_id, cmd_type, cmd_name)).start()
+
+def post_to_gas(payload):
+    try:
+        res = requests.post(GAS_URL, json=payload, allow_redirects=False, timeout=15)
+        if res.status_code in [301, 302, 307, 308] and 'Location' in res.headers:
+            redirect_url = res.headers['Location']
+            res = requests.post(redirect_url, json=payload, timeout=15)
+        return res
+    except Exception as e:
+        print(f"Error in post_to_gas: {e}")
+        raise e
+
+def async_process_bot_command(source_id, cmd_type, cmd_name):
+    import uuid
+    cmd_id = f"{cmd_type}_{int(time.time())}_{uuid.uuid4().hex[:6]}"
+    
+    try:
+        payload = {
+            "action": "create_command",
+            "cmdId": cmd_id,
+            "cmdType": cmd_type
+        }
+        res = post_to_gas(payload)
+        print(f"Created command {cmd_id}: {res.text}")
+    except Exception as e:
+        print(f"Lỗi khi gửi lệnh lên GAS: {e}")
+        line_bot_api.push_message(source_id, TextSendMessage(text=f"❌ Lỗi kết nối Google Sheets khi gửi lệnh {cmd_name}."))
+        return
+
+    start_time = time.time()
+    completed = False
+    screenshot_url = ""
+    
+    while time.time() - start_time < 45:
+        time.sleep(3)
+        try:
+            res = requests.get(f"{GAS_URL}?action=getCommandStatus&cmdId={cmd_id}", timeout=10)
+            res_data = res.json()
+            status = res_data.get("status")
+            if status == "COMPLETED":
+                completed = True
+                screenshot_url = res_data.get("screenshot_url")
+                break
+            elif status == "FAILED":
+                break
+        except Exception as e:
+            print(f"Lỗi kiểm tra trạng thái lệnh {cmd_id}: {e}")
+            
+    if completed and screenshot_url:
+        try:
+            img_msg = ImageSendMessage(
+                original_content_url=screenshot_url,
+                preview_image_url=screenshot_url
+            )
+            line_bot_api.push_message(source_id, [
+                TextSendMessage(text=f"✅ Báo cáo {cmd_name} đã được đổ số mới thành công! Dưới đây là ảnh chụp báo cáo:"),
+                img_msg
+            ])
+        except Exception as e:
+            print(f"Lỗi khi gửi ảnh báo cáo: {e}")
+            line_bot_api.push_message(source_id, TextSendMessage(text=f"❌ Lỗi gửi ảnh báo cáo {cmd_name} qua Line, vui lòng thử lại."))
+    else:
+        line_bot_api.push_message(
+            source_id, 
+            TextSendMessage(text=f"❌ Lệnh đổ số {cmd_name} thất bại hoặc hết thời gian chờ (45 giây).\n"
+                                 f"Vui lòng đảm bảo máy tính của bạn đã bật và đang mở trình duyệt đã đăng nhập sẵn trang BI.")
+        )
 
 # --- REPORT UTILS ---
 def parse_float_from_string(s):
@@ -536,9 +619,19 @@ def handle_message(event):
             "\n"
             "**📊 BÁO CÁO REALTIME:**\n"
             "• `ST [Mã ST]` - Báo cáo chi tiết.\n"
-            "• `bxh` - Top 20."
+            "• `bxh` - Top 20.\n"
+            "\n"
+            "**🔄 ĐỔ SỐ TỰ ĐỘNG (AUTO):**\n"
+            "• `RT` - Đổ số Realtime & Gửi ảnh báo cáo.\n"
+            "• `LK` - Đổ số Lũy kế & Gửi ảnh báo cáo.\n"
+            "• `NV0` - Đổ số Nhân viên & Gửi ảnh báo cáo."
         )
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=menu_text))
+        return
+
+    # === LỆNH ĐỔ SỐ TỰ ĐỘNG (AUTO SYNC) ===
+    if user_msg_upper in ['RT', 'LK', 'NV0']:
+        handle_auto_sync_command(event, user_msg_upper)
         return
 
     # === 5. XỬ LÝ LỆNH ĂN UỐNG ===
