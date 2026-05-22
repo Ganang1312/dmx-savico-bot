@@ -103,13 +103,11 @@ def handle_auto_sync_command(event, cmd_type):
     }.get(cmd_type, cmd_type)
     
     host_url = request.url_root.replace('https://', '').replace('http://', '').strip('/')
+    reply_token = event.reply_token
     
-    line_bot_api.reply_message(
-        event.reply_token,
-        TextSendMessage(text=f"⏳ Đang xếp hàng lệnh đổ số {cmd_name}.\nTrình duyệt trên máy tính sẽ tự động cào số và gửi báo cáo sau ít phút...")
-    )
+    # KHÔNG gọi reply_message ở đây để giữ reply_token cho việc gửi ảnh báo cáo (lách luật giới hạn tin nhắn)
     
-    threading.Thread(target=async_process_bot_command, args=(source_id, cmd_type, cmd_name, host_url)).start()
+    threading.Thread(target=async_process_bot_command, args=(source_id, cmd_type, cmd_name, host_url, reply_token)).start()
 
 def post_to_gas(payload):
     try:
@@ -122,10 +120,10 @@ def post_to_gas(payload):
         print(f"Error in post_to_gas: {e}")
         raise e
 
-def async_process_bot_command(source_id, cmd_type, cmd_name, host_url=""):
+def async_process_bot_command(source_id, cmd_type, cmd_name, host_url="", reply_token=""):
     import uuid
-    # Mã hóa source_id và host_url vào cmd_id bằng dấu phân tách __ để stateless và tránh truy vấn DB/Sheets phức tạp
-    cmd_id = f"{cmd_type}_{int(time.time())}_{uuid.uuid4().hex[:6]}__{source_id}__{host_url}"
+    # Mã hóa source_id, reply_token và host_url vào cmd_id (host_url ở cuối cùng để GAS bắt đúng)
+    cmd_id = f"{cmd_type}_{int(time.time())}_{uuid.uuid4().hex[:6]}__{source_id}__{reply_token}__{host_url}"
     
     try:
         payload = {
@@ -400,12 +398,13 @@ def send_report():
     if not cmd_id or not screenshot_url:
         return jsonify({"error": "Missing cmdId or screenshotUrl"}), 400
         
-    # Tách source_id từ cmd_id
+    # Tách source_id và reply_token từ cmd_id
     parts = cmd_id.split("__")
     if len(parts) < 2:
         return jsonify({"error": "Invalid cmdId structure (missing source_id)"}), 400
         
     source_id = parts[1]
+    reply_token = parts[2] if len(parts) >= 4 else None
     cmd_type = cmd_id.split("_")[0]
     
     cmd_name = "Realtime"
@@ -419,11 +418,25 @@ def send_report():
             original_content_url=screenshot_url,
             preview_image_url=screenshot_url
         )
-        line_bot_api.push_message(source_id, [
+        messages = [
             TextSendMessage(text=f"✅ Báo cáo {cmd_name} đã được đổ số mới thành công! Dưới đây là ảnh chụp báo cáo:"),
             img_msg
-        ])
-        print(f"Gửi thành công ảnh báo cáo {cmd_name} cho {source_id}")
+        ]
+        
+        # Thử sử dụng reply_message trước để lách luật giới hạn tin nhắn push của LINE
+        is_sent = False
+        if reply_token:
+            try:
+                line_bot_api.reply_message(reply_token, messages)
+                print(f"Gửi REPY ảnh báo cáo thành công cho {source_id}")
+                is_sent = True
+            except Exception as reply_err:
+                print(f"Lỗi khi reply (có thể đã quá 60s), chuyển sang PUSH: {reply_err}")
+                
+        if not is_sent:
+            line_bot_api.push_message(source_id, messages)
+            print(f"Gửi PUSH ảnh báo cáo thành công cho {source_id}")
+            
         return jsonify({"status": "success"}), 200
     except Exception as e:
         error_msg = str(e)
