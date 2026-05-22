@@ -405,7 +405,7 @@ def send_report():
     if len(parts) < 2:
         return jsonify({"error": "Invalid cmdId structure (missing source_id)"}), 400
         
-    source_id = parts[-1]
+    source_id = parts[1]
     cmd_type = cmd_id.split("_")[0]
     
     cmd_name = "Realtime"
