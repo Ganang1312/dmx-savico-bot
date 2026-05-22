@@ -10,7 +10,7 @@ import pytz
 from dateutil.relativedelta import relativedelta
 import re
 
-from flask import Flask, request, abort
+from flask import Flask, request, abort, jsonify
 from linebot import (
     LineBotApi, WebhookHandler
 )
@@ -121,7 +121,8 @@ def post_to_gas(payload):
 
 def async_process_bot_command(source_id, cmd_type, cmd_name):
     import uuid
-    cmd_id = f"{cmd_type}_{int(time.time())}_{uuid.uuid4().hex[:6]}"
+    # Mã hóa source_id vào cmd_id bằng dấu phân tách __ để stateless và tránh truy vấn DB/Sheets phức tạp
+    cmd_id = f"{cmd_type}_{int(time.time())}_{uuid.uuid4().hex[:6]}__{source_id}"
     
     try:
         payload = {
@@ -133,77 +134,10 @@ def async_process_bot_command(source_id, cmd_type, cmd_name):
         print(f"Created command {cmd_id}: {res.text}")
     except Exception as e:
         print(f"Lỗi khi gửi lệnh lên GAS: {e}")
-        line_bot_api.push_message(source_id, TextSendMessage(text=f"❌ Lỗi kết nối Google Sheets khi gửi lệnh {cmd_name}."))
-        return
-
-    start_time = time.time()
-    completed = False
-    screenshot_url = ""
-    
-    while time.time() - start_time < 45:
-        time.sleep(3)
         try:
-            res = requests.get(f"{GAS_URL}?action=getCommandStatus&cmdId={cmd_id}", timeout=10)
-            res_data = res.json()
-            status = res_data.get("status")
-            if status == "COMPLETED":
-                completed = True
-                screenshot_url = res_data.get("screenshot_url")
-                break
-            elif status == "FAILED":
-                break
-        except Exception as e:
-            print(f"Lỗi kiểm tra trạng thái lệnh {cmd_id}: {e}")
-            
-    if completed and screenshot_url:
-        try:
-            img_msg = ImageSendMessage(
-                original_content_url=screenshot_url,
-                preview_image_url=screenshot_url
-            )
-            line_bot_api.push_message(source_id, [
-                TextSendMessage(text=f"✅ Báo cáo {cmd_name} đã được đổ số mới thành công! Dưới đây là ảnh chụp báo cáo:"),
-                img_msg
-            ])
-        except Exception as e:
-            error_msg = str(e)
-            print(f"Lỗi khi gửi ảnh báo cáo: {error_msg}")
-            
-            # Ghi lỗi trực tiếp lên Google Sheet để phục vụ việc debug
-            try:
-                sheet = CLIENT.open(SHEET_NAME).worksheet('bot_commands')
-                records = sheet.get_all_values()
-                for idx, row in enumerate(records):
-                    if row[0] == cmd_id:
-                        sheet.update_cell(idx + 1, 3, "LINE_ERROR")
-                        sheet.update_cell(idx + 1, 4, error_msg[:200])
-                        break
-            except Exception as sheet_err:
-                print(f"Lỗi ghi log lên sheet: {sheet_err}")
-                
-            try:
-                line_bot_api.push_message(source_id, TextSendMessage(text=f"❌ Lỗi gửi ảnh báo cáo {cmd_name} qua Line: {error_msg[:100]}"))
-            except Exception as push_err:
-                print(f"Lỗi khi gửi tin nhắn báo lỗi qua LINE: {push_err}")
-    else:
-        try:
-            line_bot_api.push_message(
-                source_id, 
-                TextSendMessage(text=f"❌ Lệnh đổ số {cmd_name} thất bại hoặc hết thời gian chờ (45 giây).\n"
-                                     f"Vui lòng đảm bảo máy tính của bạn đã bật và đang mở trình duyệt đã đăng nhập sẵn trang BI.")
-            )
-        except Exception as e:
-            print(f"Lỗi gửi tin nhắn timeout qua LINE: {e}")
-            try:
-                sheet = CLIENT.open(SHEET_NAME).worksheet('bot_commands')
-                records = sheet.get_all_values()
-                for idx, row in enumerate(records):
-                    if row[0] == cmd_id:
-                        sheet.update_cell(idx + 1, 3, "TIMEOUT_ERROR")
-                        sheet.update_cell(idx + 1, 4, str(e)[:200])
-                        break
-            except Exception as sheet_err:
-                print(f"Lỗi ghi log timeout lên sheet: {sheet_err}")
+            line_bot_api.push_message(source_id, TextSendMessage(text=f"❌ Lỗi kết nối Google Sheets khi gửi lệnh {cmd_name}."))
+        except Exception as push_err:
+            print(f"Lỗi gửi tin báo lỗi kết nối GAS: {push_err}")
 
 # --- REPORT UTILS ---
 def parse_float_from_string(s):
@@ -450,6 +384,66 @@ def callback():
 @app.route("/ping")
 def ping():
     return "OK", 200
+
+@app.route("/send_report", methods=['POST'])
+def send_report():
+    data = request.json
+    if not data:
+        return jsonify({"error": "No JSON data provided"}), 400
+        
+    cmd_id = data.get("cmdId")
+    screenshot_url = data.get("screenshotUrl")
+    
+    if not cmd_id or not screenshot_url:
+        return jsonify({"error": "Missing cmdId or screenshotUrl"}), 400
+        
+    # Tách source_id từ cmd_id
+    parts = cmd_id.split("__")
+    if len(parts) < 2:
+        return jsonify({"error": "Invalid cmdId structure (missing source_id)"}), 400
+        
+    source_id = parts[-1]
+    cmd_type = cmd_id.split("_")[0]
+    
+    cmd_name = "Realtime"
+    if cmd_type == "LK":
+        cmd_name = "Lũy Kế"
+    elif cmd_type == "NV0":
+        cmd_name = "Nhân viên"
+        
+    try:
+        img_msg = ImageSendMessage(
+            original_content_url=screenshot_url,
+            preview_image_url=screenshot_url
+        )
+        line_bot_api.push_message(source_id, [
+            TextSendMessage(text=f"✅ Báo cáo {cmd_name} đã được đổ số mới thành công! Dưới đây là ảnh chụp báo cáo:"),
+            img_msg
+        ])
+        print(f"Gửi thành công ảnh báo cáo {cmd_name} cho {source_id}")
+        return jsonify({"status": "success"}), 200
+    except Exception as e:
+        error_msg = str(e)
+        print(f"Lỗi khi gửi ảnh báo cáo LINE từ webhook: {error_msg}")
+        
+        # Ghi nhận lỗi trực tiếp lên Google Sheet để phục vụ việc debug
+        try:
+            sheet = CLIENT.open(SHEET_NAME).worksheet('bot_commands')
+            records = sheet.get_all_values()
+            for idx, row in enumerate(records):
+                if row[0] == cmd_id:
+                    sheet.update_cell(idx + 1, 3, "LINE_ERROR")
+                    sheet.update_cell(idx + 1, 4, error_msg[:200])
+                    break
+        except Exception as sheet_err:
+            print(f"Lỗi ghi log lên sheet: {sheet_err}")
+            
+        try:
+            line_bot_api.push_message(source_id, TextSendMessage(text=f"❌ Lỗi gửi ảnh báo cáo {cmd_name} qua Line: {error_msg[:100]}"))
+        except Exception as push_err:
+            print(f"Lỗi khi gửi tin nhắn báo lỗi qua LINE: {push_err}")
+            
+        return jsonify({"error": error_msg}), 500
 
 # --- XỬ LÝ SỰ KIỆN POSTBACK ---
 
