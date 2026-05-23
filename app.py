@@ -10,13 +10,13 @@ import pytz
 from dateutil.relativedelta import relativedelta
 import re
 
-from flask import Flask, request, abort, jsonify
+from flask import Flask, request, abort
 from linebot import (
     LineBotApi, WebhookHandler
 )
 from linebot.exceptions import InvalidSignatureError
 from linebot.models import (
-    MessageEvent, TextMessage, TextSendMessage, FlexSendMessage, PostbackEvent, ImageSendMessage
+    MessageEvent, TextMessage, TextSendMessage, FlexSendMessage, PostbackEvent
 )
 import pandas as pd
 
@@ -90,55 +90,7 @@ def parse_duration(duration_str):
     unit = match.group(2)
     if unit == 'd': return relativedelta(days=value), f"{value} ngày"
     if unit == 'm': return relativedelta(months=value), f"{value} tháng"
-    # --- AUTO SYNC UTILS ---
-GAS_URL = "https://script.google.com/macros/s/AKfycbxjTGuxxRiX1zY78pRkZ55qhJQF5om1Vht_kC3exy5JsYVBwjH1u7G2crr6dwbFz0lj/exec"
-
-def handle_auto_sync_command(event, cmd_type):
-    from flask import request
-    source_id = getattr(event.source, 'group_id', event.source.user_id)
-    cmd_name = {
-        "RT": "Realtime",
-        "LK": "Lũy Kế",
-        "NV0": "Nhân Viên"
-    }.get(cmd_type, cmd_type)
-    
-    host_url = request.url_root.replace('https://', '').replace('http://', '').strip('/')
-    reply_token = event.reply_token
-    
-    # KHÔNG gọi reply_message ở đây để giữ reply_token cho việc gửi ảnh báo cáo (lách luật giới hạn tin nhắn)
-    
-    threading.Thread(target=async_process_bot_command, args=(source_id, cmd_type, cmd_name, host_url, reply_token)).start()
-
-def post_to_gas(payload):
-    try:
-        res = requests.post(GAS_URL, json=payload, allow_redirects=False, timeout=15)
-        if res.status_code in [301, 302, 307, 308] and 'Location' in res.headers:
-            redirect_url = res.headers['Location']
-            res = requests.post(redirect_url, json=payload, timeout=15)
-        return res
-    except Exception as e:
-        print(f"Error in post_to_gas: {e}")
-        raise e
-
-def async_process_bot_command(source_id, cmd_type, cmd_name, host_url="", reply_token=""):
-    import uuid
-    # Mã hóa source_id, reply_token và host_url vào cmd_id (host_url ở cuối cùng để GAS bắt đúng)
-    cmd_id = f"{cmd_type}_{int(time.time())}_{uuid.uuid4().hex[:6]}__{source_id}__{reply_token}__{host_url}"
-    
-    try:
-        payload = {
-            "action": "create_command",
-            "cmdId": cmd_id,
-            "cmdType": cmd_type
-        }
-        res = post_to_gas(payload)
-        print(f"Created command {cmd_id}: {res.text}")
-    except Exception as e:
-        print(f"Lỗi khi gửi lệnh lên GAS: {e}")
-        try:
-            line_bot_api.push_message(source_id, TextSendMessage(text=f"❌ Lỗi kết nối Google Sheets khi gửi lệnh {cmd_name}."))
-        except Exception as push_err:
-            print(f"Lỗi gửi tin báo lỗi kết nối GAS: {push_err}")
+    return None, None
 
 # --- REPORT UTILS ---
 def parse_float_from_string(s):
@@ -386,81 +338,6 @@ def callback():
 def ping():
     return "OK", 200
 
-@app.route("/send_report", methods=['POST'])
-def send_report():
-    data = request.json
-    if not data:
-        return jsonify({"error": "No JSON data provided"}), 400
-        
-    cmd_id = data.get("cmdId")
-    screenshot_url = data.get("screenshotUrl")
-    
-    if not cmd_id or not screenshot_url:
-        return jsonify({"error": "Missing cmdId or screenshotUrl"}), 400
-        
-    # Tách source_id và reply_token từ cmd_id
-    parts = cmd_id.split("__")
-    if len(parts) < 2:
-        return jsonify({"error": "Invalid cmdId structure (missing source_id)"}), 400
-        
-    source_id = parts[1]
-    reply_token = parts[2] if len(parts) >= 4 else None
-    cmd_type = cmd_id.split("_")[0]
-    
-    cmd_name = "Realtime"
-    if cmd_type == "LK":
-        cmd_name = "Lũy Kế"
-    elif cmd_type == "NV0":
-        cmd_name = "Nhân viên"
-        
-    try:
-        img_msg = ImageSendMessage(
-            original_content_url=screenshot_url,
-            preview_image_url=screenshot_url
-        )
-        messages = [
-            TextSendMessage(text=f"✅ Báo cáo {cmd_name} đã được đổ số mới thành công! Dưới đây là ảnh chụp báo cáo:"),
-            img_msg
-        ]
-        
-        # Thử sử dụng reply_message trước để lách luật giới hạn tin nhắn push của LINE
-        is_sent = False
-        if reply_token:
-            try:
-                line_bot_api.reply_message(reply_token, messages)
-                print(f"Gửi REPY ảnh báo cáo thành công cho {source_id}")
-                is_sent = True
-            except Exception as reply_err:
-                print(f"Lỗi khi reply (có thể đã quá 60s), chuyển sang PUSH: {reply_err}")
-                
-        if not is_sent:
-            line_bot_api.push_message(source_id, messages)
-            print(f"Gửi PUSH ảnh báo cáo thành công cho {source_id}")
-            
-        return jsonify({"status": "success"}), 200
-    except Exception as e:
-        error_msg = str(e)
-        print(f"Lỗi khi gửi ảnh báo cáo LINE từ webhook: {error_msg}")
-        
-        # Ghi nhận lỗi trực tiếp lên Google Sheet để phục vụ việc debug
-        try:
-            sheet = CLIENT.open(SHEET_NAME).worksheet('bot_commands')
-            records = sheet.get_all_values()
-            for idx, row in enumerate(records):
-                if row[0] == cmd_id:
-                    sheet.update_cell(idx + 1, 3, "LINE_ERROR")
-                    sheet.update_cell(idx + 1, 4, error_msg[:200])
-                    break
-        except Exception as sheet_err:
-            print(f"Lỗi ghi log lên sheet: {sheet_err}")
-            
-        try:
-            line_bot_api.push_message(source_id, TextSendMessage(text=f"❌ Lỗi gửi ảnh báo cáo {cmd_name} qua Line: {error_msg[:100]}"))
-        except Exception as push_err:
-            print(f"Lỗi khi gửi tin nhắn báo lỗi qua LINE: {push_err}")
-            
-        return jsonify({"error": error_msg}), 500
-
 # --- XỬ LÝ SỰ KIỆN POSTBACK ---
 
 @handler.add(PostbackEvent)
@@ -659,19 +536,9 @@ def handle_message(event):
             "\n"
             "**📊 BÁO CÁO REALTIME:**\n"
             "• `ST [Mã ST]` - Báo cáo chi tiết.\n"
-            "• `bxh` - Top 20.\n"
-            "\n"
-            "**🔄 ĐỔ SỐ TỰ ĐỘNG (AUTO):**\n"
-            "• `RT` - Đổ số Realtime & Gửi ảnh báo cáo.\n"
-            "• `LK` - Đổ số Lũy kế & Gửi ảnh báo cáo.\n"
-            "• `NV0` - Đổ số Nhân viên & Gửi ảnh báo cáo."
+            "• `bxh` - Top 20."
         )
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=menu_text))
-        return
-
-    # === LỆNH ĐỔ SỐ TỰ ĐỘNG (AUTO SYNC) ===
-    if user_msg_upper in ['RT', 'LK', 'NV0']:
-        handle_auto_sync_command(event, user_msg_upper)
         return
 
     # === 5. XỬ LÝ LỆNH ĂN UỐNG ===
