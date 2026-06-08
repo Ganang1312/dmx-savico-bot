@@ -409,9 +409,10 @@ def handle_postback(event):
             
             updated_flex_content = generate_checklist_flex(group_id, shift_type, all_records_prefetched=all_records)
 
+            alt_text = "Cập nhật checklist hình ảnh" if shift_type == 'vs' else f"Cập nhật checklist ca {shift_type}"
             line_bot_api.reply_message(
                 event.reply_token,
-                FlexSendMessage(alt_text=f"Cập nhật checklist ca {shift_type}", contents=updated_flex_content)
+                FlexSendMessage(alt_text=alt_text, contents=updated_flex_content)
             )
 
         except Exception as e:
@@ -544,23 +545,20 @@ def handle_message(event):
 
     # 4.5. Checklist hình ảnh (VS)
     if user_msg_upper == 'VS':
-        vs_text = (
-            "Điểm danh checklist hình ảnh trước 10h sáng :  \n"
-            "----------\n"
-            "Các cụm tạo Album đúng deadline nhé ACE\n\n"
-            "- Ảnh chụp bên ngoài ST (thấy biển, sân xe, toàn cảnh ST)\n"
-            "- Ảnh chụp bên trong ST (thấy các góc ST, Line)\n"
-            "- Ảnh chụp kho ST ( thấy quầy kệ gọn sach )\n\n"
-            "-------\n"
-            "1. Cụm 14285 : \n"
-            "2. Cụm 5468 : \n"
-            "3. Ngọc Lâm :\n"
-            "4. Ngọc Trì : \n"
-            "5. Ngô Gia Tự:\n"
-            "6. Savico:\n"
-            "7. Sài Đồng :"
-        )
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=vs_text))
+        group_id = getattr(event.source, 'group_id', None)
+        if not group_id:
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="Lệnh này chỉ hoạt động trong nhóm chat."))
+            return
+        try:
+            initialize_daily_tasks(group_id, 'vs')
+            flex_content = generate_checklist_flex(group_id, 'vs')
+            if flex_content:
+                message = FlexSendMessage(alt_text="Checklist hình ảnh trước 10h sáng", contents=flex_content)
+                line_bot_api.reply_message(event.reply_token, message)
+            else:
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(text="Không thể tạo checklist hình ảnh."))
+        except Exception as e:
+            print(f"Lỗi khi xử lý lệnh checklist VS: {e}")
         return
 
     # === 5. XỬ LÝ LỆNH ĂN UỐNG ===
