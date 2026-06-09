@@ -234,7 +234,12 @@ def generate_meal_flex(group_id, session_type):
         if not items: return None
         header = {"type": "text", "text": f"{icon} {title} ({len(items)})", "weight": "bold", "size": "sm", "color": "#555555", "margin": "lg"}
         
-        chunk_size = 5
+        # Luôn chia tối đa 2 cột nếu số lượng nhiều (> 5) để tránh bị khuất tên
+        if len(items) > 5:
+            chunk_size = math.ceil(len(items) / 2)
+        else:
+            chunk_size = len(items)
+            
         chunks = [items[i:i + chunk_size] for i in range(0, len(items), chunk_size)]
         
         columns = []
