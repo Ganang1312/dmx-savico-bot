@@ -121,7 +121,7 @@ def sync_meal_sheet(group_id, session_type):
         print(f"Lỗi sync sheet: {e}")
         return []
 
-def update_meal_status(group_id, session_type, staff_name, clicker_name):
+def update_meal_status(group_id, session_type, staff_name, clicker_name, target_status='done'):
     """
     Cập nhật trạng thái và Nick LINE người bấm.
     """
@@ -131,12 +131,13 @@ def update_meal_status(group_id, session_type, staff_name, clicker_name):
         
         tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
         today_str = datetime.now(tz_vietnam).strftime('%Y-%m-%d')
-        time_now = datetime.now(tz_vietnam).strftime('%H:%M')
+        time_now = datetime.now(tz_vietnam).strftime('%H:%M') if target_status == 'done' else ''
 
         target_name_norm = normalize_text(staff_name)
         target_group_id = str(group_id).strip()
 
         row_index = -1
+        current_status = None
         # Tìm dòng tương ứng
         for i, row in enumerate(all_values[1:], start=2):
             if len(row) < 5: continue
@@ -151,19 +152,26 @@ def update_meal_status(group_id, session_type, staff_name, clicker_name):
                 row_session == session_type and 
                 row_name_norm == target_name_norm):
                 row_index = i
+                if len(row) >= 6:
+                    current_status = row[5].strip()
                 break
         
         if row_index != -1:
+            # Nếu trạng thái hiện tại đã khớp với mục tiêu, bỏ qua (tránh duplicate)
+            if current_status == target_status:
+                print(f"Trạng thái của {staff_name} đã là {target_status} từ trước. Bỏ qua.")
+                return False, None
+
             # Ghi dữ liệu vào 3 cột:
-            # Cột 6 (F): Status -> 'done'
-            # Cột 7 (G): Time -> Giờ hiện tại
-            # Cột 8 (H): Clicked By -> Nick Line người bấm
+            # Cột 6 (F): Status -> target_status
+            # Cột 7 (G): Time -> Giờ hiện tại hoặc rỗng
+            # Cột 8 (H): Clicked By -> Nick Line hoặc rỗng
             
-            # Sử dụng update_cells để tối ưu
+            clicked_user = clicker_name if target_status == 'done' else ''
             cells = [
-                gspread.Cell(row_index, 6, 'done'),
+                gspread.Cell(row_index, 6, target_status),
                 gspread.Cell(row_index, 7, time_now),
-                gspread.Cell(row_index, 8, clicker_name)
+                gspread.Cell(row_index, 8, clicked_user)
             ]
             sheet.update_cells(cells)
             return True, time_now
@@ -201,17 +209,22 @@ def generate_meal_flex(group_id, session_type):
         }
 
         if is_done:
-            # Nếu đã xong thì hiện giờ
+            # Nếu đã xong thì hiện giờ (có thể click để hủy)
             right_side = {
-                "type": "text", "text": f"{time_val}", 
-                "flex": 0, "width": "40px", "align": "end", "size": "xxs", 
-                "color": "#2E7D32", "gravity": "center", "weight": "bold"
+                "type": "text", "text": f"🟢 {time_val}", 
+                "flex": 0, "width": "55px", "align": "end", "size": "xxs", 
+                "color": "#2E7D32", "gravity": "center", "weight": "bold",
+                "action": {
+                    "type": "postback",
+                    "label": "Hủy",
+                    "data": f"action=meal_checkin&session={session_type}&name={name}&target_status=waiting"
+                }
             }
         else:
             # Nút bấm hình bát phở 🍲
             right_side = {
                 "type": "button", "style": "secondary", "height": "sm", 
-                "action": {"type": "postback", "label": "🍲", "data": f"action=meal_checkin&session={session_type}&name={name}"},
+                "action": {"type": "postback", "label": "🍲", "data": f"action=meal_checkin&session={session_type}&name={name}&target_status=done"},
                 "flex": 0, "width": "40px", "margin": "xs"
             }
             

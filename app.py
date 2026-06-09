@@ -376,6 +376,7 @@ def handle_postback(event):
     if action == 'complete_task':
         task_id = data.get('task_id')
         shift_type = data.get('shift')
+        target_status = data.get('target_status', 'complete')
         group_id = event.source.group_id
         user_id = event.source.user_id
 
@@ -400,12 +401,18 @@ def handle_postback(event):
                     break
             
             if row_to_update != -1:
+                current_status = target_record.get('status', 'incomplete') if target_record else 'incomplete'
+                if current_status == target_status:
+                    print(f"Task {task_id} đã ở trạng thái {target_status} từ trước. Bỏ qua.")
+                    return
+                
+                new_user = user_name if target_status == 'complete' else ''
                 range_to_update = f'F{row_to_update}:G{row_to_update}'
-                sheet.update(range_name=range_to_update, values=[['complete', user_name]])
+                sheet.update(range_name=range_to_update, values=[[target_status, new_user]])
                 
                 if target_record:
-                    target_record['status'] = 'complete'
-                    target_record['user_name'] = user_name
+                    target_record['status'] = target_status
+                    target_record['user_name'] = new_user
             
             updated_flex_content = generate_checklist_flex(group_id, shift_type, all_records_prefetched=all_records)
 
@@ -423,6 +430,7 @@ def handle_postback(event):
     if action == 'meal_checkin':
         session_type = data.get('session')
         staff_name = data.get('name')
+        target_status = data.get('target_status', 'done')
         group_id = getattr(event.source, 'group_id', None)
         
         if not group_id: return
@@ -439,7 +447,7 @@ def handle_postback(event):
             except:
                 clicker_name = "Unknown"
 
-        success, time_str = update_meal_status(group_id, session_type, staff_name, clicker_name)
+        success, time_str = update_meal_status(group_id, session_type, staff_name, clicker_name, target_status)
         
         if success:
             updated_flex = generate_meal_flex(group_id, session_type)

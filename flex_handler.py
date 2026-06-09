@@ -30,7 +30,6 @@ TASKS = {
         {'id': 'vs_4', 'icon': '📸', 'name': '4. Ngọc Trì', 'time': '10:00'},
         {'id': 'vs_5', 'icon': '📸', 'name': '5. Ngô Gia Tự', 'time': '10:00'},
         {'id': 'vs_6', 'icon': '📸', 'name': '6. Savico', 'time': '10:00'},
-        {'id': 'vs_7', 'icon': '📸', 'name': '7. Sài Đồng', 'time': '10:00'},
     ]
 }
 
@@ -190,9 +189,11 @@ def generate_checklist_flex(group_id, shift_type, all_records_prefetched=None):
         if is_complete:
             sub_text_label = "Xong bởi:"
             sub_text_value = completed_by
+            target_status_param = "incomplete"
         else:
             sub_text_label = "Deadline"
             sub_text_value = task['time']
+            target_status_param = "complete"
 
         task_component = {
             "type": "box",
@@ -251,7 +252,7 @@ def generate_checklist_flex(group_id, shift_type, all_records_prefetched=None):
                     "action": {
                         "type": "postback",
                         "label": button_label,
-                        "data": f"action=complete_task&task_id={task['id']}&shift={shift_type}"
+                        "data": f"action=complete_task&task_id={task['id']}&shift={shift_type}&target_status={target_status_param}"
                     },
                     "style": "primary",
                     "color": button_color,
