@@ -675,8 +675,9 @@ def generate_all_adhoc_flex(group_id, task_group_hash):
             task_info_contents = [
                 {
                     "type": "text",
-                    "text": assignee,
-                    "wrap": True,
+                    "text": f"{i}. {assignee}",
+                    "wrap": False,
+                    "maxLines": 1,
                     "weight": "bold",
                     "size": "sm",
                     "color": main_text_color
@@ -690,7 +691,8 @@ def generate_all_adhoc_flex(group_id, task_group_hash):
                     "color": "#00B33C",
                     "size": "xs",
                     "margin": "xs",
-                    "wrap": True
+                    "wrap": False,
+                    "maxLines": 1
                 })
                 
             task_component = {
@@ -782,3 +784,47 @@ def generate_all_adhoc_flex(group_id, task_group_hash):
     except Exception as e:
         print(f"Lỗi khi tạo flex công việc chung: {e}")
         return None
+
+def register_group_member(group_id, user_id, display_name):
+    """
+    Lưu thành viên của nhóm vào sheet group_members để phục vụ cho việc giao việc @all.
+    """
+    if not group_id or not user_id or not display_name:
+        return
+    # Nếu group_id giống user_id (chat 1-1), bỏ qua
+    if str(group_id) == str(user_id):
+        return
+        
+    try:
+        from config import CLIENT, SHEET_NAME
+        spreadsheet = CLIENT.open(SHEET_NAME)
+        sheet_list = [w.title for w in spreadsheet.worksheets()]
+        
+        worksheet_name = 'group_members'
+        headers = ['group_id', 'user_id', 'display_name', 'last_seen']
+        
+        if worksheet_name in sheet_list:
+            sheet = spreadsheet.worksheet(worksheet_name)
+        else:
+            sheet = spreadsheet.add_worksheet(title=worksheet_name, rows="1000", cols="10")
+            sheet.append_row(headers)
+            print(f"Đã tạo worksheet lưu thành viên nhóm: {worksheet_name}")
+            
+        all_records = sheet.get_all_records()
+        
+        row_idx = -1
+        for i, r in enumerate(all_records):
+            if str(r.get('group_id')) == str(group_id) and str(r.get('user_id')) == str(user_id):
+                row_idx = i + 2
+                break
+                
+        tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
+        now_str = datetime.now(tz_vietnam).strftime('%Y-%m-%d %H:%M:%S')
+        
+        if row_idx != -1:
+            sheet.update(range_name=f'C{row_idx}:D{row_idx}', values=[[display_name, now_str]])
+        else:
+            new_row = [str(group_id), str(user_id), display_name, now_str]
+            sheet.append_row(new_row)
+    except Exception as e:
+        print(f"Lỗi khi lưu group member: {e}")

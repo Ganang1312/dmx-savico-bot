@@ -27,7 +27,7 @@ from schedule_handler import send_daily_schedule
 from flex_handler import (
     initialize_daily_tasks, generate_checklist_flex,
     add_adhoc_tasks, generate_adhoc_flex, update_adhoc_task_status,
-    add_all_adhoc_tasks, generate_all_adhoc_flex
+    add_all_adhoc_tasks, generate_all_adhoc_flex, register_group_member
 )
 from checklist_scheduler import send_initial_checklist, get_checklist_message 
 from meal_handler import generate_meal_flex, update_meal_status
@@ -349,6 +349,16 @@ def handle_postback(event):
     data_str = event.postback.data
     data = dict(part.split('=') for part in data_str.split('&'))
     action = data.get('action')
+    
+    user_id = event.source.user_id
+    if event.source.type == 'group':
+        group_id = event.source.group_id
+        try:
+            profile = line_bot_api.get_group_member_profile(group_id, user_id)
+            if profile and profile.display_name:
+                register_group_member(group_id, user_id, profile.display_name)
+        except Exception as e_reg:
+            print(f"Không thể lấy profile để lưu thành viên postback: {e_reg}")
 
     # 1. Gia hạn User
     if action == 'renew':
@@ -519,7 +529,30 @@ def get_group_members(group_id):
     except Exception as e_api:
         print(f"Lỗi lấy thành viên từ Line API (Có thể do tài khoản Bot Free): {e_api}")
 
-    # 2. Fallback: Lấy danh sách nhân viên từ lịch làm việc hôm nay
+    # 2. Fallback 1: Lấy danh sách thành viên đã từng tương tác trong nhóm từ sheet group_members
+    if not member_names:
+        try:
+            from config import CLIENT, SHEET_NAME
+            spreadsheet = CLIENT.open(SHEET_NAME)
+            sheet_list = [w.title for w in spreadsheet.worksheets()]
+            if 'group_members' in sheet_list:
+                sheet = spreadsheet.worksheet('group_members')
+                records = sheet.get_all_records()
+                
+                # Gom tất cả display_name của group này
+                seen_names = set()
+                for r in records:
+                    if str(r.get('group_id')) == str(group_id):
+                        name = r.get('display_name')
+                        if name:
+                            seen_names.add(str(name).strip())
+                if seen_names:
+                    member_names = sorted(list(seen_names))
+                    print(f"Lấy được {len(member_names)} thành viên từ cache sheet group_members.")
+        except Exception as e_cache:
+            print(f"Lỗi lấy danh sách thành viên từ cache sheet: {e_cache}")
+
+    # 3. Fallback 2: Lấy danh sách nhân viên từ lịch làm việc hôm nay
     if not member_names:
         try:
             from meal_handler import get_working_staff
@@ -547,7 +580,16 @@ def handle_message(event):
     user_msg_upper = user_message.upper()
     user_id = event.source.user_id
     source_id = getattr(event.source, 'group_id', user_id)
-    
+    # Tự động lưu/cập nhật thông tin thành viên nhóm
+    if event.source.type == 'group':
+        group_id = event.source.group_id
+        try:
+            profile = line_bot_api.get_group_member_profile(group_id, user_id)
+            if profile and profile.display_name:
+                register_group_member(group_id, user_id, profile.display_name)
+        except Exception as e_reg:
+            print(f"Không thể lấy profile để lưu thành viên: {e_reg}")
+
     # 0. Giao công việc phát sinh (Adhoc task)
     lines = [line.strip() for line in user_message.split('\n') if line.strip()]
     if len(lines) >= 2 and (lines[0].lower().startswith('việc @') or lines[0].lower().startswith('viec @')):
