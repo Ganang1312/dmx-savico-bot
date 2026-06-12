@@ -404,7 +404,7 @@ def update_adhoc_task_status(group_id, task_id, target_status, completed_by):
     """
     sheet = get_or_create_adhoc_worksheet()
     if not sheet:
-        return False, None
+        return False, None, None
     
     try:
         all_records = sheet.get_all_records()
@@ -414,11 +414,16 @@ def update_adhoc_task_status(group_id, task_id, target_status, completed_by):
         
         row_idx = -1
         assignee = None
+        task_group_hash = None
         for i, record in enumerate(all_records):
             if (str(record.get('group_id')) == str(group_id) and 
                 record.get('task_id') == task_id):
                 row_idx = i + 2  # 1-indexed and header row
                 assignee = record.get('assignee')
+                if str(task_id).startswith('all_'):
+                    parts = str(task_id).split('_')
+                    if len(parts) >= 3:
+                        task_group_hash = parts[1]
                 break
                 
         if row_idx != -1:
@@ -428,11 +433,11 @@ def update_adhoc_task_status(group_id, task_id, target_status, completed_by):
             # Cột F: status, Cột G: completed_by, Cột H: completed_at
             range_to_update = f'F{row_idx}:H{row_idx}'
             sheet.update(range_name=range_to_update, values=[[target_status, comp_by, comp_at]])
-            return True, assignee
-        return False, None
+            return True, assignee, task_group_hash
+        return False, None, None
     except Exception as e:
         print(f"Lỗi khi cập nhật trạng thái adhoc task: {e}")
-        return False, None
+        return False, None, None
 
 def generate_adhoc_flex(group_id, assignee, tasks_data=None):
     """
@@ -585,3 +590,195 @@ def generate_adhoc_flex(group_id, assignee, tasks_data=None):
         }
     }
     return flex_content
+
+def add_all_adhoc_tasks(group_id, members, task_name):
+    """
+    Giao việc chung @all cho toàn bộ thành viên trong nhóm.
+    """
+    sheet = get_or_create_adhoc_worksheet()
+    if not sheet:
+        return None
+        
+    tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
+    today_str = datetime.now(tz_vietnam).strftime('%Y-%m-%d')
+    time_now_str = datetime.now(tz_vietnam).strftime('%H:%M')
+    
+    task_group_hash = uuid.uuid4().hex[:6]
+    
+    rows_to_add = []
+    for index, member in enumerate(members):
+        task_id = f"all_{task_group_hash}_{index}"
+        new_row = [
+            str(group_id),
+            today_str,
+            member,
+            task_id,
+            task_name,
+            'incomplete',
+            '',
+            '',
+            time_now_str
+        ]
+        rows_to_add.append(new_row)
+        
+    if rows_to_add:
+        sheet.append_rows(rows_to_add, value_input_option='USER_ENTERED')
+        print(f"Đã thêm việc @all {task_name} cho {len(rows_to_add)} thành viên")
+        return task_group_hash
+    return None
+
+def generate_all_adhoc_flex(group_id, task_group_hash):
+    """
+    Tạo Flex Message hiển thị danh sách thành viên thực hiện việc chung @all.
+    """
+    sheet = get_or_create_adhoc_worksheet()
+    if not sheet:
+        return None
+        
+    try:
+        all_records = sheet.get_all_records()
+        tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
+        today_str = datetime.now(tz_vietnam).strftime('%Y-%m-%d')
+        today_display_str = datetime.now(tz_vietnam).strftime('%d/%m/%Y')
+        
+        # Lấy tất cả task thuộc nhóm hash này
+        prefix = f"all_{task_group_hash}_"
+        filtered_tasks = []
+        for record in all_records:
+            if (str(record.get('group_id')) == str(group_id) and 
+                record.get('date') == today_str and 
+                str(record.get('task_id')).startswith(prefix)):
+                filtered_tasks.append(record)
+                
+        if not filtered_tasks:
+            return None
+            
+        # Nội dung công việc chung (lấy từ bản ghi đầu tiên)
+        task_name = filtered_tasks[0].get('task_name', 'Công việc chung')
+        created_at = filtered_tasks[0].get('created_at', '')
+        
+        task_components = []
+        for i, task in enumerate(filtered_tasks, start=1):
+            task_id = task.get('task_id')
+            assignee = task.get('assignee')
+            status = task.get('status', 'incomplete')
+            completed_by = task.get('completed_by', '')
+            completed_at = task.get('completed_at', '')
+            
+            is_complete = (status == 'complete')
+            main_text_color = "#AAAAAA" if is_complete else "#111111"
+            
+            button_color = "#CCCCCC" if is_complete else "#00B33C"
+            button_label = "✓ Xong" if is_complete else "Hoàn tất"
+            target_status_param = "incomplete" if is_complete else "complete"
+            
+            task_info_contents = [
+                {
+                    "type": "text",
+                    "text": assignee,
+                    "wrap": True,
+                    "weight": "bold",
+                    "size": "sm",
+                    "color": main_text_color
+                }
+            ]
+            
+            if is_complete:
+                task_info_contents.append({
+                    "type": "text",
+                    "text": f"✓ Xong bởi {completed_by} lúc {completed_at}",
+                    "color": "#00B33C",
+                    "size": "xs",
+                    "margin": "xs",
+                    "wrap": True
+                })
+                
+            task_component = {
+                "type": "box",
+                "layout": "horizontal",
+                "spacing": "lg",
+                "paddingAll": "md",
+                "alignItems": "center",
+                "contents": [
+                    {
+                        "type": "text",
+                        "text": "✅" if is_complete else "⏳",
+                        "size": "lg",
+                        "flex": 0
+                    },
+                    {
+                        "type": "box",
+                        "layout": "vertical",
+                        "flex": 1,
+                        "spacing": "xs",
+                        "contents": task_info_contents
+                    },
+                    {
+                        "type": "button",
+                        "action": {
+                            "type": "postback",
+                            "label": button_label,
+                            "data": f"action=complete_adhoc_task&task_id={task_id}&assignee={assignee}&target_status={target_status_param}"
+                        },
+                        "style": "primary",
+                        "color": button_color,
+                        "height": "sm",
+                        "flex": 0
+                    }
+                ]
+            }
+            task_components.append(task_component)
+            task_components.append({"type": "separator"})
+            
+        if task_components:
+            task_components.pop()
+            
+        flex_content = {
+            "type": "bubble",
+            "size": "mega",
+            "header": {
+                "type": "box",
+                "layout": "vertical",
+                "backgroundColor": "#1565C0",  # Royal Blue đậm chuyên nghiệp
+                "paddingTop": "16px",
+                "paddingBottom": "16px",
+                "paddingStart": "20px",
+                "paddingEnd": "20px",
+                "contents": [
+                    {
+                        "type": "text",
+                        "text": "📢 CÔNG VIỆC CHUNG @ALL",
+                        "weight": "bold",
+                        "size": "md",
+                        "color": "#FFFFFF"
+                    },
+                    {
+                        "type": "text",
+                        "text": task_name,
+                        "weight": "bold",
+                        "size": "lg",
+                        "color": "#FFFFFF",
+                        "margin": "sm",
+                        "wrap": True
+                    },
+                    {
+                        "type": "text",
+                        "text": f"📅 Ngày giao: {today_display_str}  |  🕒 Giao lúc: {created_at}",
+                        "size": "xs",
+                        "color": "#BBDEFB",
+                        "margin": "xs"
+                    }
+                ]
+            },
+            "body": {
+                "type": "box",
+                "layout": "vertical",
+                "spacing": "sm",
+                "paddingAll": "sm",
+                "contents": task_components
+            }
+        }
+        return flex_content
+    except Exception as e:
+        print(f"Lỗi khi tạo flex công việc chung: {e}")
+        return None

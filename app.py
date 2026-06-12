@@ -26,7 +26,8 @@ from config import CLIENT, SHEET_NAME, WORKSHEET_NAME_USERS, WORKSHEET_NAME, WOR
 from schedule_handler import send_daily_schedule
 from flex_handler import (
     initialize_daily_tasks, generate_checklist_flex,
-    add_adhoc_tasks, generate_adhoc_flex, update_adhoc_task_status
+    add_adhoc_tasks, generate_adhoc_flex, update_adhoc_task_status,
+    add_all_adhoc_tasks, generate_all_adhoc_flex
 )
 from checklist_scheduler import send_initial_checklist, get_checklist_message 
 from meal_handler import generate_meal_flex, update_meal_status
@@ -443,14 +444,20 @@ def handle_postback(event):
             profile = line_bot_api.get_group_member_profile(group_id, user_id)
             user_name = profile.display_name
             
-            success, resolved_assignee = update_adhoc_task_status(group_id, task_id, target_status, user_name)
+            success, resolved_assignee, task_group_hash = update_adhoc_task_status(group_id, task_id, target_status, user_name)
             
             if success:
-                updated_flex_content = generate_adhoc_flex(group_id, resolved_assignee or assignee)
+                if task_group_hash:
+                    updated_flex_content = generate_all_adhoc_flex(group_id, task_group_hash)
+                    alt_text = "Cập nhật công việc chung @all"
+                else:
+                    updated_flex_content = generate_adhoc_flex(group_id, resolved_assignee or assignee)
+                    alt_text = f"Cập nhật công việc phát sinh của {resolved_assignee or assignee}"
+                    
                 if updated_flex_content:
                     line_bot_api.reply_message(
                         event.reply_token,
-                        FlexSendMessage(alt_text=f"Cập nhật công việc phát sinh của {resolved_assignee or assignee}", contents=updated_flex_content)
+                        FlexSendMessage(alt_text=alt_text, contents=updated_flex_content)
                     )
         except Exception as e:
             print(f"Lỗi nghiêm trọng khi xử lý postback hoàn thành công việc phát sinh: {e}")
@@ -490,6 +497,48 @@ def handle_postback(event):
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ Lỗi: Không tìm thấy tên hoặc lỗi cập nhật."))
         return
 
+def get_group_members(group_id):
+    """
+    Lấy danh sách tên thành viên trong nhóm Line, loại trừ các bot hoặc tài khoản hệ thống nếu có thể.
+    """
+    member_names = []
+    # 1. Gọi API Line để lấy danh sách đầy đủ
+    try:
+        res = line_bot_api.get_group_member_ids(group_id)
+        member_ids = res.member_ids
+        for uid in member_ids:
+            try:
+                profile = line_bot_api.get_group_member_profile(group_id, uid)
+                if profile.display_name:
+                    name_lower = profile.display_name.lower()
+                    # Loại bỏ bot
+                    if 'bot' not in name_lower and name_lower != 'line':
+                        member_names.append(profile.display_name)
+            except Exception as e_prof:
+                print(f"Lỗi lấy profile cho {uid}: {e_prof}")
+    except Exception as e_api:
+        print(f"Lỗi lấy thành viên từ Line API (Có thể do tài khoản Bot Free): {e_api}")
+
+    # 2. Fallback: Lấy danh sách nhân viên từ lịch làm việc hôm nay
+    if not member_names:
+        try:
+            from meal_handler import get_working_staff
+            staff_morning = get_working_staff('ansang')
+            staff_afternoon = get_working_staff('anchieu')
+            
+            all_staff = set()
+            for s_type in ['NV', 'PG']:
+                for name in staff_morning.get(s_type, []):
+                    all_staff.add(name)
+                for name in staff_afternoon.get(s_type, []):
+                    all_staff.add(name)
+            member_names = sorted(list(all_staff))
+            print(f"Sử dụng fallback lấy {len(member_names)} nhân viên từ lịch hôm nay.")
+        except Exception as e_fallback:
+            print(f"Lỗi fallback lấy nhân viên: {e_fallback}")
+            
+    return member_names
+
 # --- XỬ LÝ TIN NHẮN ---
 
 @handler.add(MessageEvent, message=TextMessage)
@@ -525,18 +574,36 @@ def handle_message(event):
                     
         if assignee and tasks:
             try:
-                # 1. Thêm công việc mới vào Sheets
-                add_adhoc_tasks(group_id, assignee, tasks)
-                
-                # 2. Tạo flex hiển thị toàn bộ việc trong ngày của nhân viên đó
-                flex_content = generate_adhoc_flex(group_id, assignee)
-                if flex_content:
-                    line_bot_api.reply_message(
-                        event.reply_token,
-                        FlexSendMessage(alt_text=f"📋 Công việc phát sinh hôm nay của {assignee}", contents=flex_content)
-                    )
+                # Giao việc @all
+                if assignee.lower() == 'all':
+                    members = get_group_members(group_id)
+                    if not members:
+                        line_bot_api.reply_message(
+                            event.reply_token,
+                            TextSendMessage(text="⚠️ Không tìm thấy thành viên nào trong nhóm hoặc danh sách lịch làm việc trống.")
+                        )
+                        return
+                    
+                    for task_name in tasks:
+                        task_group_hash = add_all_adhoc_tasks(group_id, members, task_name)
+                        if task_group_hash:
+                            flex_content = generate_all_adhoc_flex(group_id, task_group_hash)
+                            if flex_content:
+                                line_bot_api.push_message(
+                                    group_id,
+                                    FlexSendMessage(alt_text=f"📢 Công việc chung @all: {task_name}", contents=flex_content)
+                                )
+                # Giao việc cá nhân
                 else:
-                    line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ Có lỗi xảy ra khi tạo danh sách công việc."))
+                    add_adhoc_tasks(group_id, assignee, tasks)
+                    flex_content = generate_adhoc_flex(group_id, assignee)
+                    if flex_content:
+                        line_bot_api.reply_message(
+                            event.reply_token,
+                            FlexSendMessage(alt_text=f"📋 Công việc phát sinh hôm nay của {assignee}", contents=flex_content)
+                        )
+                    else:
+                        line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ Có lỗi xảy ra khi tạo danh sách công việc."))
             except Exception as e:
                 print(f"Lỗi khi xử lý lệnh giao việc: {e}")
                 line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ Gặp lỗi khi xử lý giao việc."))
