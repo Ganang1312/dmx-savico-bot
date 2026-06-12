@@ -320,10 +320,17 @@ def get_or_create_adhoc_worksheet():
     try:
         spreadsheet = CLIENT.open(SHEET_NAME)
         sheet_list = [w.title for w in spreadsheet.worksheets()]
+        headers = ['group_id', 'date', 'assignee', 'task_id', 'task_name', 'status', 'completed_by', 'completed_at', 'created_at']
         if WORKSHEET_ADHOC_TASKS in sheet_list:
-            return spreadsheet.worksheet(WORKSHEET_ADHOC_TASKS)
+            worksheet = spreadsheet.worksheet(WORKSHEET_ADHOC_TASKS)
+            try:
+                first_row = worksheet.row_values(1)
+                if len(first_row) < len(headers):
+                    worksheet.update(range_name='A1:I1', values=[headers])
+            except Exception as e_header:
+                print(f"Lỗi kiểm tra/cập nhật header adhoc_tasks: {e_header}")
+            return worksheet
         else:
-            headers = ['group_id', 'date', 'assignee', 'task_id', 'task_name', 'status', 'completed_by', 'completed_at']
             worksheet = spreadsheet.add_worksheet(title=WORKSHEET_ADHOC_TASKS, rows="1000", cols="20")
             worksheet.append_row(headers)
             print(f"Đã tạo worksheet mới: {WORKSHEET_ADHOC_TASKS}")
@@ -342,6 +349,7 @@ def add_adhoc_tasks(group_id, assignee, tasks_list):
     
     tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
     today_str = datetime.now(tz_vietnam).strftime('%Y-%m-%d')
+    time_now_str = datetime.now(tz_vietnam).strftime('%H:%M')
     
     rows_to_add = []
     for task_name in tasks_list:
@@ -354,7 +362,8 @@ def add_adhoc_tasks(group_id, assignee, tasks_list):
             task_name,
             'incomplete',
             '',
-            ''
+            '',
+            time_now_str
         ]
         rows_to_add.append(new_row)
         
@@ -445,6 +454,7 @@ def generate_adhoc_flex(group_id, assignee, tasks_data=None):
         status = task.get('status', 'incomplete')
         completed_by = task.get('completed_by', '')
         completed_at = task.get('completed_at', '')
+        created_at = task.get('created_at', '')
         
         is_complete = (status == 'complete')
         
@@ -469,13 +479,23 @@ def generate_adhoc_flex(group_id, assignee, tasks_data=None):
             }
         ]
         
+        if created_at:
+            task_info_contents.append({
+                "type": "text",
+                "text": f"🕒 Giao lúc: {created_at}",
+                "color": "#888888" if is_complete else "#E65100",
+                "size": "xs",
+                "margin": "xs"
+            })
+        
         if is_complete:
             task_info_contents.append({
                 "type": "text",
                 "text": f"✓ Xong bởi {completed_by} lúc {completed_at}",
                 "color": "#00B33C",
                 "size": "xs",
-                "margin": "xs"
+                "margin": "xs",
+                "wrap": True
             })
             
         task_component = {
