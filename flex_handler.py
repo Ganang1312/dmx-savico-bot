@@ -225,8 +225,8 @@ def generate_checklist_flex(group_id, shift_type, all_records_prefetched=None):
                         },
                         {
                             "type": "box",
-                            "layout": "baseline",
-                            "spacing": "sm",
+                            "layout": "horizontal",
+                            "spacing": "xs",
                             "contents": [
                                 {
                                     "type": "text",
@@ -241,7 +241,8 @@ def generate_checklist_flex(group_id, shift_type, all_records_prefetched=None):
                                     "color": deadline_color,
                                     "weight": "bold",
                                     "size": "xs",
-                                    "flex": 0
+                                    "flex": 1,
+                                    "wrap": True
                                 }
                             ]
                         }

@@ -409,7 +409,9 @@ def handle_postback(event):
                     print(f"Task {task_id} đã ở trạng thái {target_status} từ trước. Bỏ qua.")
                     return
                 
-                new_user = user_name if target_status == 'complete' else ''
+                tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
+                time_str = datetime.now(tz_vietnam).strftime('%H:%M')
+                new_user = f"{user_name} lúc {time_str}" if target_status == 'complete' else ''
                 range_to_update = f'F{row_to_update}:G{row_to_update}'
                 sheet.update(range_name=range_to_update, values=[[target_status, new_user]])
                 
