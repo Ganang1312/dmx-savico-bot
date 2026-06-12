@@ -24,3 +24,4 @@ WORKSHEET_NAME = 'chi_tiet_cum'
 WORKSHEET_SCHEDULES_NAME = 'schedules'
 # === THÊM MỚI ===
 WORKSHEET_MEAL_TRACKER_NAME = 'meal_tracker'
+WORKSHEET_ADHOC_TASKS = 'adhoc_tasks'

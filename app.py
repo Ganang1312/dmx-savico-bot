@@ -24,7 +24,10 @@ import pandas as pd
 from config import CLIENT, SHEET_NAME, WORKSHEET_NAME_USERS, WORKSHEET_NAME, WORKSHEET_TRACKER_NAME
 # CẬP NHẬT IMPORT MỚI
 from schedule_handler import send_daily_schedule
-from flex_handler import initialize_daily_tasks, generate_checklist_flex
+from flex_handler import (
+    initialize_daily_tasks, generate_checklist_flex,
+    add_adhoc_tasks, generate_adhoc_flex, update_adhoc_task_status
+)
 from checklist_scheduler import send_initial_checklist, get_checklist_message 
 from meal_handler import generate_meal_flex, update_meal_status
 
@@ -426,6 +429,31 @@ def handle_postback(event):
             print(f"Lỗi nghiêm trọng khi xử lý postback hoàn thành công việc: {e}")
         return
 
+    # 2.5. Hoàn thành công việc phát sinh (Adhoc task)
+    if action == 'complete_adhoc_task':
+        task_id = data.get('task_id')
+        assignee = data.get('assignee')
+        target_status = data.get('target_status', 'complete')
+        group_id = event.source.group_id
+        user_id = event.source.user_id
+
+        try:
+            profile = line_bot_api.get_group_member_profile(group_id, user_id)
+            user_name = profile.display_name
+            
+            success, resolved_assignee = update_adhoc_task_status(group_id, task_id, target_status, user_name)
+            
+            if success:
+                updated_flex_content = generate_adhoc_flex(group_id, resolved_assignee or assignee)
+                if updated_flex_content:
+                    line_bot_api.reply_message(
+                        event.reply_token,
+                        FlexSendMessage(alt_text=f"Cập nhật công việc phát sinh của {resolved_assignee or assignee}", contents=updated_flex_content)
+                    )
+        except Exception as e:
+            print(f"Lỗi nghiêm trọng khi xử lý postback hoàn thành công việc phát sinh: {e}")
+        return
+
     # 3. Check-in Ăn Sáng/Chiều
     if action == 'meal_checkin':
         session_type = data.get('session')
@@ -469,6 +497,49 @@ def handle_message(event):
     user_id = event.source.user_id
     source_id = getattr(event.source, 'group_id', user_id)
     
+    # 0. Giao công việc phát sinh (Adhoc task)
+    lines = [line.strip() for line in user_message.split('\n') if line.strip()]
+    if len(lines) >= 2 and (lines[0].lower().startswith('việc @') or lines[0].lower().startswith('viec @')):
+        group_id = getattr(event.source, 'group_id', None)
+        if not group_id:
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="⚠️ Chức năng giao việc chỉ sử dụng được trong nhóm chat."))
+            return
+            
+        header = lines[0]
+        idx_at = header.find('@')
+        idx_colon = header.find(':', idx_at)
+        
+        if idx_colon != -1:
+            assignee = header[idx_at + 1 : idx_colon].strip()
+        else:
+            assignee = header[idx_at + 1 :].strip()
+            
+        tasks = []
+        for line in lines[1:]:
+            if line.startswith('-') or line.startswith('*'):
+                task_name = line[1:].strip()
+                if task_name:
+                    tasks.append(task_name)
+                    
+        if assignee and tasks:
+            try:
+                # 1. Thêm công việc mới vào Sheets
+                add_adhoc_tasks(group_id, assignee, tasks)
+                
+                # 2. Tạo flex hiển thị toàn bộ việc trong ngày của nhân viên đó
+                flex_content = generate_adhoc_flex(group_id, assignee)
+                if flex_content:
+                    line_bot_api.reply_message(
+                        event.reply_token,
+                        FlexSendMessage(alt_text=f"📋 Công việc phát sinh hôm nay của {assignee}", contents=flex_content)
+                    )
+                else:
+                    line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ Có lỗi xảy ra khi tạo danh sách công việc."))
+            except Exception as e:
+                print(f"Lỗi khi xử lý lệnh giao việc: {e}")
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ Gặp lỗi khi xử lý giao việc."))
+            return
+
     # 1. Admin ADD
     if user_msg_upper.startswith('ADD '):
         if user_id != ADMIN_USER_ID:
