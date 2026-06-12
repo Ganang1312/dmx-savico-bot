@@ -679,7 +679,7 @@ def generate_all_adhoc_flex(group_id, task_group_hash):
                     "wrap": False,
                     "maxLines": 1,
                     "weight": "bold",
-                    "size": "sm",
+                    "size": "xs",
                     "color": main_text_color
                 }
             ]
@@ -689,23 +689,22 @@ def generate_all_adhoc_flex(group_id, task_group_hash):
                     "type": "text",
                     "text": f"✓ Xong bởi {completed_by} lúc {completed_at}",
                     "color": "#00B33C",
-                    "size": "xs",
+                    "size": "xxs",
                     "margin": "xs",
-                    "wrap": False,
-                    "maxLines": 1
+                    "wrap": True
                 })
                 
             task_component = {
                 "type": "box",
                 "layout": "horizontal",
-                "spacing": "lg",
-                "paddingAll": "md",
+                "spacing": "sm",
+                "paddingAll": "sm",
                 "alignItems": "center",
                 "contents": [
                     {
                         "type": "text",
                         "text": "✅" if is_complete else "⏳",
-                        "size": "lg",
+                        "size": "md",
                         "flex": 0
                     },
                     {
@@ -725,7 +724,8 @@ def generate_all_adhoc_flex(group_id, task_group_hash):
                         "style": "primary",
                         "color": button_color,
                         "height": "sm",
-                        "flex": 0
+                        "flex": 0,
+                        "width": "75px"
                     }
                 ]
             }
