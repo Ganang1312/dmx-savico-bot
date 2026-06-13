@@ -187,8 +187,12 @@ def generate_checklist_flex(group_id, shift_type, all_records_prefetched=None):
         button_label = "✓ Xong" if is_complete else "Hoàn tất"
         
         if is_complete:
-            sub_text_label = "Xong bởi:"
-            sub_text_value = completed_by
+            if shift_type in ['sang', 'chieu']:
+                sub_text_label = "Deadline"
+                sub_text_value = task['time']
+            else:
+                sub_text_label = "Xong bởi:"
+                sub_text_value = completed_by
             target_status_param = "incomplete"
         else:
             sub_text_label = "Deadline"
