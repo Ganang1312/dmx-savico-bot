@@ -160,7 +160,7 @@ def update_meal_status(group_id, session_type, staff_name, clicker_name, target_
             # Nếu trạng thái hiện tại đã khớp với mục tiêu, bỏ qua (tránh duplicate)
             if current_status == target_status:
                 print(f"Trạng thái của {staff_name} đã là {target_status} từ trước. Bỏ qua.")
-                return False, None
+                return "already", None
 
             # Ghi dữ liệu vào 3 cột:
             # Cột 6 (F): Status -> target_status

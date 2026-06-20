@@ -494,15 +494,17 @@ def handle_postback(event):
             except:
                 clicker_name = "Unknown"
 
-        success, time_str = update_meal_status(group_id, session_type, staff_name, clicker_name, target_status)
+        status_code, time_str = update_meal_status(group_id, session_type, staff_name, clicker_name, target_status)
         
-        if success:
+        if status_code is True:
             updated_flex = generate_meal_flex(group_id, session_type)
             if updated_flex:
                 line_bot_api.reply_message(
                     event.reply_token,
                     FlexSendMessage(alt_text=f"Checklist ăn {session_type} updated", contents=updated_flex)
                 )
+        elif status_code == "already":
+            return
         else:
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ Lỗi: Không tìm thấy tên hoặc lỗi cập nhật."))
         return
@@ -922,32 +924,35 @@ def trigger_morning_tasks():
         pg_group_id = os.environ.get('PG_GROUP_ID')
         employee_group_id = os.environ.get('EMPLOYEE_GROUP_ID')
         
-        # Danh sách tin nhắn để gửi gộp
+        # 1. Gửi Lịch PG vào nhóm PG nếu nhóm PG khác nhóm NV
+        if pg_group_id and pg_group_id != employee_group_id:
+            msg_pg = send_daily_schedule('pg', return_msg_only=True)
+            if msg_pg:
+                line_bot_api.push_message(pg_group_id, msg_pg)
+                print("Đã gửi lịch PG vào nhóm PG.")
+
+        # 2. Gửi Lịch NV và Checklist Sáng vào nhóm NV
         messages_to_send = []
 
-        # 1. Lấy Lịch PG (Nếu cần)
-        # Nếu PG và Employee chung group, chúng ta sẽ gửi hết vào employee_group_id
-        if pg_group_id:
-            # Nếu PG Group ID khác Employee Group ID, phải gửi riêng (hoặc chấp nhận tốn thêm 1 tin)
-            # Ở đây tôi ưu tiên gom nếu trùng hoặc logic của bạn cho phép
+        # Nếu PG và NV chung nhóm thì gửi gộp
+        if pg_group_id and pg_group_id == employee_group_id:
             msg_pg = send_daily_schedule('pg', return_msg_only=True)
-            if msg_pg: messages_to_send.append(msg_pg)
+            if msg_pg:
+                messages_to_send.append(msg_pg)
 
-        # 2. Lấy Lịch NV
         if employee_group_id:
             msg_nv = send_daily_schedule('employee', return_msg_only=True)
-            if msg_nv: messages_to_send.append(msg_nv)
+            if msg_nv:
+                messages_to_send.append(msg_nv)
 
-        # 3. Lấy Checklist Sáng
-        if employee_group_id:
             msg_check = get_checklist_message('sang', employee_group_id)
-            if msg_check: messages_to_send.append(msg_check)
+            if msg_check:
+                messages_to_send.append(msg_check)
         
         # --- GỬI TIN NHẮN (BATCHING) ---
         if messages_to_send and employee_group_id:
-            # Gửi tối đa 5 bong bóng trong 1 lần push -> Chỉ tính 1 tin nhắn
             line_bot_api.push_message(employee_group_id, messages_to_send[:5])
-            print(f"Đã gửi gộp {len(messages_to_send)} thông báo sáng.")
+            print(f"Đã gửi gộp {len(messages_to_send)} thông báo sáng vào nhóm NV.")
         else:
             print("Không có nội dung nào để gửi sáng nay.")
 
@@ -964,24 +969,38 @@ def trigger_afternoon_tasks():
     
     print("Cron Job: Bắt đầu tác vụ buổi chiều (GOM TIN)...")
     try:
+        pg_group_id = os.environ.get('PG_GROUP_ID')
         employee_group_id = os.environ.get('EMPLOYEE_GROUP_ID')
         
+        # 1. Gửi Lịch PG vào nhóm PG nếu nhóm PG khác nhóm NV
+        if pg_group_id and pg_group_id != employee_group_id:
+            msg_pg = send_daily_schedule('pg', return_msg_only=True)
+            if msg_pg:
+                line_bot_api.push_message(pg_group_id, msg_pg)
+                print("Đã gửi lịch PG vào nhóm PG.")
+
+        # 2. Gửi Lịch NV và Checklist Chiều vào nhóm NV
         messages_to_send = []
 
-        # 1. Lịch NV (Nếu muốn nhắc lại chiều)
+        # Nếu PG và NV chung nhóm thì gửi gộp
+        if pg_group_id and pg_group_id == employee_group_id:
+            msg_pg = send_daily_schedule('pg', return_msg_only=True)
+            if msg_pg:
+                messages_to_send.append(msg_pg)
+
         if employee_group_id:
             msg_nv = send_daily_schedule('employee', return_msg_only=True)
-            if msg_nv: messages_to_send.append(msg_nv)
+            if msg_nv:
+                messages_to_send.append(msg_nv)
 
-        # 2. Checklist Chiều
-        if employee_group_id:
             msg_check = get_checklist_message('chieu', employee_group_id)
-            if msg_check: messages_to_send.append(msg_check)
+            if msg_check:
+                messages_to_send.append(msg_check)
         
         # --- GỬI TIN NHẮN (BATCHING) ---
         if messages_to_send and employee_group_id:
             line_bot_api.push_message(employee_group_id, messages_to_send[:5])
-            print(f"Đã gửi gộp {len(messages_to_send)} thông báo chiều.")
+            print(f"Đã gửi gộp {len(messages_to_send)} thông báo chiều vào nhóm NV.")
         else:
             print("Không có nội dung nào để gửi chiều nay.")
 
