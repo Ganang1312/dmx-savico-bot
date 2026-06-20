@@ -626,15 +626,23 @@ def handle_message(event):
                         )
                         return
                     
+                    reply_messages = []
                     for task_name in tasks:
                         task_group_hash = add_all_adhoc_tasks(group_id, members, task_name)
                         if task_group_hash:
                             flex_content = generate_all_adhoc_flex(group_id, task_group_hash)
                             if flex_content:
-                                line_bot_api.push_message(
-                                    group_id,
+                                reply_messages.append(
                                     FlexSendMessage(alt_text=f"📢 Công việc chung @all: {task_name}", contents=flex_content)
                                 )
+                    
+                    if reply_messages:
+                        line_bot_api.reply_message(event.reply_token, reply_messages[:5])
+                    else:
+                        line_bot_api.reply_message(
+                            event.reply_token,
+                            TextSendMessage(text="❌ Có lỗi xảy ra khi tạo danh sách công việc chung.")
+                        )
                 # Giao việc cá nhân
                 else:
                     add_adhoc_tasks(group_id, assignee, tasks)
