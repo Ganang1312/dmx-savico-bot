@@ -344,6 +344,36 @@ def get_or_create_adhoc_worksheet():
         print(f"Lỗi khi lấy/tạo worksheet adhoc_tasks: {e}")
         return None
 
+def clean_old_adhoc_tasks(sheet):
+    """
+    Xóa các công việc cũ (khác ngày hôm nay) trong trang tính adhoc_tasks để giải phóng dữ liệu.
+    """
+    try:
+        all_values = sheet.get_all_values()
+        if len(all_values) <= 1:
+            return
+        
+        headers = all_values[0]
+        tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
+        today_str = datetime.now(tz_vietnam).strftime('%Y-%m-%d')
+        
+        rows_to_keep = []
+        has_old_rows = False
+        for row in all_values[1:]:
+            if len(row) > 1 and row[1] == today_str:
+                rows_to_keep.append(row)
+            else:
+                has_old_rows = True
+                
+        if has_old_rows:
+            sheet.clear()
+            sheet.append_row(headers)
+            if rows_to_keep:
+                sheet.append_rows(rows_to_keep, value_input_option='USER_ENTERED')
+            print("Đã tự động dọn dẹp các công việc phát sinh cũ của những ngày trước.")
+    except Exception as e:
+        print(f"Lỗi khi dọn dẹp adhoc tasks cũ: {e}")
+
 def add_adhoc_tasks(group_id, assignee, tasks_list):
     """
     Thêm danh sách các công việc phát sinh cho nhân viên vào sheet.
@@ -351,6 +381,8 @@ def add_adhoc_tasks(group_id, assignee, tasks_list):
     sheet = get_or_create_adhoc_worksheet()
     if not sheet:
         return False
+        
+    clean_old_adhoc_tasks(sheet)
     
     tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
     today_str = datetime.now(tz_vietnam).strftime('%Y-%m-%d')
@@ -603,6 +635,8 @@ def add_all_adhoc_tasks(group_id, members, task_name):
     if not sheet:
         return None
         
+    clean_old_adhoc_tasks(sheet)
+        
     tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
     today_str = datetime.now(tz_vietnam).strftime('%Y-%m-%d')
     time_now_str = datetime.now(tz_vietnam).strftime('%H:%M')
@@ -841,6 +875,8 @@ def add_multi_adhoc_tasks(group_id, job_name, task_assignments):
     sheet = get_or_create_adhoc_worksheet()
     if not sheet:
         return None
+        
+    clean_old_adhoc_tasks(sheet)
     
     tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
     today_str = datetime.now(tz_vietnam).strftime('%Y-%m-%d')
