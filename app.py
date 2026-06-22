@@ -27,7 +27,8 @@ from schedule_handler import send_daily_schedule
 from flex_handler import (
     initialize_daily_tasks, generate_checklist_flex,
     add_adhoc_tasks, generate_adhoc_flex, update_adhoc_task_status,
-    add_all_adhoc_tasks, generate_all_adhoc_flex, register_group_member
+    add_all_adhoc_tasks, generate_all_adhoc_flex, register_group_member,
+    add_multi_adhoc_tasks, generate_multi_adhoc_flex
 )
 from checklist_scheduler import send_initial_checklist, get_checklist_message 
 from meal_handler import generate_meal_flex, update_meal_status
@@ -458,8 +459,12 @@ def handle_postback(event):
             
             if success:
                 if task_group_hash:
-                    updated_flex_content = generate_all_adhoc_flex(group_id, task_group_hash)
-                    alt_text = "Cập nhật công việc chung @all"
+                    if str(task_id).startswith('multi_'):
+                        updated_flex_content = generate_multi_adhoc_flex(group_id, task_group_hash)
+                        alt_text = "Cập nhật danh sách checklist công việc"
+                    else:
+                        updated_flex_content = generate_all_adhoc_flex(group_id, task_group_hash)
+                        alt_text = "Cập nhật công việc chung @all"
                 else:
                     updated_flex_content = generate_adhoc_flex(group_id, resolved_assignee or assignee)
                     alt_text = f"Cập nhật công việc phát sinh của {resolved_assignee or assignee}"
@@ -658,6 +663,50 @@ def handle_message(event):
                         line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ Có lỗi xảy ra khi tạo danh sách công việc."))
             except Exception as e:
                 print(f"Lỗi khi xử lý lệnh giao việc: {e}")
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ Gặp lỗi khi xử lý giao việc."))
+            return
+
+    elif len(lines) >= 2 and (lines[0].lower().startswith('việc ') or lines[0].lower().startswith('viec ')):
+        group_id = getattr(event.source, 'group_id', None)
+        if not group_id:
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="⚠️ Chức năng giao việc chỉ sử dụng được trong nhóm chat."))
+            return
+            
+        header = lines[0]
+        if header.lower().startswith('việc '):
+            job_name = header[5:].strip()
+        else:
+            job_name = header[5:].strip()
+            
+        job_name = job_name.strip(' "\'').strip()
+            
+        task_assignments = []
+        for line in lines[1:]:
+            if line.startswith('-') or line.startswith('*'):
+                line_content = line[1:].strip()
+                idx_at = line_content.rfind('@')
+                if idx_at != -1:
+                    sub_task = line_content[:idx_at].strip().strip(' "\'').strip()
+                    assignee = line_content[idx_at + 1:].strip().strip(' "\'').strip()
+                    if sub_task and assignee:
+                        task_assignments.append((sub_task, assignee))
+                        
+        if job_name and task_assignments:
+            try:
+                task_group_hash = add_multi_adhoc_tasks(group_id, job_name, task_assignments)
+                if task_group_hash:
+                    flex_content = generate_multi_adhoc_flex(group_id, task_group_hash)
+                    if flex_content:
+                        line_bot_api.reply_message(
+                            event.reply_token,
+                            FlexSendMessage(alt_text=f"📋 Checklist công việc: {job_name}", contents=flex_content)
+                        )
+                    else:
+                        line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ Có lỗi xảy ra khi tạo danh sách công việc."))
+                else:
+                    line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ Có lỗi xảy ra khi lưu công việc."))
+            except Exception as e:
+                print(f"Lỗi khi xử lý lệnh giao việc checklist: {e}")
                 line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ Gặp lỗi khi xử lý giao việc."))
             return
 

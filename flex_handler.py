@@ -424,7 +424,7 @@ def update_adhoc_task_status(group_id, task_id, target_status, completed_by):
                 record.get('task_id') == task_id):
                 row_idx = i + 2  # 1-indexed and header row
                 assignee = record.get('assignee')
-                if str(task_id).startswith('all_'):
+                if str(task_id).startswith('all_') or str(task_id).startswith('multi_'):
                     parts = str(task_id).split('_')
                     if len(parts) >= 3:
                         task_group_hash = parts[1]
@@ -832,3 +832,216 @@ def register_group_member(group_id, user_id, display_name):
             sheet.append_row(new_row)
     except Exception as e:
         print(f"Lỗi khi lưu group member: {e}")
+
+def add_multi_adhoc_tasks(group_id, job_name, task_assignments):
+    """
+    Thêm danh sách các công việc phát sinh cho nhiều nhân viên dưới một tên công việc chung (multi-assignee checklist).
+    task_assignments là danh sách các tuple dạng (sub_task_name, assignee).
+    """
+    sheet = get_or_create_adhoc_worksheet()
+    if not sheet:
+        return None
+    
+    tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
+    today_str = datetime.now(tz_vietnam).strftime('%Y-%m-%d')
+    time_now_str = datetime.now(tz_vietnam).strftime('%H:%M')
+    
+    task_group_hash = uuid.uuid4().hex[:6]
+    
+    rows_to_add = []
+    for index, (sub_task, assignee) in enumerate(task_assignments):
+        task_id = f"multi_{task_group_hash}_{index}"
+        combined_task_name = f"{job_name} | {sub_task}"
+        new_row = [
+            str(group_id),
+            today_str,
+            assignee,
+            task_id,
+            combined_task_name,
+            'incomplete',
+            '',
+            '',
+            time_now_str
+        ]
+        rows_to_add.append(new_row)
+        
+    if rows_to_add:
+        sheet.append_rows(rows_to_add, value_input_option='USER_ENTERED')
+        print(f"Đã thêm checklist công việc '{job_name}' cho {len(rows_to_add)} nhân sự")
+        return task_group_hash
+    return None
+
+def generate_multi_adhoc_flex(group_id, task_group_hash):
+    """
+    Tạo Flex Message hiển thị danh sách checklist công việc (multi-assignee) với nhiều người/nhiều việc khác nhau.
+    """
+    sheet = get_or_create_adhoc_worksheet()
+    if not sheet:
+        return None
+        
+    try:
+        all_records = sheet.get_all_records()
+        tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
+        today_str = datetime.now(tz_vietnam).strftime('%Y-%m-%d')
+        today_display_str = datetime.now(tz_vietnam).strftime('%d/%m/%Y')
+        
+        prefix = f"multi_{task_group_hash}_"
+        filtered_tasks = []
+        for record in all_records:
+            if (str(record.get('group_id')) == str(group_id) and 
+                record.get('date') == today_str and 
+                str(record.get('task_id')).startswith(prefix)):
+                filtered_tasks.append(record)
+                
+        if not filtered_tasks:
+            return None
+            
+        combined_name = filtered_tasks[0].get('task_name', 'Công việc phát sinh')
+        created_at = filtered_tasks[0].get('created_at', '')
+        
+        if ' | ' in combined_name:
+            main_job_name = combined_name.split(' | ', 1)[0]
+        else:
+            main_job_name = combined_name
+
+        task_components = []
+        for i, task in enumerate(filtered_tasks, start=1):
+            task_id = task.get('task_id')
+            assignee = task.get('assignee')
+            task_name_val = task.get('task_name', '')
+            status = task.get('status', 'incomplete')
+            completed_by = task.get('completed_by', '')
+            completed_at = task.get('completed_at', '')
+            
+            if ' | ' in task_name_val:
+                sub_task_name = task_name_val.split(' | ', 1)[1]
+            else:
+                sub_task_name = task_name_val
+
+            is_complete = (status == 'complete')
+            text_decoration = "line-through" if is_complete else "none"
+            main_text_color = "#AAAAAA" if is_complete else "#111111"
+            
+            button_color = "#CCCCCC" if is_complete else "#00B33C"
+            button_label = "✓ Xong" if is_complete else "Hoàn tất"
+            target_status_param = "incomplete" if is_complete else "complete"
+            
+            task_info_contents = [
+                {
+                    "type": "text",
+                    "text": f"{i}. {sub_task_name}",
+                    "wrap": True,
+                    "weight": "bold",
+                    "size": "sm",
+                    "color": main_text_color,
+                    "decoration": text_decoration
+                },
+                {
+                    "type": "text",
+                    "text": f"👤 Giao cho: {assignee}",
+                    "color": "#888888" if is_complete else "#1565C0",
+                    "size": "xs",
+                    "margin": "xs"
+                }
+            ]
+            
+            if is_complete:
+                task_info_contents.append({
+                    "type": "text",
+                    "text": f"✓ Xong bởi {completed_by} lúc {completed_at}",
+                    "color": "#00B33C",
+                    "size": "xxs",
+                    "margin": "xs",
+                    "wrap": True
+                })
+                
+            task_component = {
+                "type": "box",
+                "layout": "horizontal",
+                "spacing": "sm",
+                "paddingAll": "sm",
+                "alignItems": "center",
+                "contents": [
+                    {
+                        "type": "text",
+                        "text": "✅" if is_complete else "⏳",
+                        "size": "md",
+                        "flex": 0
+                    },
+                    {
+                        "type": "box",
+                        "layout": "vertical",
+                        "flex": 1,
+                        "spacing": "xs",
+                        "contents": task_info_contents
+                    },
+                    {
+                        "type": "button",
+                        "action": {
+                            "type": "postback",
+                            "label": button_label,
+                            "data": f"action=complete_adhoc_task&task_id={task_id}&assignee={assignee}&target_status={target_status_param}"
+                        },
+                        "style": "primary",
+                        "color": button_color,
+                        "height": "sm",
+                        "flex": 0,
+                        "width": "75px"
+                    }
+                ]
+            }
+            task_components.append(task_component)
+            task_components.append({"type": "separator"})
+            
+        if task_components:
+            task_components.pop()
+            
+        flex_content = {
+            "type": "bubble",
+            "size": "mega",
+            "header": {
+                "type": "box",
+                "layout": "vertical",
+                "backgroundColor": "#0288D1",
+                "paddingTop": "16px",
+                "paddingBottom": "16px",
+                "paddingStart": "20px",
+                "paddingEnd": "20px",
+                "contents": [
+                    {
+                        "type": "text",
+                        "text": "📋 DANH SÁCH CHECKLIST CÔNG VIỆC",
+                        "weight": "bold",
+                        "size": "xs",
+                        "color": "#B3E5FC"
+                    },
+                    {
+                        "type": "text",
+                        "text": main_job_name,
+                        "weight": "bold",
+                        "size": "lg",
+                        "color": "#FFFFFF",
+                        "margin": "sm",
+                        "wrap": True
+                    },
+                    {
+                        "type": "text",
+                        "text": f"📅 Ngày giao: {today_display_str}  |  🕒 Giao lúc: {created_at}",
+                        "size": "xs",
+                        "color": "#B3E5FC",
+                        "margin": "xs"
+                    }
+                ]
+            },
+            "body": {
+                "type": "box",
+                "layout": "vertical",
+                "spacing": "sm",
+                "paddingAll": "sm",
+                "contents": task_components
+            }
+        }
+        return flex_content
+    except Exception as e:
+        print(f"Lỗi khi tạo flex checklist công việc: {e}")
+        return None
