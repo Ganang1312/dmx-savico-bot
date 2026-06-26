@@ -616,7 +616,7 @@ def handle_message(event):
             
         tasks = []
         for line in lines[1:]:
-            if line.startswith('-') or line.startswith('*'):
+            if line.startswith(('-', '*', '–', '—', '•', '+')):
                 task_name = line[1:].strip()
                 if task_name:
                     tasks.append(task_name)
@@ -682,7 +682,7 @@ def handle_message(event):
             
         task_assignments = []
         for line in lines[1:]:
-            if line.startswith('-') or line.startswith('*'):
+            if line.startswith(('-', '*', '–', '—', '•', '+')):
                 line_content = line[1:].strip()
                 idx_at = line_content.rfind('@')
                 if idx_at != -1:
