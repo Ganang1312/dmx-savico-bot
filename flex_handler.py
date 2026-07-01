@@ -1,7 +1,7 @@
 from datetime import datetime
 import pytz
 # Import từ file cấu hình trung tâm
-from config import CLIENT, SHEET_NAME, WORKSHEET_TRACKER_NAME
+from config import CLIENT, SHEET_NAME, WORKSHEET_TRACKER_NAME, get_spreadsheet
 
 # --- Danh sách công việc ---
 TASKS = {
@@ -41,7 +41,7 @@ def initialize_daily_tasks(group_id, shift_type, force=False):
     """
     print(f"Bắt đầu khởi tạo công việc ca {shift_type} cho group {group_id} (force={force})...")
     try:
-        sheet = CLIENT.open(SHEET_NAME).worksheet(WORKSHEET_TRACKER_NAME)
+        sheet = get_spreadsheet().worksheet(WORKSHEET_TRACKER_NAME)
         all_values = sheet.get_all_values()
         
         headers = ['group_id', 'date', 'task_id', 'name', 'time', 'status', 'user_name']
@@ -97,7 +97,7 @@ def initialize_daily_tasks(group_id, shift_type, force=False):
 def get_tasks_status_from_sheet(group_id, shift_type, all_records=None):
     try:
         if all_records is None:
-            sheet = CLIENT.open(SHEET_NAME).worksheet(WORKSHEET_TRACKER_NAME)
+            sheet = get_spreadsheet().worksheet(WORKSHEET_TRACKER_NAME)
             all_records = sheet.get_all_records()
         
         tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
@@ -317,28 +317,31 @@ def generate_checklist_flex(group_id, shift_type, all_records_prefetched=None):
 # ==========================================
 import uuid
 
+_adhoc_sheet_cache = None
+_last_clean_date = None
+
 def get_or_create_adhoc_worksheet():
     """
     Lấy worksheet adhoc_tasks, nếu chưa tồn tại thì tạo mới.
     """
-    from config import CLIENT, SHEET_NAME, WORKSHEET_ADHOC_TASKS
+    global _adhoc_sheet_cache
+    if _adhoc_sheet_cache is not None:
+        return _adhoc_sheet_cache
+        
+    from config import get_spreadsheet, WORKSHEET_ADHOC_TASKS
+    import gspread
     try:
-        spreadsheet = CLIENT.open(SHEET_NAME)
-        sheet_list = [w.title for w in spreadsheet.worksheets()]
-        headers = ['group_id', 'date', 'assignee', 'task_id', 'task_name', 'status', 'completed_by', 'completed_at', 'created_at']
-        if WORKSHEET_ADHOC_TASKS in sheet_list:
+        spreadsheet = get_spreadsheet()
+        try:
             worksheet = spreadsheet.worksheet(WORKSHEET_ADHOC_TASKS)
-            try:
-                first_row = worksheet.row_values(1)
-                if len(first_row) < len(headers):
-                    worksheet.update(range_name='A1:I1', values=[headers])
-            except Exception as e_header:
-                print(f"Lỗi kiểm tra/cập nhật header adhoc_tasks: {e_header}")
+            _adhoc_sheet_cache = worksheet
             return worksheet
-        else:
+        except gspread.exceptions.WorksheetNotFound:
+            headers = ['group_id', 'date', 'assignee', 'task_id', 'task_name', 'status', 'completed_by', 'completed_at', 'created_at']
             worksheet = spreadsheet.add_worksheet(title=WORKSHEET_ADHOC_TASKS, rows="1000", cols="20")
             worksheet.append_row(headers)
             print(f"Đã tạo worksheet mới: {WORKSHEET_ADHOC_TASKS}")
+            _adhoc_sheet_cache = worksheet
             return worksheet
     except Exception as e:
         print(f"Lỗi khi lấy/tạo worksheet adhoc_tasks: {e}")
@@ -348,15 +351,20 @@ def clean_old_adhoc_tasks(sheet):
     """
     Xóa các công việc cũ (khác ngày hôm nay) trong trang tính adhoc_tasks để giải phóng dữ liệu.
     """
+    global _last_clean_date
+    tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
+    today_str = datetime.now(tz_vietnam).strftime('%Y-%m-%d')
+    
+    if _last_clean_date == today_str:
+        return
+        
     try:
         all_values = sheet.get_all_values()
         if len(all_values) <= 1:
+            _last_clean_date = today_str
             return
         
         headers = all_values[0]
-        tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
-        today_str = datetime.now(tz_vietnam).strftime('%Y-%m-%d')
-        
         rows_to_keep = []
         has_old_rows = False
         for row in all_values[1:]:
@@ -371,6 +379,7 @@ def clean_old_adhoc_tasks(sheet):
             if rows_to_keep:
                 sheet.append_rows(rows_to_keep, value_input_option='USER_ENTERED')
             print("Đã tự động dọn dẹp các công việc phát sinh cũ của những ngày trước.")
+        _last_clean_date = today_str
     except Exception as e:
         print(f"Lỗi khi dọn dẹp adhoc tasks cũ: {e}")
 
@@ -823,10 +832,13 @@ def generate_all_adhoc_flex(group_id, task_group_hash):
         print(f"Lỗi khi tạo flex công việc chung: {e}")
         return None
 
+_group_members_sheet_cache_flex = None
+
 def register_group_member(group_id, user_id, display_name):
     """
     Lưu thành viên của nhóm vào sheet group_members để phục vụ cho việc giao việc @all.
     """
+    global _group_members_sheet_cache_flex
     if not group_id or not user_id or not display_name:
         return
     # Nếu group_id giống user_id (chat 1-1), bỏ qua
@@ -834,20 +846,20 @@ def register_group_member(group_id, user_id, display_name):
         return
         
     try:
-        from config import CLIENT, SHEET_NAME
-        spreadsheet = CLIENT.open(SHEET_NAME)
-        sheet_list = [w.title for w in spreadsheet.worksheets()]
+        from config import get_spreadsheet
+        import gspread
         
-        worksheet_name = 'group_members'
-        headers = ['group_id', 'user_id', 'display_name', 'last_seen']
-        
-        if worksheet_name in sheet_list:
-            sheet = spreadsheet.worksheet(worksheet_name)
-        else:
-            sheet = spreadsheet.add_worksheet(title=worksheet_name, rows="1000", cols="10")
-            sheet.append_row(headers)
-            print(f"Đã tạo worksheet lưu thành viên nhóm: {worksheet_name}")
-            
+        if _group_members_sheet_cache_flex is None:
+            spreadsheet = get_spreadsheet()
+            try:
+                _group_members_sheet_cache_flex = spreadsheet.worksheet('group_members')
+            except gspread.exceptions.WorksheetNotFound:
+                headers = ['group_id', 'user_id', 'display_name', 'last_seen']
+                _group_members_sheet_cache_flex = spreadsheet.add_worksheet(title='group_members', rows="1000", cols="10")
+                _group_members_sheet_cache_flex.append_row(headers)
+                print("Đã tạo worksheet lưu thành viên nhóm: group_members")
+                
+        sheet = _group_members_sheet_cache_flex
         all_records = sheet.get_all_records()
         
         row_idx = -1

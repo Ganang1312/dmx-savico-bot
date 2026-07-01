@@ -7,7 +7,7 @@ import gspread
 from linebot.models import FlexSendMessage
 
 # Import từ file cấu hình trung tâm
-from config import CLIENT, SHEET_NAME, WORKSHEET_SCHEDULES_NAME, WORKSHEET_MEAL_TRACKER_NAME
+from config import CLIENT, SHEET_NAME, WORKSHEET_SCHEDULES_NAME, WORKSHEET_MEAL_TRACKER_NAME, get_spreadsheet
 
 # Định nghĩa Header chuẩn (8 cột)
 MEAL_HEADERS = ['group_id', 'date', 'session', 'type', 'name', 'status', 'time_clicked', 'clicked_by']
@@ -36,7 +36,7 @@ def get_working_staff(session_type):
     exclude_pattern = r'off\s*ca\s*3' if session_type == 'ansang' else r'off\s*ca\s*4'
     
     try:
-        sheet = CLIENT.open(SHEET_NAME).worksheet(WORKSHEET_SCHEDULES_NAME)
+        sheet = get_spreadsheet().worksheet(WORKSHEET_SCHEDULES_NAME)
         records = sheet.get_all_records()
         today_schedule = next((row for row in records if row.get('day_of_week') == day_str), None)
         if not today_schedule: return {}
@@ -65,7 +65,7 @@ def get_working_staff(session_type):
 
 def sync_meal_sheet(group_id, session_type):
     try:
-        sheet = CLIENT.open(SHEET_NAME).worksheet(WORKSHEET_MEAL_TRACKER_NAME)
+        sheet = get_spreadsheet().worksheet(WORKSHEET_MEAL_TRACKER_NAME)
         tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
         today_str = datetime.now(tz_vietnam).strftime('%Y-%m-%d')
         
@@ -126,7 +126,7 @@ def update_meal_status(group_id, session_type, staff_name, clicker_name, target_
     Cập nhật trạng thái và Nick LINE người bấm.
     """
     try:
-        sheet = CLIENT.open(SHEET_NAME).worksheet(WORKSHEET_MEAL_TRACKER_NAME)
+        sheet = get_spreadsheet().worksheet(WORKSHEET_MEAL_TRACKER_NAME)
         all_values = sheet.get_all_values()
         
         tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')

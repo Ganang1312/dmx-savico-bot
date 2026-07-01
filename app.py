@@ -21,7 +21,7 @@ from linebot.models import (
 import pandas as pd
 
 # --- IMPORT ---
-from config import CLIENT, SHEET_NAME, WORKSHEET_NAME_USERS, WORKSHEET_NAME, WORKSHEET_TRACKER_NAME
+from config import CLIENT, SHEET_NAME, WORKSHEET_NAME_USERS, WORKSHEET_NAME, WORKSHEET_TRACKER_NAME, get_spreadsheet
 # CẬP NHẬT IMPORT MỚI
 from schedule_handler import send_daily_schedule
 from flex_handler import (
@@ -51,7 +51,7 @@ handler = WebhookHandler(CHANNEL_SECRET)
 def load_allowed_ids():
     global allowed_ids_cache
     try:
-        sheet = CLIENT.open(SHEET_NAME).worksheet(WORKSHEET_NAME_USERS)
+        sheet = get_spreadsheet().worksheet(WORKSHEET_NAME_USERS)
         records = sheet.get_all_records()
         new_allowed_ids = set()
         today = datetime.now(pytz.timezone('Asia/Ho_Chi_Minh')).date()
@@ -77,7 +77,7 @@ def keep_alive():
         time.sleep(600)
 
 def update_expiration_in_sheet(target_id, expiration_date_str):
-    sheet = CLIENT.open(SHEET_NAME).worksheet(WORKSHEET_NAME_USERS)
+    sheet = get_spreadsheet().worksheet(WORKSHEET_NAME_USERS)
     all_ids = sheet.col_values(1)
     try:
         row_to_update = all_ids.index(target_id) + 1
@@ -399,7 +399,7 @@ def handle_postback(event):
             profile = line_bot_api.get_group_member_profile(group_id, user_id)
             user_name = profile.display_name
             
-            sheet = CLIENT.open(SHEET_NAME).worksheet(WORKSHEET_TRACKER_NAME)
+            sheet = get_spreadsheet().worksheet(WORKSHEET_TRACKER_NAME)
             tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
             today_str = datetime.now(tz_vietnam).strftime('%Y-%m-%d')
             
@@ -514,10 +514,13 @@ def handle_postback(event):
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ Lỗi: Không tìm thấy tên hoặc lỗi cập nhật."))
         return
 
+_group_members_sheet_cache = None
+
 def get_group_members(group_id):
     """
     Lấy danh sách tên thành viên trong nhóm Line, loại trừ các bot hoặc tài khoản hệ thống nếu có thể.
     """
+    global _group_members_sheet_cache
     member_names = []
     # 1. Gọi API Line để lấy danh sách đầy đủ
     try:
@@ -539,12 +542,17 @@ def get_group_members(group_id):
     # 2. Fallback 1: Lấy danh sách thành viên đã từng tương tác trong nhóm từ sheet group_members
     if not member_names:
         try:
-            from config import CLIENT, SHEET_NAME
-            spreadsheet = CLIENT.open(SHEET_NAME)
-            sheet_list = [w.title for w in spreadsheet.worksheets()]
-            if 'group_members' in sheet_list:
-                sheet = spreadsheet.worksheet('group_members')
-                records = sheet.get_all_records()
+            from config import get_spreadsheet
+            import gspread
+            if _group_members_sheet_cache is None:
+                spreadsheet = get_spreadsheet()
+                try:
+                    _group_members_sheet_cache = spreadsheet.worksheet('group_members')
+                except gspread.exceptions.WorksheetNotFound:
+                    pass
+            
+            if _group_members_sheet_cache is not None:
+                records = _group_members_sheet_cache.get_all_records()
                 
                 # Gom tất cả display_name của group này
                 seen_names = set()
@@ -888,7 +896,7 @@ def handle_message(event):
         
     # 8. Báo cáo (ST, BXH)
     try:
-        sheet = CLIENT.open(SHEET_NAME).worksheet(WORKSHEET_NAME)
+        sheet = get_spreadsheet().worksheet(WORKSHEET_NAME)
         all_data = sheet.get_all_values()
         reply_messages = []
         cluster_names = {row[0].strip().upper() for row in all_data[1:] if len(row) > 0 and row[0]}
