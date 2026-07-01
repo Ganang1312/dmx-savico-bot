@@ -186,17 +186,11 @@ def generate_checklist_flex(group_id, shift_type, all_records_prefetched=None):
         button_color = "#CCCCCC" if is_complete else "#00B33C"
         button_label = "✓ Xong" if is_complete else "Hoàn tất"
         
+        sub_text_label = "Deadline"
+        sub_text_value = task['time']
         if is_complete:
-            if shift_type in ['sang', 'chieu']:
-                sub_text_label = "Deadline"
-                sub_text_value = task['time']
-            else:
-                sub_text_label = "Xong bởi:"
-                sub_text_value = completed_by
             target_status_param = "incomplete"
         else:
-            sub_text_label = "Deadline"
-            sub_text_value = task['time']
             target_status_param = "complete"
 
         task_component = {
@@ -539,15 +533,7 @@ def generate_adhoc_flex(group_id, assignee, tasks_data=None):
                 "margin": "xs"
             })
         
-        if is_complete:
-            task_info_contents.append({
-                "type": "text",
-                "text": f"✓ Xong bởi {completed_by} lúc {completed_at}",
-                "color": "#00B33C",
-                "size": "xs",
-                "margin": "xs",
-                "wrap": True
-            })
+
             
         task_component = {
             "type": "box",
@@ -727,19 +713,10 @@ def generate_all_adhoc_flex(group_id, task_group_hash):
                     "maxLines": 1,
                     "weight": "bold",
                     "size": "xs",
-                    "color": main_text_color
+                    "color": main_text_color,
+                    "decoration": "line-through" if is_complete else "none"
                 }
             ]
-            
-            if is_complete:
-                task_info_contents.append({
-                    "type": "text",
-                    "text": f"✓ Xong bởi {completed_by} lúc {completed_at}",
-                    "color": "#00B33C",
-                    "size": "xxs",
-                    "margin": "xs",
-                    "wrap": True
-                })
                 
             task_component = {
                 "type": "box",
@@ -989,19 +966,10 @@ def generate_multi_adhoc_flex(group_id, task_group_hash):
                     "text": f"👤 Giao cho: {assignee}",
                     "color": "#888888" if is_complete else "#1565C0",
                     "size": "xs",
-                    "margin": "xs"
+                    "margin": "xs",
+                    "decoration": text_decoration
                 }
             ]
-            
-            if is_complete:
-                task_info_contents.append({
-                    "type": "text",
-                    "text": f"✓ Xong bởi {completed_by} lúc {completed_at}",
-                    "color": "#00B33C",
-                    "size": "xxs",
-                    "margin": "xs",
-                    "wrap": True
-                })
                 
             task_component = {
                 "type": "box",
