@@ -32,6 +32,8 @@ from flex_handler import (
 )
 from checklist_scheduler import send_initial_checklist, get_checklist_message 
 from meal_handler import generate_meal_flex, update_meal_status
+from dmx_data_provider import trigger_adhoc_scrape, check_scrape_status
+from dmx_flex_messages import build_luyke_flex, build_nhanvien_flex, build_realtime_flex
 
 # --- CẤU HÌNH ---
 CHANNEL_ACCESS_TOKEN = os.environ.get('CHANNEL_ACCESS_TOKEN')
@@ -868,6 +870,68 @@ def handle_message(event):
 
         except Exception as e:
             print(f"Lỗi khi xử lý lệnh checklist '{shift_type}': {e}")
+        return
+
+    # === DMX SAVICO CODES: LK1, NV1, RT1 & CAO ===
+    if user_msg_upper == 'LK1':
+        try:
+            flex_msg = build_luyke_flex()
+            line_bot_api.reply_message(event.reply_token, FlexSendMessage(alt_text="Báo Cáo Lũy Kế Savico", contents=flex_msg))
+        except Exception as e:
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"Lỗi tải báo cáo lũy kế: {str(e)}"))
+        return
+
+    if user_msg_upper == 'NV1':
+        try:
+            flex_msg = build_nhanvien_flex()
+            line_bot_api.reply_message(event.reply_token, FlexSendMessage(alt_text="Bảng Xếp Hạng Nhân Viên", contents=flex_msg))
+        except Exception as e:
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"Lỗi tải bảng xếp hạng nhân viên: {str(e)}"))
+        return
+
+    if user_msg_upper == 'RT1':
+        try:
+            flex_msg = build_realtime_flex()
+            line_bot_api.reply_message(event.reply_token, FlexSendMessage(alt_text="Báo Cáo Realtime Hôm Nay", contents=flex_msg))
+        except Exception as e:
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"Lỗi tải báo cáo realtime: {str(e)}"))
+        return
+
+    if user_msg_upper == 'CAO' or user_msg_upper.startswith('CAO '):
+        scrape_type = "realtime"
+        if "LK" in user_msg_upper or "LUY" in user_msg_upper:
+            scrape_type = "luyke"
+            
+        try:
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"⏳ Đã phát tín hiệu yêu cầu cào dữ liệu [{scrape_type.upper()}] lên máy trạm trình duyệt..."))
+            
+            # Kích hoạt tín hiệu trên Supabase
+            trigger_success = trigger_adhoc_scrape(scrape_type)
+            if not trigger_success:
+                print("Lỗi kích hoạt tín hiệu cào dữ liệu.")
+                return
+                
+            # Đợi Chrome Extension phản hồi cào hoàn thành (tối đa 40 giây)
+            completed = False
+            for _ in range(10):
+                time.sleep(4)
+                status = check_scrape_status()
+                if status == "completed":
+                    completed = True
+                    break
+            
+            # Gửi thông báo kết quả qua push_message
+            if completed:
+                if scrape_type == "luyke":
+                    flex_msg = build_luyke_flex()
+                    line_bot_api.push_message(source_id, FlexSendMessage(alt_text="Báo Cáo Lũy Kế Savico", contents=flex_msg))
+                else:
+                    flex_msg = build_realtime_flex()
+                    line_bot_api.push_message(source_id, FlexSendMessage(alt_text="Báo Cáo Realtime Hôm Nay", contents=flex_msg))
+            else:
+                line_bot_api.push_message(source_id, TextSendMessage(text=f"⚠️ Thời gian chờ cào dữ liệu [{scrape_type.upper()}] quá hạn. Trình duyệt trạm có thể đang đóng hoặc chưa đăng nhập portal. Số liệu sẽ tiếp tục được cập nhật trong nền."))
+        except Exception as e:
+            print(f"Lỗi xử lý tín hiệu CAO: {e}")
         return
 
     # 7. Lịch làm việc (NV/PG)
