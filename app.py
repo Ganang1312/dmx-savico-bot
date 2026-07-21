@@ -876,25 +876,55 @@ def handle_message(event):
     if user_msg_upper == 'LK1':
         try:
             flex_msg = build_luyke_flex()
+        except Exception as e:
+            print(f"Lỗi khởi tạo báo cáo lũy kế: {e}")
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"Lỗi tạo báo cáo lũy kế: {str(e)}"))
+            return
+            
+        try:
             line_bot_api.reply_message(event.reply_token, FlexSendMessage(alt_text="Báo Cáo Lũy Kế Savico", contents=flex_msg))
         except Exception as e:
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"Lỗi tải báo cáo lũy kế: {str(e)}"))
+            print(f"Lỗi gửi Flex LK1: {e}")
+            try:
+                line_bot_api.push_message(source_id, TextSendMessage(text=f"Lỗi gửi Flex báo cáo lũy kế: {str(e)}"))
+            except Exception as pe:
+                print(f"Lỗi gửi tin nhắn đẩy dự phòng: {pe}")
         return
 
     if user_msg_upper == 'NV1':
         try:
             flex_msg = build_nhanvien_flex()
+        except Exception as e:
+            print(f"Lỗi khởi tạo xếp hạng nhân viên: {e}")
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"Lỗi tạo xếp hạng nhân viên: {str(e)}"))
+            return
+            
+        try:
             line_bot_api.reply_message(event.reply_token, FlexSendMessage(alt_text="Bảng Xếp Hạng Nhân Viên", contents=flex_msg))
         except Exception as e:
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"Lỗi tải bảng xếp hạng nhân viên: {str(e)}"))
+            print(f"Lỗi gửi Flex NV1: {e}")
+            try:
+                line_bot_api.push_message(source_id, TextSendMessage(text=f"Lỗi gửi Flex xếp hạng nhân viên: {str(e)}"))
+            except Exception as pe:
+                print(f"Lỗi gửi tin nhắn đẩy dự phòng: {pe}")
         return
 
     if user_msg_upper == 'RT1':
         try:
             flex_msg = build_realtime_flex()
+        except Exception as e:
+            print(f"Lỗi khởi tạo báo cáo realtime: {e}")
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"Lỗi tạo báo cáo realtime: {str(e)}"))
+            return
+            
+        try:
             line_bot_api.reply_message(event.reply_token, FlexSendMessage(alt_text="Báo Cáo Realtime Hôm Nay", contents=flex_msg))
         except Exception as e:
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"Lỗi tải báo cáo realtime: {str(e)}"))
+            print(f"Lỗi gửi Flex RT1: {e}")
+            try:
+                line_bot_api.push_message(source_id, TextSendMessage(text=f"Lỗi gửi Flex báo cáo realtime: {str(e)}"))
+            except Exception as pe:
+                print(f"Lỗi gửi tin nhắn đẩy dự phòng: {pe}")
         return
 
     if user_msg_upper == 'CAO' or user_msg_upper.startswith('CAO '):
