@@ -3,13 +3,23 @@ from datetime import datetime
 from dmx_data_provider import get_dashboard_data
 
 def parse_number(val):
-    if not val:
+    if val is None or val == '':
         return 0.0
+    if isinstance(val, (int, float)):
+        return float(val)
+    
+    str_val = str(val).strip().replace(" ", "")
+    if ',' in str_val and '.' in str_val:
+        if str_val.rfind(',') > str_val.rfind('.'):
+            str_val = str_val.replace(".", "").replace(",", ".")
+        else:
+            str_val = str_val.replace(",", "")
+    elif ',' in str_val:
+        str_val = str_val.replace(",", ".")
+        
     try:
-        if isinstance(val, (int, float)):
-            return float(val)
-        val_str = str(val).replace(",", "").replace("%", "").strip()
-        return float(val_str)
+        num = float(str_val.replace("%", ""))
+        return num
     except:
         return 0.0
 
@@ -56,7 +66,7 @@ def build_luyke_flex():
     for b in bi_rows:
         bi_cat = get_key_val(b, "maingroupname", "main group name", "nhóm ngành hàng", "nhóm ngành hàng chính", "Nhóm Ngành Hàng", default=None)
         actual = parse_number(get_key_val(b, "Doanh thu Quy đổi", "Doanh thu", default=0.0))
-        if bi_cat and actual > 0:
+        if bi_cat and str(bi_cat).strip().upper() != "N/A" and actual > 0:
             cat_items.append({
                 "name": str(bi_cat).strip(),
                 "actual": actual
@@ -180,7 +190,8 @@ def build_nhanvien_flex():
             emp_name = get_key_val(r, "Họ và tên", "tên nhân viên", default=None)
             pct = parse_number(get_key_val(r, "% chia", "tỷ lệ %", default=0.0))
             if emp_name and pct > 0:
-                emp_targets[str(emp_name).strip()] = (pct / 100.0) * total_target
+                ratio = pct if pct <= 1.0 else pct / 100.0
+                emp_targets[str(emp_name).strip()] = ratio * total_target
 
     # 3. Sum employee actuals by group
     emp_actuals = {}
@@ -309,7 +320,7 @@ def build_realtime_flex():
         )
         rt_total += dt
         
-        if cat_name and str(cat_name).strip() and str(cat_name).strip() not in seen_cats and dt > 0:
+        if cat_name and str(cat_name).strip() and str(cat_name).strip().upper() != "N/A" and str(cat_name).strip() not in seen_cats and dt > 0:
             seen_cats.add(str(cat_name).strip())
             cat_items.append({
                 "name": str(cat_name).strip(),

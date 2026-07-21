@@ -939,11 +939,12 @@ def handle_message(event):
             trigger_success = trigger_adhoc_scrape(scrape_type)
             if not trigger_success:
                 print("Lỗi kích hoạt tín hiệu cào dữ liệu.")
+                line_bot_api.push_message(source_id, TextSendMessage(text="❌ Không thể kết nối Supabase để gửi tín hiệu cào số."))
                 return
                 
-            # Đợi Chrome Extension phản hồi cào hoàn thành (tối đa 40 giây)
+            # Đợi Chrome Extension phản hồi cào hoàn thành (tối đa 60 giây)
             completed = False
-            for _ in range(10):
+            for _ in range(15):
                 time.sleep(4)
                 status = check_scrape_status()
                 if status == "completed":
@@ -962,6 +963,10 @@ def handle_message(event):
                 line_bot_api.push_message(source_id, TextSendMessage(text=f"⚠️ Thời gian chờ cào dữ liệu [{scrape_type.upper()}] quá hạn. Trình duyệt trạm có thể đang đóng hoặc chưa đăng nhập portal. Số liệu sẽ tiếp tục được cập nhật trong nền."))
         except Exception as e:
             print(f"Lỗi xử lý tín hiệu CAO: {e}")
+            try:
+                line_bot_api.push_message(source_id, TextSendMessage(text=f"❌ Có lỗi xảy ra khi xử lý lệnh cào: {str(e)}"))
+            except Exception as pe:
+                print(f"Lỗi gửi tin nhắn đẩy báo lỗi: {pe}")
         return
 
     # 7. Lịch làm việc (NV/PG)
