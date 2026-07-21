@@ -26,16 +26,20 @@ def parse_number(val):
 def get_key_val(row, *possible_keys, default=None):
     if not row or not isinstance(row, dict):
         return default
-    norm_keys = [k.strip().lower() for k in possible_keys]
     
-    for rk, rv in row.items():
-        if rk.strip().lower() in norm_keys:
-            return rv
-            
-    # Try exact match as fallback
+    # 1. Exact match in order of possible_keys
     for pk in possible_keys:
         if pk in row:
             return row[pk]
+            
+    # 2. Case insensitive match in order of possible_keys
+    row_keys_lower = {k.strip().lower(): k for k in row.keys()}
+    for pk in possible_keys:
+        pk_lower = pk.strip().lower()
+        if pk_lower in row_keys_lower:
+            orig_key = row_keys_lower[pk_lower]
+            return row[orig_key]
+            
     return default
 
 def make_table_header(cols, weights, aligns=None):
@@ -544,8 +548,12 @@ def build_realtime_flex():
         target_bu_tru = 0.0
         
     holiday_target = 0.0
-    if config_rows and len(config_rows) >= current_day:
-        holiday_target = parse_number(get_key_val(config_rows[current_day - 1], "Mục tiêu", "mục tiêu ngày", default=0.0))
+    if config_rows:
+        for r in config_rows:
+            day_val = parse_number(get_key_val(r, "ngày", "Ngày", default=0.0))
+            if int(day_val) == current_day:
+                holiday_target = parse_number(get_key_val(r, "Mục tiêu", "mục tiêu ngày", "mục tiêu", default=0.0))
+                break
         
     target_today = 0.0
     if holiday_target > 0:
