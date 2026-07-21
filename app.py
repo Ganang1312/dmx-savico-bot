@@ -942,25 +942,38 @@ def handle_message(event):
                 line_bot_api.push_message(source_id, TextSendMessage(text="❌ Không thể kết nối Supabase để gửi tín hiệu cào số."))
                 return
                 
-            # Đợi Chrome Extension phản hồi cào hoàn thành (tối đa 60 giây)
-            completed = False
-            for _ in range(15):
-                time.sleep(4)
-                status = check_scrape_status()
-                if status == "completed":
-                    completed = True
-                    break
-            
-            # Gửi thông báo kết quả qua push_message
-            if completed:
-                if scrape_type == "luyke":
-                    flex_msg = build_luyke_flex()
-                    line_bot_api.push_message(source_id, FlexSendMessage(alt_text="Báo Cáo Lũy Kế Savico", contents=flex_msg))
+            # Chạy vòng lặp kiểm tra trạng thái cào trong thread chạy ngầm (non-blocking) để tránh Gunicorn Timeout
+            def poll_and_push(scrape_type_val, dest_id):
+                completed = False
+                for _ in range(25): # Tối đa 75 giây (25 vòng lặp * 3 giây)
+                    time.sleep(3)
+                    status = check_scrape_status()
+                    if status == "completed":
+                        completed = True
+                        break
+                
+                if completed:
+                    try:
+                        if scrape_type_val == "luyke":
+                            flex_msg = build_luyke_flex()
+                            line_bot_api.push_message(dest_id, FlexSendMessage(alt_text="Báo Cáo Lũy Kế Savico", contents=flex_msg))
+                        else:
+                            flex_msg = build_realtime_flex()
+                            line_bot_api.push_message(dest_id, FlexSendMessage(alt_text="Báo Cáo Realtime Hôm Nay", contents=flex_msg))
+                    except Exception as fe:
+                        print(f"Lỗi gửi Flex báo cáo cào: {fe}")
+                        try:
+                            line_bot_api.push_message(dest_id, TextSendMessage(text=f"❌ Có lỗi xảy ra khi vẽ Flex báo cáo: {str(fe)}"))
+                        except Exception as pe:
+                            print(f"Lỗi gửi tin đẩy báo lỗi: {pe}")
                 else:
-                    flex_msg = build_realtime_flex()
-                    line_bot_api.push_message(source_id, FlexSendMessage(alt_text="Báo Cáo Realtime Hôm Nay", contents=flex_msg))
-            else:
-                line_bot_api.push_message(source_id, TextSendMessage(text=f"⚠️ Thời gian chờ cào dữ liệu [{scrape_type.upper()}] quá hạn. Trình duyệt trạm có thể đang đóng hoặc chưa đăng nhập portal. Số liệu sẽ tiếp tục được cập nhật trong nền."))
+                    try:
+                        line_bot_api.push_message(dest_id, TextSendMessage(text=f"⚠️ Thời gian chờ cào dữ liệu [{scrape_type_val.upper()}] quá hạn. Trình duyệt trạm có thể đang đóng hoặc chưa đăng nhập portal. Số liệu sẽ tiếp tục được cập nhật trong nền."))
+                    except Exception as pe:
+                        print(f"Lỗi gửi tin đẩy quá hạn: {pe}")
+
+            threading.Thread(target=poll_and_push, args=(scrape_type, source_id), daemon=True).start()
+
         except Exception as e:
             print(f"Lỗi xử lý tín hiệu CAO: {e}")
             try:
