@@ -63,6 +63,17 @@ def shorten_name(name):
         s = s[:14] + "…"
     return s
 
+def shorten_staff_name(name):
+    if not name:
+        return ""
+    parts = str(name).strip().split()
+    if not parts:
+        return ""
+    if len(parts) == 1:
+        return parts[0]
+    initials = [p[0].upper() + "." for p in parts[:-1]]
+    return "".join(initials) + parts[-1]
+
 def get_key_val(row, *possible_keys, default=None):
     if not row or not isinstance(row, dict):
         return default
@@ -217,7 +228,6 @@ def build_luyke_flex():
     now = datetime.now(tz)
     now_str = now.strftime("%H:%M - %d/%m/%Y")
     
-    # Total KPI calculations
     tDT = sum(parse_number(get_key_val(b, "Doanh thu Quy đổi", "Doanh thu", default=0.0)) for b in bi_rows)
     tTG = sum(parse_number(get_key_val(b, "Target", "target", default=0.0)) for b in bi_rows)
     if tTG <= 0:
@@ -236,7 +246,6 @@ def build_luyke_flex():
     tDTGoc = sum(parse_number(get_key_val(b, "doanh thu", default=0.0)) for b in bi_rows)
     totalTyLeTC = tTC / tDTGoc if tDTGoc > 0 else (tTC / tDT if tDT > 0 else 0.0)
     
-    # Process Category sales
     parsed_bi = []
     for b in bi_rows:
         nganh = get_key_val(b, "nhóm ngành hàng", "ngành hàng", "salegroupmastername", default=None)
@@ -255,7 +264,6 @@ def build_luyke_flex():
             })
     parsed_bi.sort(key=lambda x: x["dt"], reverse=True)
     
-    # Process Compete list
     config_map = {}
     for c in config_rows:
         ten = get_key_val(c, "ngành hàng", "nhóm ngành hàng", default=None)
@@ -307,24 +315,24 @@ def build_luyke_flex():
     td_done.sort(key=lambda x: x["ht_dk"], reverse=True)
     td_pending.sort(key=lambda x: x["ht_dk"], reverse=True)
     
-    # KPI cards with icons & bold solid backgrounds
+    # Larger KPI Cards
     body_contents = [
         {
             "type": "box",
             "layout": "horizontal",
             "margin": "md",
-            "spacing": "xs",
+            "spacing": "sm",
             "contents": [
                 {
                     "type": "box",
                     "layout": "vertical",
                     "flex": 1,
                     "backgroundColor": "#1e40af",
-                    "paddingAll": "sm",
+                    "paddingAll": "md",
                     "cornerRadius": "md",
                     "contents": [
-                        {"type": "text", "text": "💰 DT Lũy Kế", "size": "xxs", "color": "#ffffff", "weight": "bold", "align": "center"},
-                        {"type": "text", "text": f"{fmt_num(tDT)} Tr ({totalHT*100:.0f}%)", "size": "xs", "color": "#ffffff", "weight": "bold", "align": "center", "margin": "xs"}
+                        {"type": "text", "text": "💰 DT Lũy Kế", "size": "xs", "color": "#ffffff", "weight": "bold", "align": "center"},
+                        {"type": "text", "text": f"{fmt_num(tDT)} Tr ({totalHT*100:.0f}%)", "size": "sm", "color": "#ffffff", "weight": "bold", "align": "center", "margin": "xs"}
                     ]
                 },
                 {
@@ -332,11 +340,11 @@ def build_luyke_flex():
                     "layout": "vertical",
                     "flex": 1,
                     "backgroundColor": "#475569",
-                    "paddingAll": "sm",
+                    "paddingAll": "md",
                     "cornerRadius": "md",
                     "contents": [
-                        {"type": "text", "text": "🎯 Mục Tiêu Tháng", "size": "xxs", "color": "#ffffff", "weight": "bold", "align": "center"},
-                        {"type": "text", "text": f"{fmt_num(tTG)} Tr", "size": "xs", "color": "#ffffff", "weight": "bold", "align": "center", "margin": "xs"}
+                        {"type": "text", "text": "🎯 Mục Tiêu Tháng", "size": "xs", "color": "#ffffff", "weight": "bold", "align": "center"},
+                        {"type": "text", "text": f"{fmt_num(tTG)} Tr", "size": "sm", "color": "#ffffff", "weight": "bold", "align": "center", "margin": "xs"}
                     ]
                 }
             ]
@@ -345,18 +353,18 @@ def build_luyke_flex():
             "type": "box",
             "layout": "horizontal",
             "margin": "xs",
-            "spacing": "xs",
+            "spacing": "sm",
             "contents": [
                 {
                     "type": "box",
                     "layout": "vertical",
                     "flex": 1,
                     "backgroundColor": "#ef4444",
-                    "paddingAll": "sm",
+                    "paddingAll": "md",
                     "cornerRadius": "md",
                     "contents": [
-                        {"type": "text", "text": "📉 Còn Thiếu", "size": "xxs", "color": "#ffffff", "weight": "bold", "align": "center"},
-                        {"type": "text", "text": f"{fmt_num(revRem)} Tr", "size": "xs", "color": "#ffffff", "weight": "bold", "align": "center", "margin": "xs"}
+                        {"type": "text", "text": "📉 Còn Thiếu", "size": "xs", "color": "#ffffff", "weight": "bold", "align": "center"},
+                        {"type": "text", "text": f"{fmt_num(revRem)} Tr", "size": "sm", "color": "#ffffff", "weight": "bold", "align": "center", "margin": "xs"}
                     ]
                 },
                 {
@@ -364,11 +372,11 @@ def build_luyke_flex():
                     "layout": "vertical",
                     "flex": 1,
                     "backgroundColor": "#f59e0b",
-                    "paddingAll": "sm",
+                    "paddingAll": "md",
                     "cornerRadius": "md",
                     "contents": [
-                        {"type": "text", "text": "🔮 Dự Kiến Tháng", "size": "xxs", "color": "#ffffff", "weight": "bold", "align": "center"},
-                        {"type": "text", "text": f"{fmt_num(totalDKThang)} Tr", "size": "xs", "color": "#ffffff", "weight": "bold", "align": "center", "margin": "xs"}
+                        {"type": "text", "text": "🔮 Dự Kiến Tháng", "size": "xs", "color": "#ffffff", "weight": "bold", "align": "center"},
+                        {"type": "text", "text": f"{fmt_num(totalDKThang)} Tr", "size": "sm", "color": "#ffffff", "weight": "bold", "align": "center", "margin": "xs"}
                     ]
                 }
             ]
@@ -377,18 +385,18 @@ def build_luyke_flex():
             "type": "box",
             "layout": "horizontal",
             "margin": "xs",
-            "spacing": "xs",
+            "spacing": "sm",
             "contents": [
                 {
                     "type": "box",
                     "layout": "vertical",
                     "flex": 1,
                     "backgroundColor": "#9333ea",
-                    "paddingAll": "sm",
+                    "paddingAll": "md",
                     "cornerRadius": "md",
                     "contents": [
-                        {"type": "text", "text": "💳 Trả Góp", "size": "xxs", "color": "#ffffff", "weight": "bold", "align": "center"},
-                        {"type": "text", "text": f"{fmt_num(tTC)} Tr ({totalTyLeTC*100:.0f}%)", "size": "xs", "color": "#ffffff", "weight": "bold", "align": "center", "margin": "xs"}
+                        {"type": "text", "text": "💳 Trả Góp", "size": "xs", "color": "#ffffff", "weight": "bold", "align": "center"},
+                        {"type": "text", "text": f"{fmt_num(tTC)} Tr ({totalTyLeTC*100:.0f}%)", "size": "sm", "color": "#ffffff", "weight": "bold", "align": "center", "margin": "xs"}
                     ]
                 },
                 {
@@ -396,11 +404,11 @@ def build_luyke_flex():
                     "layout": "vertical",
                     "flex": 1,
                     "backgroundColor": "#10b981",
-                    "paddingAll": "sm",
+                    "paddingAll": "md",
                     "cornerRadius": "md",
                     "contents": [
-                        {"type": "text", "text": "🏆 Thi Đua Đạt", "size": "xxs", "color": "#ffffff", "weight": "bold", "align": "center"},
-                        {"type": "text", "text": f"{cnt_dk}/{len(parsed_td)} Nhóm", "size": "xs", "color": "#ffffff", "weight": "bold", "align": "center", "margin": "xs"}
+                        {"type": "text", "text": "🏆 Thi Đua Đạt", "size": "xs", "color": "#ffffff", "weight": "bold", "align": "center"},
+                        {"type": "text", "text": f"{cnt_dk}/{len(parsed_td)} Nhóm", "size": "sm", "color": "#ffffff", "weight": "bold", "align": "center", "margin": "xs"}
                     ]
                 }
             ]
@@ -430,7 +438,6 @@ def build_luyke_flex():
         {"type": "separator", "color": "#cbd5e1", "margin": "md"}
     ]
     
-    # Revenue Table
     body_contents.append({"type": "text", "text": "📊 CHI TIẾT DOANH THU LŨY KẾ", "size": "xxs", "color": "#0284c7", "weight": "bold", "margin": "md"})
     headers = ["STT", "Ngành hàng", "SL", "DTQĐ", "Target", "%HT"]
     weights = [1, 3, 1, 2, 2, 2]
@@ -449,7 +456,6 @@ def build_luyke_flex():
     tot_colors = ["#ffffff", "#ffffff", "#ffffff", "#ffffff", "#ffffff", "#ffffff"]
     body_contents.append(make_table_row(tot_vals, weights, aligns, tot_colors, bold=True, bg_color="#f59e0b"))
 
-    # Compete List (Image 2 style)
     if td_done:
         body_contents.append({"type": "separator", "color": "#cbd5e1", "margin": "md"})
         body_contents.append({"type": "text", "text": "🏆 THI ĐUA DỰ KIẾN ĐẠT (DKHT ≥ 100%)", "size": "xxs", "color": "#16a34a", "weight": "bold", "margin": "md"})
@@ -543,23 +549,24 @@ def build_nhanvien_flex():
     emp_list.sort(key=lambda x: x["actual"], reverse=True)
     totalHT = tDT / total_target if total_target > 0 else 0.0
     
+    # Larger KPI Cards
     body_contents = [
         {
             "type": "box",
             "layout": "horizontal",
             "margin": "md",
-            "spacing": "xs",
+            "spacing": "sm",
             "contents": [
                 {
                     "type": "box",
                     "layout": "vertical",
                     "flex": 1,
                     "backgroundColor": "#0284c7",
-                    "paddingAll": "sm",
+                    "paddingAll": "md",
                     "cornerRadius": "md",
                     "contents": [
-                        {"type": "text", "text": "🏪 DT Cửa Hàng", "size": "xxs", "color": "#ffffff", "weight": "bold", "align": "center"},
-                        {"type": "text", "text": f"{fmt_num(tDT)} Tr", "size": "xs", "color": "#ffffff", "weight": "bold", "align": "center", "margin": "xs"}
+                        {"type": "text", "text": "🏪 DT Cửa Hàng", "size": "xs", "color": "#ffffff", "weight": "bold", "align": "center"},
+                        {"type": "text", "text": f"{fmt_num(tDT)} Tr", "size": "sm", "color": "#ffffff", "weight": "bold", "align": "center", "margin": "xs"}
                     ]
                 },
                 {
@@ -567,11 +574,11 @@ def build_nhanvien_flex():
                     "layout": "vertical",
                     "flex": 1,
                     "backgroundColor": "#475569",
-                    "paddingAll": "sm",
+                    "paddingAll": "md",
                     "cornerRadius": "md",
                     "contents": [
-                        {"type": "text", "text": "🎯 Mục Tiêu Chung", "size": "xxs", "color": "#ffffff", "weight": "bold", "align": "center"},
-                        {"type": "text", "text": f"{fmt_num(total_target)} Tr", "size": "xs", "color": "#ffffff", "weight": "bold", "align": "center", "margin": "xs"}
+                        {"type": "text", "text": "🎯 Mục Tiêu Chung", "size": "xs", "color": "#ffffff", "weight": "bold", "align": "center"},
+                        {"type": "text", "text": f"{fmt_num(total_target)} Tr", "size": "sm", "color": "#ffffff", "weight": "bold", "align": "center", "margin": "xs"}
                     ]
                 }
             ]
@@ -580,18 +587,18 @@ def build_nhanvien_flex():
             "type": "box",
             "layout": "horizontal",
             "margin": "xs",
-            "spacing": "xs",
+            "spacing": "sm",
             "contents": [
                 {
                     "type": "box",
                     "layout": "vertical",
                     "flex": 1,
                     "backgroundColor": "#9333ea",
-                    "paddingAll": "sm",
+                    "paddingAll": "md",
                     "cornerRadius": "md",
                     "contents": [
-                        {"type": "text", "text": "👥 Số Nhân Viên", "size": "xxs", "color": "#ffffff", "weight": "bold", "align": "center"},
-                        {"type": "text", "text": f"{len(emp_list)} Nhân Sự", "size": "xs", "color": "#ffffff", "weight": "bold", "align": "center", "margin": "xs"}
+                        {"type": "text", "text": "👥 Số Nhân Viên", "size": "xs", "color": "#ffffff", "weight": "bold", "align": "center"},
+                        {"type": "text", "text": f"{len(emp_list)} Nhân Sự", "size": "sm", "color": "#ffffff", "weight": "bold", "align": "center", "margin": "xs"}
                     ]
                 },
                 {
@@ -599,11 +606,11 @@ def build_nhanvien_flex():
                     "layout": "vertical",
                     "flex": 1,
                     "backgroundColor": "#10b981",
-                    "paddingAll": "sm",
+                    "paddingAll": "md",
                     "cornerRadius": "md",
                     "contents": [
-                        {"type": "text", "text": "📈 % Đạt Cửa Hàng", "size": "xxs", "color": "#ffffff", "weight": "bold", "align": "center"},
-                        {"type": "text", "text": f"{totalHT*100:.0f}%", "size": "xs", "color": "#ffffff", "weight": "bold", "align": "center", "margin": "xs"}
+                        {"type": "text", "text": "📈 % Đạt Cửa Hàng", "size": "xs", "color": "#ffffff", "weight": "bold", "align": "center"},
+                        {"type": "text", "text": f"{totalHT*100:.0f}%", "size": "sm", "color": "#ffffff", "weight": "bold", "align": "center", "margin": "xs"}
                     ]
                 }
             ]
@@ -612,16 +619,22 @@ def build_nhanvien_flex():
         {"type": "text", "text": "👥 CHI TIẾT XẾP HẠNG DOANH THU NHÂN VIÊN", "size": "xxs", "color": "#0284c7", "weight": "bold", "margin": "md"},
     ]
     
-    headers = ["STT", "Nhân viên", "Đạt được", "Chỉ tiêu", "%HT"]
-    weights = [1, 4, 3, 3, 2]
+    # Table Header & Rows styled according to user image
+    headers = ["#", "👤 NHÂN VIÊN", "🎯 ĐẠT / TARGET", "%HT", "⌛ CÒN LẠI"]
+    weights = [1, 3, 3, 2, 2]
     aligns = ["start", "start", "center", "center", "end"]
     body_contents.append(make_table_header(headers, weights, aligns, bg_color="#0f766e"))
     body_contents.append({"type": "separator", "color": "#cbd5e1", "margin": "xs"})
     
     for idx, e in enumerate(emp_list):
         crown = "🥇" if idx == 0 else ("🥈" if idx == 1 else ("🥉" if idx == 2 else idx+1))
-        vals = [crown, e["name"], f"{fmt_num(e['actual'])} Tr", f"{fmt_num(e['target'])} Tr", f"{e['pct']*100:.0f}%"]
-        colors = ["#d97706" if idx < 3 else "#64748b", "#0f172a", "#0284c7", "#475569", get_color_class(e["pct"])]
+        short_name = shorten_staff_name(e["name"])
+        actual_target_str = f"{fmt_num(e['actual'])} / {fmt_num(e['target'])}"
+        con_lai_val = max(0.0, e['target'] - e['actual'])
+        con_lai_str = fmt_num(con_lai_val)
+        
+        vals = [crown, short_name, actual_target_str, f"{e['pct']*100:.0f}%", con_lai_str]
+        colors = ["#d97706" if idx < 3 else "#64748b", "#0f172a", "#0284c7", get_color_class(e["pct"]), "#dc2626"]
         bg_row = "#fef3c7" if idx < 3 else None
         body_contents.append(make_table_row(vals, weights, aligns, colors, bold=(idx < 3), bg_color=bg_row))
         body_contents.append({"type": "separator", "color": "#f1f5f9", "margin": "xs"})
@@ -849,84 +862,102 @@ def build_realtime_flex():
             ]
         },
         
-        # Progress bars
-        {"type": "text", "text": "🕒 TIẾN ĐỘ THỜI GIAN", "size": "xxs", "color": "#475569", "weight": "bold", "margin": "md"},
+        # Progress Bar 1: Tiến độ thời gian (Chỉ số thiếu trên tiêu đề, %HT nằm đầu thanh tiến độ)
         {
             "type": "box",
             "layout": "horizontal",
-            "margin": "xs",
+            "margin": "md",
             "contents": [
-                {"type": "text", "text": f"{time_ratio*100:.0f}%", "size": "xs", "color": "#0284c7", "weight": "bold", "flex": 2},
-                {"type": "text", "text": f"(Còn {(13.0 - elapsed_hours):.1f}h)", "size": "xxs", "color": "#64748b", "align": "end", "flex": 8}
+                {"type": "text", "text": "🕒 TIẾN ĐỘ THỜI GIAN", "size": "xxs", "color": "#475569", "weight": "bold", "flex": 6},
+                {"type": "text", "text": f"(Còn {(13.0 - elapsed_hours):.1f}h)", "size": "xxs", "color": "#64748b", "align": "end", "flex": 4}
             ]
         },
         {
             "type": "box",
-            "layout": "vertical",
-            "backgroundColor": "#e2e8f0",
-            "height": "6px",
-            "cornerRadius": "md",
+            "layout": "horizontal",
             "margin": "xs",
+            "alignItems": "center",
             "contents": [
+                {"type": "text", "text": f"{time_ratio*100:.0f}%", "size": "xs", "color": "#0284c7", "weight": "bold", "flex": 2},
                 {
                     "type": "box",
                     "layout": "vertical",
-                    "backgroundColor": "#0284c7",
-                    "height": "6px",
+                    "flex": 8,
+                    "backgroundColor": "#e2e8f0",
+                    "height": "8px",
                     "cornerRadius": "md",
-                    "width": f"{min(100, round(time_ratio * 100))}%",
-                    "contents": [{"type": "filler"}]
+                    "contents": [
+                        {
+                            "type": "box",
+                            "layout": "vertical",
+                            "backgroundColor": "#0284c7",
+                            "height": "8px",
+                            "cornerRadius": "md",
+                            "width": f"{min(100, round(time_ratio * 100))}%",
+                            "contents": [{"type": "filler"}]
+                        }
+                    ]
                 }
             ]
         },
-        {"type": "text", "text": "🎯 TIẾN ĐỘ DOANH THU NGÀY", "size": "xxs", "color": "#475569", "weight": "bold", "margin": "sm"},
+        
+        # Progress Bar 2: Tiến độ doanh thu ngày (Chỉ số thiếu trên tiêu đề, %HT nằm đầu thanh tiến độ)
         {
             "type": "box",
             "layout": "horizontal",
-            "margin": "xs",
+            "margin": "sm",
             "contents": [
-                {"type": "text", "text": f"{htChung*100:.0f}%", "size": "xs", "color": get_color_class(htChung), "weight": "bold", "flex": 2},
-                {"type": "text", "text": f"(Thiếu {fmt_num(thieuDTRT)} Tr)", "size": "xxs", "color": "#dc2626", "align": "end", "flex": 8}
+                {"type": "text", "text": "🎯 TIẾN ĐỘ DOANH THU NGÀY", "size": "xxs", "color": "#475569", "weight": "bold", "flex": 6},
+                {"type": "text", "text": f"(Thiếu {fmt_num(thieuDTRT)} Tr)", "size": "xxs", "color": "#dc2626", "align": "end", "flex": 4}
             ]
         },
         {
             "type": "box",
-            "layout": "vertical",
-            "backgroundColor": "#e2e8f0",
-            "height": "6px",
-            "cornerRadius": "md",
+            "layout": "horizontal",
             "margin": "xs",
+            "alignItems": "center",
             "contents": [
+                {"type": "text", "text": f"{htChung*100:.0f}%", "size": "xs", "color": get_color_class(htChung), "weight": "bold", "flex": 2},
                 {
                     "type": "box",
                     "layout": "vertical",
-                    "backgroundColor": get_color_class(htChung),
-                    "height": "6px",
+                    "flex": 8,
+                    "backgroundColor": "#e2e8f0",
+                    "height": "8px",
                     "cornerRadius": "md",
-                    "width": f"{min(100, round(htChung * 100))}%",
-                    "contents": [{"type": "filler"}]
+                    "contents": [
+                        {
+                            "type": "box",
+                            "layout": "vertical",
+                            "backgroundColor": get_color_class(htChung),
+                            "height": "8px",
+                            "cornerRadius": "md",
+                            "width": f"{min(100, round(htChung * 100))}%",
+                            "contents": [{"type": "filler"}]
+                        }
+                    ]
                 }
             ]
         },
         {"type": "separator", "color": "#cbd5e1", "margin": "md"},
         
-        # KPI boxes with Icons (Solid Bold Colored Backgrounds with Crisp White Text)
+        # Larger KPI Boxes with Icons
         {
             "type": "box",
             "layout": "horizontal",
             "margin": "md",
-            "spacing": "xs",
+            "spacing": "sm",
             "contents": [
                 {
                     "type": "box",
                     "layout": "vertical",
                     "flex": 1,
                     "backgroundColor": "#0284c7",
-                    "paddingAll": "sm",
+                    "paddingAll": "md",
                     "cornerRadius": "md",
                     "contents": [
-                        {"type": "text", "text": "🚀 DT Thực Hiện", "size": "xxs", "color": "#ffffff", "weight": "bold", "align": "center"},
-                        {"type": "text", "text": f"{fmt_num(rt_total)} Tr ({htChung*100:.0f}%)", "size": "xs", "color": "#ffffff", "weight": "bold", "align": "center", "margin": "xs"}
+                        {"type": "text", "text": "🚀 DT Thực Hiện", "size": "xs", "color": "#ffffff", "weight": "bold", "align": "center"},
+                        {"type": "text", "text": f"{fmt_num(rt_total)} Tr ({htChung*100:.0f}%)", "size": "sm", "color": "#ffffff", "weight": "bold", "align": "center", "margin": "xs"}
                     ]
                 },
                 {
@@ -934,11 +965,11 @@ def build_realtime_flex():
                     "layout": "vertical",
                     "flex": 1,
                     "backgroundColor": "#475569",
-                    "paddingAll": "sm",
+                    "paddingAll": "md",
                     "cornerRadius": "md",
                     "contents": [
-                        {"type": "text", "text": "🎯 Mục Tiêu Ngày", "size": "xxs", "color": "#ffffff", "weight": "bold", "align": "center"},
-                        {"type": "text", "text": f"{fmt_num(target_today)} Tr", "size": "xs", "color": "#ffffff", "weight": "bold", "align": "center", "margin": "xs"}
+                        {"type": "text", "text": "🎯 Mục Tiêu Ngày", "size": "xs", "color": "#ffffff", "weight": "bold", "align": "center"},
+                        {"type": "text", "text": f"{fmt_num(target_today)} Tr", "size": "sm", "color": "#ffffff", "weight": "bold", "align": "center", "margin": "xs"}
                     ]
                 }
             ]
@@ -947,18 +978,18 @@ def build_realtime_flex():
             "type": "box",
             "layout": "horizontal",
             "margin": "xs",
-            "spacing": "xs",
+            "spacing": "sm",
             "contents": [
                 {
                     "type": "box",
                     "layout": "vertical",
                     "flex": 1,
                     "backgroundColor": "#9333ea",
-                    "paddingAll": "sm",
+                    "paddingAll": "md",
                     "cornerRadius": "md",
                     "contents": [
-                        {"type": "text", "text": "💳 Trả Góp", "size": "xxs", "color": "#ffffff", "weight": "bold", "align": "center"},
-                        {"type": "text", "text": f"{fmt_num(rt_tTC)} Tr ({rt_tc_pct:.0f}%)", "size": "xs", "color": "#ffffff", "weight": "bold", "align": "center", "margin": "xs"}
+                        {"type": "text", "text": "💳 Trả Góp", "size": "xs", "color": "#ffffff", "weight": "bold", "align": "center"},
+                        {"type": "text", "text": f"{fmt_num(rt_tTC)} Tr ({rt_tc_pct:.0f}%)", "size": "sm", "color": "#ffffff", "weight": "bold", "align": "center", "margin": "xs"}
                     ]
                 },
                 {
@@ -966,11 +997,11 @@ def build_realtime_flex():
                     "layout": "vertical",
                     "flex": 1,
                     "backgroundColor": "#10b981",
-                    "paddingAll": "sm",
+                    "paddingAll": "md",
                     "cornerRadius": "md",
                     "contents": [
-                        {"type": "text", "text": "🏆 Thi Đua Đạt", "size": "xxs", "color": "#ffffff", "weight": "bold", "align": "center"},
-                        {"type": "text", "text": f"{rt_cntVD}/{len(parsed_td)} Nhóm", "size": "xs", "color": "#ffffff", "weight": "bold", "align": "center", "margin": "xs"}
+                        {"type": "text", "text": "🏆 Thi Đua Đạt", "size": "xs", "color": "#ffffff", "weight": "bold", "align": "center"},
+                        {"type": "text", "text": f"{rt_cntVD}/{len(parsed_td)} Nhóm", "size": "sm", "color": "#ffffff", "weight": "bold", "align": "center", "margin": "xs"}
                     ]
                 }
             ]
@@ -978,7 +1009,7 @@ def build_realtime_flex():
         {"type": "separator", "color": "#cbd5e1", "margin": "md"}
     ]
     
-    # Revenue table
+    # Revenue Table
     body_contents.append({"type": "text", "text": "⚡ CHI TIẾT DOANH THU HÔM NAY", "size": "xxs", "color": "#0284c7", "weight": "bold", "margin": "md"})
     headers = ["STT", "Ngành hàng", "SL", "DTQĐ", "Target", "%HT"]
     weights = [1, 3, 1, 2, 2, 2]
@@ -998,7 +1029,7 @@ def build_realtime_flex():
     tot_colors = ["#ffffff", "#ffffff", "#ffffff", "#ffffff", "#ffffff", "#ffffff"]
     body_contents.append(make_table_row(tot_vals, weights, aligns, tot_colors, bold=True, bg_color="#f59e0b"))
 
-    # Compete List (Image 2 progress list style)
+    # Compete List
     if td_done:
         body_contents.append({"type": "separator", "color": "#cbd5e1", "margin": "md"})
         body_contents.append({"type": "text", "text": "🏆 THI ĐUA ĐÃ ĐẠT CHỈ TIÊU NGÀY", "size": "xxs", "color": "#16a34a", "weight": "bold", "margin": "md"})

@@ -927,15 +927,13 @@ def handle_message(event):
                 print(f"Lỗi gửi tin nhắn đẩy dự phòng: {pe}")
         return
 
-    if user_msg_upper == 'CAO' or user_msg_upper.startswith('CAO '):
+    if user_msg_upper in ['RT', 'CAO'] or user_msg_upper.startswith(('RT ', 'CAO ')):
         scrape_type = "realtime"
         if "LK" in user_msg_upper or "LUY" in user_msg_upper:
             scrape_type = "luyke"
             
         try:
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"⏳ Đã phát tín hiệu yêu cầu cào dữ liệu [{scrape_type.upper()}] lên máy trạm trình duyệt..."))
-            
-            # Kích hoạt tín hiệu trên Supabase
+            # Kích hoạt tín hiệu trên Supabase (Không hiển thị tin nhắn chờ văn bản)
             trigger_success = trigger_adhoc_scrape(scrape_type)
             if not trigger_success:
                 print("Lỗi kích hoạt tín hiệu cào dữ liệu.")
@@ -975,7 +973,7 @@ def handle_message(event):
             threading.Thread(target=poll_and_push, args=(scrape_type, source_id), daemon=True).start()
 
         except Exception as e:
-            print(f"Lỗi xử lý tín hiệu CAO: {e}")
+            print(f"Lỗi xử lý tín hiệu {user_msg_upper}: {e}")
             try:
                 line_bot_api.push_message(source_id, TextSendMessage(text=f"❌ Có lỗi xảy ra khi xử lý lệnh cào: {str(e)}"))
             except Exception as pe:
