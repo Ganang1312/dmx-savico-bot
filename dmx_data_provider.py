@@ -1,6 +1,7 @@
 import requests
 import json
 from datetime import datetime
+import pytz
 
 SUPABASE_URL = "https://uybcglehwheygxmzlwbq.supabase.co"
 SUPABASE_KEY = "sb_publishable_tb1cO9NPuNC1cdA-pt_NNQ_1n5I9IkU"
@@ -19,7 +20,6 @@ def get_dashboard_data(sheets_str):
         "Cache-Control": "no-cache"
     }
     
-    # Khởi tạo giá trị mặc định trống cho từng bảng yêu cầu
     result = {name: [] for name in sheet_names}
     
     try:
@@ -34,6 +34,32 @@ def get_dashboard_data(sheets_str):
         print(f"Lỗi truy vấn dữ liệu trực tiếp từ Supabase: {e}")
         
     return result
+
+def get_locked_target_config(area_id="78109"):
+    """
+    Lấy cấu hình Target khóa (được lưu từ web app baocao_nhanvien theo tỷ lệ 60-40 hoặc mode chọn)
+    """
+    tz = pytz.timezone('Asia/Ho_Chi_Minh')
+    now = datetime.now(tz)
+    month_str = now.strftime("%Y-%m")
+    
+    url = f"{SUPABASE_URL}/rest/v1/sheet_data?sheet_name=ilike.Target_Lock_{area_id}_{month_str}%25&order=updated_at.desc&limit=1"
+    headers = {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Cache-Control": "no-cache"
+    }
+    try:
+        res = requests.get(url, headers=headers, timeout=6)
+        if res.status_code == 200:
+            rows = res.json()
+            if rows and len(rows) > 0:
+                data = rows[0].get("data", {})
+                if isinstance(data, dict) and data.get("is_locked"):
+                    return data
+    except Exception as e:
+        print(f"Lỗi truy vấn Target_Lock từ Supabase: {e}")
+    return None
 
 def trigger_adhoc_scrape(scrape_type):
     """

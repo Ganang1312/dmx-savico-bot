@@ -943,12 +943,16 @@ def handle_message(event):
             # Chạy vòng lặp kiểm tra trạng thái cào trong thread chạy ngầm (non-blocking) để tránh Gunicorn Timeout
             def poll_and_push(scrape_type_val, dest_id):
                 completed = False
-                for _ in range(25): # Tối đa 75 giây (25 vòng lặp * 3 giây)
+                saw_running = False
+                for i in range(30): # Tối đa 90 giây (30 vòng lặp * 3 giây)
                     time.sleep(3)
                     status = check_scrape_status()
-                    if status == "completed":
-                        completed = True
-                        break
+                    if status == "running":
+                        saw_running = True
+                    elif status == "completed":
+                        if saw_running or i >= 4:
+                            completed = True
+                            break
                 
                 if completed:
                     try:

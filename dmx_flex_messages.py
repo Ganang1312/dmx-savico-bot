@@ -1,6 +1,6 @@
 import pytz
 from datetime import datetime
-from dmx_data_provider import get_dashboard_data
+from dmx_data_provider import get_dashboard_data, get_locked_target_config
 
 def parse_number(val):
     if val is None or val == '':
@@ -522,9 +522,34 @@ def build_nhanvien_flex():
     emp_targets = {}
     active_staff_names = {}
     
-    # Matching baocao_nhanvien.html exact logic:
-    # A row in Config_ThiDua is a staff row ONLY IF 'user' column is non-empty!
-    if config_rows and len(config_rows) > 0:
+    # 1. Đọc cấu hình Target đã Khóa từ Supabase (60-40 chia theo năng lực hoặc mode đã khóa)
+    lock_config = get_locked_target_config("78109")
+    if lock_config and lock_config.get("is_locked") and lock_config.get("staff"):
+        locked_staff = lock_config.get("staff", [])
+        initial_ratios = {}
+        sum_ratios = 0.0
+        
+        for s in locked_staff:
+            raw_name = str(s.get("name", "")).strip()
+            if " - " in raw_name:
+                raw_name = raw_name.split(" - ")[-1].strip()
+            if not raw_name:
+                continue
+                
+            locked_ratio = parse_number(s.get("lockedRatio", s.get("targetRatio", 0.0)))
+            initial_ratios[raw_name] = locked_ratio
+            sum_ratios += locked_ratio
+            active_staff_names[raw_name.upper()] = raw_name
+            
+        if sum_ratios <= 0:
+            sum_ratios = 1.0
+            
+        for raw_name, ratio in initial_ratios.items():
+            norm_ratio = ratio / sum_ratios
+            emp_targets[raw_name] = norm_ratio * total_target
+            
+    # 2. Nếu chưa khóa target, đọc từ Config_ThiDua làm mặc định
+    if not emp_targets and config_rows:
         for r in config_rows:
             user_id = get_key_val(r, "user", "User", default=None)
             if not user_id or str(user_id).strip() == "":
