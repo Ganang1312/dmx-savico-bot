@@ -943,14 +943,19 @@ def handle_message(event):
             # Chạy vòng lặp kiểm tra trạng thái cào trong thread chạy ngầm (non-blocking) để tránh Gunicorn Timeout
             def poll_and_push(scrape_type_val, dest_id, requested_at_str):
                 completed = False
-                for _ in range(35): # Tối đa 105 giây (35 vòng lặp * 3 giây)
+                saw_running = False
+                req_prefix = requested_at_str[:16] if requested_at_str else ""
+                
+                for _ in range(40): # Tối đa 120 giây (40 vòng lặp * 3 giây)
                     time.sleep(3)
                     st_info = check_scrape_status()
                     sig_status = st_info.get("status")
-                    sig_req = st_info.get("requested_at")
+                    sig_req = st_info.get("requested_at", "")
                     
-                    if sig_status == "completed":
-                        if not sig_req or sig_req >= requested_at_str:
+                    if sig_status == "running":
+                        saw_running = True
+                    elif sig_status == "completed":
+                        if saw_running or not sig_req or sig_req >= req_prefix:
                             completed = True
                             break
                 

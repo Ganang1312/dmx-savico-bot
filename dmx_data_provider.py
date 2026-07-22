@@ -66,7 +66,7 @@ def trigger_adhoc_scrape(scrape_type):
     """
     Gửi tín hiệu cào dữ liệu mới lên Supabase để Chrome Extension phát hiện
     """
-    now_iso = datetime.now().isoformat()
+    now_utc = datetime.now(pytz.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
     try:
         url = f"{SUPABASE_URL}/rest/v1/sheet_data"
         headers = {
@@ -80,16 +80,16 @@ def trigger_adhoc_scrape(scrape_type):
             "data": {
                 "status": "pending",
                 "type": scrape_type,
-                "requested_at": now_iso
+                "requested_at": now_utc
             },
-            "updated_at": now_iso
+            "updated_at": now_utc
         }
         res = requests.post(url, headers=headers, json=payload, timeout=10)
         if res.status_code in [200, 201]:
-            return True, now_iso
+            return True, now_utc
     except Exception as e:
         print(f"Error posting scrape signal: {e}")
-    return False, now_iso
+    return False, now_utc
 
 def check_scrape_status():
     """
