@@ -521,35 +521,25 @@ def build_nhanvien_flex():
         
     emp_targets = {}
     active_staff_names = {}
-    raw_ratios = {}
-    sum_ratios = 0.0
     
+    # Matching baocao_nhanvien.html exact logic:
+    # A row in Config_ThiDua is a staff row ONLY IF 'user' column is non-empty!
     if config_rows and len(config_rows) > 0:
         for r in config_rows:
-            emp_name = get_key_val(r, "Họ và tên", "tên nhân viên", "User-Họ và tên", default=None)
+            user_id = get_key_val(r, "user", "User", default=None)
+            if not user_id or str(user_id).strip() == "":
+                continue
+                
+            emp_name = get_key_val(r, "user-họ và tên", "Họ và tên", "tên nhân viên", default=None)
             if not emp_name:
                 continue
             emp_name_str = str(emp_name).strip()
             
-            target_fixed = parse_number(get_key_val(r, "Target Tháng", "Target", "mục tiêu", default=0.0))
-            pct = parse_number(get_key_val(r, "% chia", "tỷ lệ %", default=0.0))
+            pct = parse_number(get_key_val(r, "tỷ lệ %", "% chia", default=0.0))
+            ratio = pct if pct <= 1.0 else pct / 100.0
             
-            if target_fixed > 0:
-                emp_targets[emp_name_str] = target_fixed
-                active_staff_names[emp_name_str.upper()] = emp_name_str
-            elif pct > 0:
-                ratio = pct if pct <= 1.0 else pct / 100.0
-                raw_ratios[emp_name_str] = ratio
-                sum_ratios += ratio
-                active_staff_names[emp_name_str.upper()] = emp_name_str
-                
-    if raw_ratios:
-        if sum_ratios <= 0:
-            sum_ratios = 1.0
-        for emp_name_str, ratio in raw_ratios.items():
-            if emp_name_str not in emp_targets:
-                norm_ratio = ratio / sum_ratios
-                emp_targets[emp_name_str] = norm_ratio * total_target
+            emp_targets[emp_name_str] = ratio * total_target
+            active_staff_names[emp_name_str.upper()] = emp_name_str
 
     emp_actuals = {}
     for r in nv_rows:
