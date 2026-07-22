@@ -6,7 +6,7 @@ import os
 # Ensure current dir is in sys.path
 sys.path.insert(0, os.path.dirname(__file__))
 
-from dmx_flex_messages import build_realtime_flex, build_luyke_flex, build_nhanvien_flex, parse_number, fmt_num
+from dmx_flex_messages import build_realtime_flex, build_luyke_flex, build_nhanvien_flex, parse_number, fmt_num, shorten_name
 
 class TestDmxFlexMessages(unittest.TestCase):
 
@@ -58,6 +58,10 @@ class TestDmxFlexMessages(unittest.TestCase):
         self.assertEqual(fmt_num(0), "0")
         self.assertEqual(fmt_num(8.8), "9")
 
+    def test_shorten_name(self):
+        self.assertEqual(shorten_name("Điện gia dụng"), "Đ.Gia Dụng")
+        self.assertEqual(shorten_name("Nhóm Thi Đua 23"), "T.Đua 23")
+
     @patch("dmx_flex_messages.get_dashboard_data")
     def test_build_realtime_flex_light_theme(self, mock_get_data):
         mock_get_data.return_value = self.mock_data
@@ -79,8 +83,8 @@ class TestDmxFlexMessages(unittest.TestCase):
         
         flex = build_realtime_flex()
         flex_str = str(flex)
-        # Verify that Nhóm Thi Đua 23 is included in the flex message
-        self.assertIn("Nhóm Thi Đua 23", flex_str)
+        # Verify that shortened name for group 23 is included
+        self.assertIn("T.\u0110ua 23", flex_str)
 
     @patch("dmx_flex_messages.get_dashboard_data")
     def test_build_luyke_flex_light_theme(self, mock_get_data):
