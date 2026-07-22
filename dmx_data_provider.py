@@ -98,7 +98,7 @@ def check_scrape_status():
     try:
         import time
         timestamp = int(time.time() * 1000)
-        url = f"{SUPABASE_URL}/rest/v1/sheet_data?sheet_name=eq.scrape_signals&select=data&t={timestamp}"
+        url = f"{SUPABASE_URL}/rest/v1/sheet_data?sheet_name=in.(scrape_signals,cb_{timestamp})&select=data"
         headers = {
             "apikey": SUPABASE_KEY,
             "Authorization": f"Bearer {SUPABASE_KEY}",
