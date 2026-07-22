@@ -444,7 +444,7 @@ def build_luyke_flex():
             while len(row_contents) < 3:
                 row_contents.append({
                     "type": "text",
-                    "text": "",
+                    "text": " ",
                     "size": "xxs",
                     "flex": 1
                 })
@@ -1057,7 +1057,7 @@ def build_realtime_flex():
             while len(row_contents) < 3:
                 row_contents.append({
                     "type": "text",
-                    "text": "",
+                    "text": " ",
                     "size": "xxs",
                     "flex": 1
                 })
