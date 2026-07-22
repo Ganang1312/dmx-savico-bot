@@ -933,42 +933,48 @@ def handle_message(event):
             scrape_type = "luyke"
             
         try:
-            # Kích hoạt tín hiệu trên Supabase (Không hiển thị tin nhắn chờ văn bản)
+            # Kích hoạt tín hiệu trên Supabase
             trigger_success, req_time = trigger_adhoc_scrape(scrape_type)
             if not trigger_success:
-                print("Lỗi kích hoạt tín hiệu cào dữ liệu.")
-                line_bot_api.push_message(source_id, TextSendMessage(text="❌ Không thể kết nối Supabase để gửi tín hiệu cào số."))
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ Không thể kết nối Supabase để gửi tín hiệu cào số."))
                 return
                 
-            # Chạy vòng lặp kiểm tra trạng thái cào trong thread chạy ngầm (non-blocking) để tránh Gunicorn Timeout
-            def poll_and_push(scrape_type_val, dest_id, requested_at_str):
-                completed = False
-                saw_running = False
-                req_prefix = requested_at_str[:16] if requested_at_str else ""
+            # Đợi đồng bộ cào kết quả trực tiếp
+            completed = False
+            req_prefix = req_time[:16] if req_time else ""
+            
+            # Chạy tối đa 15 giây (30 vòng lặp * 0.5 giây)
+            for _ in range(30):
+                time.sleep(0.5)
+                st_info = check_scrape_status()
+                sig_status = st_info.get("status")
+                sig_req = st_info.get("requested_at", "")
                 
-                for _ in range(40): # Tối đa 120 giây (40 vòng lặp * 3 giây)
-                    time.sleep(3)
-                    st_info = check_scrape_status()
-                    sig_status = st_info.get("status")
-                    sig_req = st_info.get("requested_at", "")
-                    
-                    if sig_status == "running":
-                        saw_running = True
-                    elif sig_status == "completed":
-                        if saw_running or not sig_req or sig_req >= req_prefix:
-                            completed = True
-                            break
-                
-                if completed:
-                    try:
-                        if scrape_type_val == "luyke":
-                            flex_msg = build_luyke_flex()
-                            line_bot_api.push_message(dest_id, FlexSendMessage(alt_text="Báo Cáo Lũy Kế Savico", contents=flex_msg))
-                        else:
-                            flex_msg = build_realtime_flex()
-                            line_bot_api.push_message(dest_id, FlexSendMessage(alt_text="Báo Cáo Realtime Hôm Nay", contents=flex_msg))
-                    except Exception as fe:
-                        print(f"Lỗi gửi Flex báo cáo cào: {fe}")
+                if sig_status == "completed":
+                    if not sig_req or sig_req >= req_prefix:
+                        completed = True
+                        break
+            
+            if completed:
+                if scrape_type == "luyke":
+                    flex_msg = build_luyke_flex()
+                    line_bot_api.reply_message(event.reply_token, FlexSendMessage(alt_text="Báo Cáo Lũy Kế Savico", contents=flex_msg))
+                else:
+                    flex_msg = build_realtime_flex()
+                    line_bot_api.reply_message(event.reply_token, FlexSendMessage(alt_text="Báo Cáo Realtime Hôm Nay", contents=flex_msg))
+            else:
+                line_bot_api.reply_message(
+                    event.reply_token, 
+                    TextSendMessage(text=f"⚠️ Thời gian chờ cào dữ liệu [{scrape_type.upper()}] quá hạn. Vui lòng đảm bảo Chrome trên máy trạm đã bật và đã đăng nhập Portal BI.")
+                )
+
+        except Exception as e:
+            print(f"Lỗi xử lý tín hiệu {user_msg_upper}: {e}")
+            try:
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"❌ Có lỗi xảy ra khi cào dữ liệu: {str(e)}"))
+            except Exception as pe:
+                print(f"Lỗi gửi tin nhắn báo lỗi: {pe}")
+        return
                         try:
                             line_bot_api.push_message(dest_id, TextSendMessage(text=f"❌ Có lỗi xảy ra khi vẽ Flex báo cáo: {str(fe)}"))
                         except Exception as pe:
