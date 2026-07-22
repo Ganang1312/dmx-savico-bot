@@ -67,12 +67,10 @@ def get_key_val(row, *possible_keys, default=None):
     if not row or not isinstance(row, dict):
         return default
     
-    # 1. Exact match in order of possible_keys
     for pk in possible_keys:
         if pk in row:
             return row[pk]
             
-    # 2. Case insensitive match in order of possible_keys
     row_keys_lower = {k.strip().lower(): k for k in row.keys()}
     for pk in possible_keys:
         pk_lower = pk.strip().lower()
@@ -144,6 +142,71 @@ def get_color_class(pct):
     else:
         return "#dc2626" # Red
 
+def make_thidua_progress_row(idx, name, con_lai_str, ht, unit):
+    ht_pct = round(ht * 100)
+    color = get_color_class(ht)
+    
+    if con_lai_str:
+        display_name = f"{name} (thiếu {con_lai_str} {unit})"
+    else:
+        display_name = name
+        
+    return {
+        "type": "box",
+        "layout": "horizontal",
+        "margin": "sm",
+        "alignItems": "center",
+        "contents": [
+            {
+                "type": "text",
+                "text": str(idx),
+                "size": "xxs",
+                "color": "#64748b",
+                "weight": "bold",
+                "flex": 1,
+                "align": "start"
+            },
+            {
+                "type": "text",
+                "text": display_name,
+                "size": "xxs",
+                "color": "#0f172a",
+                "weight": "bold",
+                "flex": 6,
+                "wrap": True
+            },
+            {
+                "type": "text",
+                "text": f"{ht_pct}%",
+                "size": "xxs",
+                "color": color,
+                "weight": "bold",
+                "flex": 2,
+                "align": "end"
+            },
+            {
+                "type": "box",
+                "layout": "vertical",
+                "flex": 3,
+                "margin": "xs",
+                "backgroundColor": "#e2e8f0",
+                "height": "6px",
+                "cornerRadius": "md",
+                "contents": [
+                    {
+                        "type": "box",
+                        "layout": "vertical",
+                        "backgroundColor": color,
+                        "height": "6px",
+                        "cornerRadius": "md",
+                        "width": f"{min(100, max(5, ht_pct))}%",
+                        "contents": [{"type": "filler"}]
+                    }
+                ]
+            }
+        ]
+    }
+
 def build_luyke_flex():
     data = get_dashboard_data("Config_ThiDua,Data_BI,Data_ThiDua")
     bi_rows = data.get("Data_BI", [])
@@ -154,7 +217,7 @@ def build_luyke_flex():
     now = datetime.now(tz)
     now_str = now.strftime("%H:%M - %d/%m/%Y")
     
-    # 1. Total KPI calculations
+    # Total KPI calculations
     tDT = sum(parse_number(get_key_val(b, "Doanh thu Quy đổi", "Doanh thu", default=0.0)) for b in bi_rows)
     tTG = sum(parse_number(get_key_val(b, "Target", "target", default=0.0)) for b in bi_rows)
     if tTG <= 0:
@@ -173,7 +236,7 @@ def build_luyke_flex():
     tDTGoc = sum(parse_number(get_key_val(b, "doanh thu", default=0.0)) for b in bi_rows)
     totalTyLeTC = tTC / tDTGoc if tDTGoc > 0 else (tTC / tDT if tDT > 0 else 0.0)
     
-    # 2. Filter & Process Category sales
+    # Process Category sales
     parsed_bi = []
     for b in bi_rows:
         nganh = get_key_val(b, "nhóm ngành hàng", "ngành hàng", "salegroupmastername", default=None)
@@ -192,7 +255,7 @@ def build_luyke_flex():
             })
     parsed_bi.sort(key=lambda x: x["dt"], reverse=True)
     
-    # 3. Process Compete list
+    # Process Compete list
     config_map = {}
     for c in config_rows:
         ten = get_key_val(c, "ngành hàng", "nhóm ngành hàng", default=None)
@@ -241,11 +304,10 @@ def build_luyke_flex():
         
     td_done = [x for x in parsed_td if x["ht_dk"] >= 1.0 and x["actual"] > 0]
     td_pending = [x for x in parsed_td if x["ht_dk"] < 1.0 and x["actual"] > 0]
-    td_zero = [x for x in parsed_td if x["actual"] == 0]
     td_done.sort(key=lambda x: x["ht_dk"], reverse=True)
     td_pending.sort(key=lambda x: x["ht_dk"], reverse=True)
     
-    # 4. Generate Flex UI components (Bold Vibrant Cards & High Contrast Text)
+    # KPI cards with icons & bold solid backgrounds
     body_contents = [
         {
             "type": "box",
@@ -261,7 +323,7 @@ def build_luyke_flex():
                     "paddingAll": "sm",
                     "cornerRadius": "md",
                     "contents": [
-                        {"type": "text", "text": "Doanh Thu Lũy Kế", "size": "xxs", "color": "#ffffff", "weight": "bold", "align": "center"},
+                        {"type": "text", "text": "💰 DT Lũy Kế", "size": "xxs", "color": "#ffffff", "weight": "bold", "align": "center"},
                         {"type": "text", "text": f"{fmt_num(tDT)} Tr ({totalHT*100:.0f}%)", "size": "xs", "color": "#ffffff", "weight": "bold", "align": "center", "margin": "xs"}
                     ]
                 },
@@ -273,7 +335,7 @@ def build_luyke_flex():
                     "paddingAll": "sm",
                     "cornerRadius": "md",
                     "contents": [
-                        {"type": "text", "text": "Mục Tiêu Tháng", "size": "xxs", "color": "#ffffff", "weight": "bold", "align": "center"},
+                        {"type": "text", "text": "🎯 Mục Tiêu Tháng", "size": "xxs", "color": "#ffffff", "weight": "bold", "align": "center"},
                         {"type": "text", "text": f"{fmt_num(tTG)} Tr", "size": "xs", "color": "#ffffff", "weight": "bold", "align": "center", "margin": "xs"}
                     ]
                 }
@@ -293,7 +355,7 @@ def build_luyke_flex():
                     "paddingAll": "sm",
                     "cornerRadius": "md",
                     "contents": [
-                        {"type": "text", "text": "Còn Thiếu", "size": "xxs", "color": "#ffffff", "weight": "bold", "align": "center"},
+                        {"type": "text", "text": "📉 Còn Thiếu", "size": "xxs", "color": "#ffffff", "weight": "bold", "align": "center"},
                         {"type": "text", "text": f"{fmt_num(revRem)} Tr", "size": "xs", "color": "#ffffff", "weight": "bold", "align": "center", "margin": "xs"}
                     ]
                 },
@@ -305,7 +367,7 @@ def build_luyke_flex():
                     "paddingAll": "sm",
                     "cornerRadius": "md",
                     "contents": [
-                        {"type": "text", "text": "Dự Kiến Tháng", "size": "xxs", "color": "#ffffff", "weight": "bold", "align": "center"},
+                        {"type": "text", "text": "🔮 Dự Kiến Tháng", "size": "xxs", "color": "#ffffff", "weight": "bold", "align": "center"},
                         {"type": "text", "text": f"{fmt_num(totalDKThang)} Tr", "size": "xs", "color": "#ffffff", "weight": "bold", "align": "center", "margin": "xs"}
                     ]
                 }
@@ -325,7 +387,7 @@ def build_luyke_flex():
                     "paddingAll": "sm",
                     "cornerRadius": "md",
                     "contents": [
-                        {"type": "text", "text": "Trả Góp", "size": "xxs", "color": "#ffffff", "weight": "bold", "align": "center"},
+                        {"type": "text", "text": "💳 Trả Góp", "size": "xxs", "color": "#ffffff", "weight": "bold", "align": "center"},
                         {"type": "text", "text": f"{fmt_num(tTC)} Tr ({totalTyLeTC*100:.0f}%)", "size": "xs", "color": "#ffffff", "weight": "bold", "align": "center", "margin": "xs"}
                     ]
                 },
@@ -337,7 +399,7 @@ def build_luyke_flex():
                     "paddingAll": "sm",
                     "cornerRadius": "md",
                     "contents": [
-                        {"type": "text", "text": "Thi Đua Đạt", "size": "xxs", "color": "#ffffff", "weight": "bold", "align": "center"},
+                        {"type": "text", "text": "🏆 Thi Đua Đạt", "size": "xxs", "color": "#ffffff", "weight": "bold", "align": "center"},
                         {"type": "text", "text": f"{cnt_dk}/{len(parsed_td)} Nhóm", "size": "xs", "color": "#ffffff", "weight": "bold", "align": "center", "margin": "xs"}
                     ]
                 }
@@ -368,7 +430,7 @@ def build_luyke_flex():
         {"type": "separator", "color": "#cbd5e1", "margin": "md"}
     ]
     
-    # Table 1: Revenue details
+    # Revenue Table
     body_contents.append({"type": "text", "text": "📊 CHI TIẾT DOANH THU LŨY KẾ", "size": "xxs", "color": "#0284c7", "weight": "bold", "margin": "md"})
     headers = ["STT", "Ngành hàng", "SL", "DTQĐ", "Target", "%HT"]
     weights = [1, 3, 1, 2, 2, 2]
@@ -382,78 +444,26 @@ def build_luyke_flex():
         body_contents.append(make_table_row(vals, weights, aligns, colors))
         body_contents.append({"type": "separator", "color": "#f1f5f9", "margin": "xs"})
     
-    # Row Total (Solid Amber Background, White Bold Text)
     tot_sl = sum(x["sl"] for x in parsed_bi)
     tot_vals = ["⭐", "TỔNG CỘNG", fmt_num(tot_sl), fmt_num(tDT), fmt_num(tTG), f"{totalHT*100:.0f}%"]
     tot_colors = ["#ffffff", "#ffffff", "#ffffff", "#ffffff", "#ffffff", "#ffffff"]
     body_contents.append(make_table_row(tot_vals, weights, aligns, tot_colors, bold=True, bg_color="#f59e0b"))
-    
-    headers_td = ["STT", "Ngành hàng thi đua", "Đạt", "Target", "%DK"]
-    headers_td2 = ["STT", "Ngành hàng thi đua", "Đạt", "Thiếu", "%DK"]
-    weights_td = [1, 4, 2, 2, 2]
-    aligns_td = ["start", "start", "center", "center", "end"]
 
-    # Table 2: Compete Items (Completed with actual > 0)
+    # Compete List (Image 2 style)
     if td_done:
         body_contents.append({"type": "separator", "color": "#cbd5e1", "margin": "md"})
         body_contents.append({"type": "text", "text": "🏆 THI ĐUA DỰ KIẾN ĐẠT (DKHT ≥ 100%)", "size": "xxs", "color": "#16a34a", "weight": "bold", "margin": "md"})
-        body_contents.append(make_table_header(headers_td, weights_td, aligns_td, bg_color="#10b981"))
-        body_contents.append({"type": "separator", "color": "#cbd5e1", "margin": "xs"})
         for idx, t in enumerate(td_done):
-            vals = [idx+1, t["name"], f"{fmt_num(t['actual'])} {t['unit']}", fmt_num(t['target']), f"{t['ht_dk']*100:.0f}%"]
-            colors = ["#64748b", "#0f172a", "#0284c7", "#475569", "#16a34a"]
-            body_contents.append(make_table_row(vals, weights_td, aligns_td, colors))
+            body_contents.append(make_thidua_progress_row(idx+1, t["name"], None, t["ht_dk"], t["unit"]))
             body_contents.append({"type": "separator", "color": "#f1f5f9", "margin": "xs"})
             
-    # Table 3: Compete Items (Pending with actual > 0)
     if td_pending:
         body_contents.append({"type": "separator", "color": "#cbd5e1", "margin": "md"})
         body_contents.append({"type": "text", "text": "🎯 THI ĐUA CHƯA ĐẠT (DKHT < 100%)", "size": "xxs", "color": "#dc2626", "weight": "bold", "margin": "md"})
-        body_contents.append(make_table_header(headers_td2, weights_td, aligns_td, bg_color="#ef4444"))
-        body_contents.append({"type": "separator", "color": "#cbd5e1", "margin": "xs"})
         for idx, t in enumerate(td_pending):
-            vals = [idx+1, t["name"], fmt_num(t['actual']), fmt_num(t['con_lai']), f"{t['ht_dk']*100:.0f}%"]
-            colors = ["#64748b", "#0f172a", "#d97706", "#dc2626", get_color_class(t["ht_dk"])]
-            body_contents.append(make_table_row(vals, weights_td, aligns_td, colors))
+            con_lai_str = fmt_num(t['con_lai'])
+            body_contents.append(make_thidua_progress_row(idx+1, t["name"], con_lai_str, t["ht_dk"], t["unit"]))
             body_contents.append({"type": "separator", "color": "#f1f5f9", "margin": "xs"})
-
-    # 3-column Grid for Zero Actual Compete Items
-    if td_zero:
-        body_contents.append({"type": "separator", "color": "#cbd5e1", "margin": "md"})
-        body_contents.append({
-            "type": "text",
-            "text": f"🚫 CÁC NHÓM THI ĐUA CHƯA CÓ DT ({len(td_zero)} nhóm)",
-            "size": "xxs",
-            "color": "#ef4444",
-            "weight": "bold",
-            "margin": "md"
-        })
-        chunks = [td_zero[i:i + 3] for i in range(0, len(td_zero), 3)]
-        for chunk in chunks:
-            row_contents = []
-            for t in chunk:
-                target_str = fmt_num(t["target"])
-                row_contents.append({
-                    "type": "text",
-                    "text": f"• {t['name']} ({target_str})",
-                    "size": "xxs",
-                    "color": "#64748b",
-                    "flex": 1,
-                    "wrap": True
-                })
-            while len(row_contents) < 3:
-                row_contents.append({
-                    "type": "text",
-                    "text": " ",
-                    "size": "xxs",
-                    "flex": 1
-                })
-            body_contents.append({
-                "type": "box",
-                "layout": "horizontal",
-                "margin": "xs",
-                "contents": row_contents
-            })
             
     flex_bubble = {
         "type": "bubble",
@@ -494,7 +504,6 @@ def build_nhanvien_flex():
     if total_target <= 0:
         total_target = 1500.0
         
-    # Get active config staff
     emp_targets = {}
     active_staff_names = {}
     if config_rows and len(config_rows) > 0:
@@ -506,7 +515,6 @@ def build_nhanvien_flex():
                 emp_targets[str(emp_name).strip()] = ratio * total_target
                 active_staff_names[str(emp_name).strip().upper()] = str(emp_name).strip()
 
-    # Sum employee actuals
     emp_actuals = {}
     for r in nv_rows:
         name = get_key_val(r, "staffUserName", "tên nv", "Họ và tên", default=None)
@@ -516,7 +524,6 @@ def build_nhanvien_flex():
         actual = parse_number(get_key_val(r, "Doanh thu Quy đổi", "Doanh thu", "Value_Compe", default=0.0))
         emp_actuals[name_str] = emp_actuals.get(name_str, 0.0) + actual
 
-    # Map name case insensitive
     emp_list = []
     for staff_upper, clean_name in active_staff_names.items():
         actual = 0.0
@@ -534,7 +541,6 @@ def build_nhanvien_flex():
         })
         
     emp_list.sort(key=lambda x: x["actual"], reverse=True)
-    
     totalHT = tDT / total_target if total_target > 0 else 0.0
     
     body_contents = [
@@ -552,7 +558,7 @@ def build_nhanvien_flex():
                     "paddingAll": "sm",
                     "cornerRadius": "md",
                     "contents": [
-                        {"type": "text", "text": "Doanh Thu Cửa Hàng", "size": "xxs", "color": "#ffffff", "weight": "bold", "align": "center"},
+                        {"type": "text", "text": "🏪 DT Cửa Hàng", "size": "xxs", "color": "#ffffff", "weight": "bold", "align": "center"},
                         {"type": "text", "text": f"{fmt_num(tDT)} Tr", "size": "xs", "color": "#ffffff", "weight": "bold", "align": "center", "margin": "xs"}
                     ]
                 },
@@ -564,7 +570,7 @@ def build_nhanvien_flex():
                     "paddingAll": "sm",
                     "cornerRadius": "md",
                     "contents": [
-                        {"type": "text", "text": "Mục Tiêu Chung", "size": "xxs", "color": "#ffffff", "weight": "bold", "align": "center"},
+                        {"type": "text", "text": "🎯 Mục Tiêu Chung", "size": "xxs", "color": "#ffffff", "weight": "bold", "align": "center"},
                         {"type": "text", "text": f"{fmt_num(total_target)} Tr", "size": "xs", "color": "#ffffff", "weight": "bold", "align": "center", "margin": "xs"}
                     ]
                 }
@@ -584,7 +590,7 @@ def build_nhanvien_flex():
                     "paddingAll": "sm",
                     "cornerRadius": "md",
                     "contents": [
-                        {"type": "text", "text": "Số Nhân Viên", "size": "xxs", "color": "#ffffff", "weight": "bold", "align": "center"},
+                        {"type": "text", "text": "👥 Số Nhân Viên", "size": "xxs", "color": "#ffffff", "weight": "bold", "align": "center"},
                         {"type": "text", "text": f"{len(emp_list)} Nhân Sự", "size": "xs", "color": "#ffffff", "weight": "bold", "align": "center", "margin": "xs"}
                     ]
                 },
@@ -596,7 +602,7 @@ def build_nhanvien_flex():
                     "paddingAll": "sm",
                     "cornerRadius": "md",
                     "contents": [
-                        {"type": "text", "text": "% Đạt Toàn Cửa Hàng", "size": "xxs", "color": "#ffffff", "weight": "bold", "align": "center"},
+                        {"type": "text", "text": "📈 % Đạt Cửa Hàng", "size": "xxs", "color": "#ffffff", "weight": "bold", "align": "center"},
                         {"type": "text", "text": f"{totalHT*100:.0f}%", "size": "xs", "color": "#ffffff", "weight": "bold", "align": "center", "margin": "xs"}
                     ]
                 }
@@ -655,7 +661,6 @@ def build_realtime_flex():
     now = datetime.now(tz)
     now_str = now.strftime("%H:%M - %d/%m/%Y")
     
-    # 1. Target Today logic from baocao_realtime.html
     lk_tDT = sum(parse_number(get_key_val(b, "Doanh thu Quy đổi", "Doanh thu", default=0.0)) for b in bi_rows)
     lk_tTG = sum(parse_number(get_key_val(b, "Target", "target", default=0.0)) for b in bi_rows)
     if lk_tTG <= 0:
@@ -686,7 +691,6 @@ def build_realtime_flex():
     else:
         target_today = target_co_dinh * 2 if is_weekend else max(target_co_dinh, target_bu_tru)
 
-    # 2. Total Realtime Today actual
     rt_total = 0.0
     rt_tTC = 0.0
     rt_tSL = 0.0
@@ -732,21 +736,17 @@ def build_realtime_flex():
     thieuDTRT = max(0.0, target_today - rt_total)
     rt_tc_pct = (rt_tTC / rt_total * 100) if rt_total > 0 else 0.0
     
-    # Formula from baocao_realtime.html
     tongDTHienTai = lk_tDT + rt_total
     duKienThang = (tongDTHienTai / days_passed) * days_in_month if days_passed > 0 else 0.0
     ptDuKienThang = (duKienThang / lk_tTG * 100) if lk_tTG > 0 else 0.0
     
-    # Time ratio (Assume 9:00 to 22:00 = 13 hours shift)
     elapsed_hours = (now.hour + now.minute / 60.0) - 9.0
     if elapsed_hours < 0: elapsed_hours = 0.0
     if elapsed_hours > 13: elapsed_hours = 13.0
     time_ratio = elapsed_hours / 13.0
     
-    # 3. Compete list logic from baocao_realtime.html
     bi_map = {x["name"].lower().strip(): x["dt"] for x in parsed_rt_bi}
     
-    # Make luyke map
     thi_dua_luy_ke = {}
     for r in td_rows:
         nganh = get_key_val(r, "maingroupname", "main group name", "nhóm ngành hàng", default=None)
@@ -822,13 +822,11 @@ def build_realtime_flex():
         
     td_done = [x for x in parsed_td if x["ht"] >= 1.0 and x["actual"] > 0]
     td_pending = [x for x in parsed_td if x["ht"] < 1.0 and x["actual"] > 0]
-    td_zero = [x for x in parsed_td if x["actual"] == 0]
     td_done.sort(key=lambda x: x["ht"], reverse=True)
     td_pending.sort(key=lambda x: x["ht"], reverse=True)
     
-    # 4. Build Flex structure (Light Theme - Rich Bold Backgrounds & High Contrast)
     body_contents = [
-        # Realtime summary box (like baocao_realtime.html)
+        # Realtime summary box
         {
             "type": "box",
             "layout": "vertical",
@@ -912,7 +910,7 @@ def build_realtime_flex():
         },
         {"type": "separator", "color": "#cbd5e1", "margin": "md"},
         
-        # KPI boxes (Solid Bold Colored Backgrounds with Crisp White Text)
+        # KPI boxes with Icons (Solid Bold Colored Backgrounds with Crisp White Text)
         {
             "type": "box",
             "layout": "horizontal",
@@ -927,7 +925,7 @@ def build_realtime_flex():
                     "paddingAll": "sm",
                     "cornerRadius": "md",
                     "contents": [
-                        {"type": "text", "text": "DT Thực Hiện", "size": "xxs", "color": "#ffffff", "weight": "bold", "align": "center"},
+                        {"type": "text", "text": "🚀 DT Thực Hiện", "size": "xxs", "color": "#ffffff", "weight": "bold", "align": "center"},
                         {"type": "text", "text": f"{fmt_num(rt_total)} Tr ({htChung*100:.0f}%)", "size": "xs", "color": "#ffffff", "weight": "bold", "align": "center", "margin": "xs"}
                     ]
                 },
@@ -939,7 +937,7 @@ def build_realtime_flex():
                     "paddingAll": "sm",
                     "cornerRadius": "md",
                     "contents": [
-                        {"type": "text", "text": "Mục Tiêu Ngày", "size": "xxs", "color": "#ffffff", "weight": "bold", "align": "center"},
+                        {"type": "text", "text": "🎯 Mục Tiêu Ngày", "size": "xxs", "color": "#ffffff", "weight": "bold", "align": "center"},
                         {"type": "text", "text": f"{fmt_num(target_today)} Tr", "size": "xs", "color": "#ffffff", "weight": "bold", "align": "center", "margin": "xs"}
                     ]
                 }
@@ -959,7 +957,7 @@ def build_realtime_flex():
                     "paddingAll": "sm",
                     "cornerRadius": "md",
                     "contents": [
-                        {"type": "text", "text": "Trả Góp", "size": "xxs", "color": "#ffffff", "weight": "bold", "align": "center"},
+                        {"type": "text", "text": "💳 Trả Góp", "size": "xxs", "color": "#ffffff", "weight": "bold", "align": "center"},
                         {"type": "text", "text": f"{fmt_num(rt_tTC)} Tr ({rt_tc_pct:.0f}%)", "size": "xs", "color": "#ffffff", "weight": "bold", "align": "center", "margin": "xs"}
                     ]
                 },
@@ -971,7 +969,7 @@ def build_realtime_flex():
                     "paddingAll": "sm",
                     "cornerRadius": "md",
                     "contents": [
-                        {"type": "text", "text": "Thi Đua Đạt", "size": "xxs", "color": "#ffffff", "weight": "bold", "align": "center"},
+                        {"type": "text", "text": "🏆 Thi Đua Đạt", "size": "xxs", "color": "#ffffff", "weight": "bold", "align": "center"},
                         {"type": "text", "text": f"{rt_cntVD}/{len(parsed_td)} Nhóm", "size": "xs", "color": "#ffffff", "weight": "bold", "align": "center", "margin": "xs"}
                     ]
                 }
@@ -980,7 +978,7 @@ def build_realtime_flex():
         {"type": "separator", "color": "#cbd5e1", "margin": "md"}
     ]
     
-    # Table 1: Revenue details
+    # Revenue table
     body_contents.append({"type": "text", "text": "⚡ CHI TIẾT DOANH THU HÔM NAY", "size": "xxs", "color": "#0284c7", "weight": "bold", "margin": "md"})
     headers = ["STT", "Ngành hàng", "SL", "DTQĐ", "Target", "%HT"]
     weights = [1, 3, 1, 2, 2, 2]
@@ -994,79 +992,27 @@ def build_realtime_flex():
         body_contents.append(make_table_row(vals, weights, aligns, colors))
         body_contents.append({"type": "separator", "color": "#f1f5f9", "margin": "xs"})
         
-    # Total row (Solid Amber Background, White Bold Text)
     tot_sl = sum(x["sl"] for x in parsed_rt_bi)
     totalHTCol2 = rt_total / rt_tTarget if rt_tTarget > 0 else 0.0
     tot_vals = ["⭐", "TỔNG CỘNG", fmt_num(tot_sl), fmt_num(rt_total), fmt_num(rt_tTarget), f"{totalHTCol2*100:.0f}%"]
     tot_colors = ["#ffffff", "#ffffff", "#ffffff", "#ffffff", "#ffffff", "#ffffff"]
     body_contents.append(make_table_row(tot_vals, weights, aligns, tot_colors, bold=True, bg_color="#f59e0b"))
-    
-    headers_td = ["STT", "Ngành hàng thi đua", "Đạt", "Mục tiêu", "%HT"]
-    headers_td2 = ["STT", "Ngành hàng thi đua", "Đạt", "Còn thiếu", "%HT"]
-    weights_td = [1, 4, 2, 2, 2]
-    aligns_td = ["start", "start", "center", "center", "end"]
 
-    # Table 2: Compete Items (Completed with actual > 0)
+    # Compete List (Image 2 progress list style)
     if td_done:
         body_contents.append({"type": "separator", "color": "#cbd5e1", "margin": "md"})
         body_contents.append({"type": "text", "text": "🏆 THI ĐUA ĐÃ ĐẠT CHỈ TIÊU NGÀY", "size": "xxs", "color": "#16a34a", "weight": "bold", "margin": "md"})
-        body_contents.append(make_table_header(headers_td, weights_td, aligns_td, bg_color="#10b981"))
-        body_contents.append({"type": "separator", "color": "#cbd5e1", "margin": "xs"})
         for idx, t in enumerate(td_done):
-            vals = [idx+1, t["name"], f"{fmt_num(t['actual'])} {t['unit']}", fmt_num(t['target']), f"{t['ht']*100:.0f}%"]
-            colors = ["#64748b", "#0f172a", "#0284c7", "#475569", "#16a34a"]
-            body_contents.append(make_table_row(vals, weights_td, aligns_td, colors))
+            body_contents.append(make_thidua_progress_row(idx+1, t["name"], None, t["ht"], t["unit"]))
             body_contents.append({"type": "separator", "color": "#f1f5f9", "margin": "xs"})
             
-    # Table 3: Compete Items (Pending with actual > 0)
     if td_pending:
         body_contents.append({"type": "separator", "color": "#cbd5e1", "margin": "md"})
         body_contents.append({"type": "text", "text": "🎯 THI ĐUA CHƯA ĐẠT CHỈ TIÊU NGÀY", "size": "xxs", "color": "#dc2626", "weight": "bold", "margin": "md"})
-        body_contents.append(make_table_header(headers_td2, weights_td, aligns_td, bg_color="#ef4444"))
-        body_contents.append({"type": "separator", "color": "#cbd5e1", "margin": "xs"})
         for idx, t in enumerate(td_pending):
-            vals = [idx+1, t["name"], f"{fmt_num(t['actual'])} {t['unit']}", fmt_num(t['con_lai']), f"{t['ht']*100:.0f}%"]
-            colors = ["#64748b", "#0f172a", "#d97706", "#dc2626", get_color_class(t["ht"])]
-            body_contents.append(make_table_row(vals, weights_td, aligns_td, colors))
+            con_lai_str = fmt_num(t['con_lai'])
+            body_contents.append(make_thidua_progress_row(idx+1, t["name"], con_lai_str, t["ht"], t["unit"]))
             body_contents.append({"type": "separator", "color": "#f1f5f9", "margin": "xs"})
-
-    # 3-column Grid for Zero Actual Compete Items
-    if td_zero:
-        body_contents.append({"type": "separator", "color": "#cbd5e1", "margin": "md"})
-        body_contents.append({
-            "type": "text",
-            "text": f"🚫 CÁC NHÓM THI ĐUA CHƯA CÓ DT ({len(td_zero)} nhóm)",
-            "size": "xxs",
-            "color": "#ef4444",
-            "weight": "bold",
-            "margin": "md"
-        })
-        chunks = [td_zero[i:i + 3] for i in range(0, len(td_zero), 3)]
-        for chunk in chunks:
-            row_contents = []
-            for t in chunk:
-                target_str = fmt_num(t["target"])
-                row_contents.append({
-                    "type": "text",
-                    "text": f"• {t['name']} ({target_str})",
-                    "size": "xxs",
-                    "color": "#64748b",
-                    "flex": 1,
-                    "wrap": True
-                })
-            while len(row_contents) < 3:
-                row_contents.append({
-                    "type": "text",
-                    "text": " ",
-                    "size": "xxs",
-                    "flex": 1
-                })
-            body_contents.append({
-                "type": "box",
-                "layout": "horizontal",
-                "margin": "xs",
-                "contents": row_contents
-            })
             
     flex_bubble = {
         "type": "bubble",
