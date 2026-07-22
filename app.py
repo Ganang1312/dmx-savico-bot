@@ -21,12 +21,19 @@ from linebot.models import (
 import pandas as pd
 
 # --- IMPORT ---
-from config import CLIENT, SHEET_NAME, WORKSHEET_NAME_USERS, WORKSHEET_NAME, WORKSHEET_TRACKER_NAME
+from config import CLIENT, SHEET_NAME, WORKSHEET_NAME_USERS, WORKSHEET_NAME, WORKSHEET_TRACKER_NAME, get_spreadsheet
 # CẬP NHẬT IMPORT MỚI
 from schedule_handler import send_daily_schedule
-from flex_handler import initialize_daily_tasks, generate_checklist_flex
+from flex_handler import (
+    initialize_daily_tasks, generate_checklist_flex,
+    add_adhoc_tasks, generate_adhoc_flex, update_adhoc_task_status,
+    add_all_adhoc_tasks, generate_all_adhoc_flex, register_group_member,
+    add_multi_adhoc_tasks, generate_multi_adhoc_flex
+)
 from checklist_scheduler import send_initial_checklist, get_checklist_message 
 from meal_handler import generate_meal_flex, update_meal_status
+from dmx_data_provider import trigger_adhoc_scrape, check_scrape_status
+from dmx_flex_messages import build_luyke_flex, build_nhanvien_flex, build_realtime_flex
 
 # --- CẤU HÌNH ---
 CHANNEL_ACCESS_TOKEN = os.environ.get('CHANNEL_ACCESS_TOKEN')
@@ -46,7 +53,7 @@ handler = WebhookHandler(CHANNEL_SECRET)
 def load_allowed_ids():
     global allowed_ids_cache
     try:
-        sheet = CLIENT.open(SHEET_NAME).worksheet(WORKSHEET_NAME_USERS)
+        sheet = get_spreadsheet().worksheet(WORKSHEET_NAME_USERS)
         records = sheet.get_all_records()
         new_allowed_ids = set()
         today = datetime.now(pytz.timezone('Asia/Ho_Chi_Minh')).date()
@@ -72,7 +79,7 @@ def keep_alive():
         time.sleep(600)
 
 def update_expiration_in_sheet(target_id, expiration_date_str):
-    sheet = CLIENT.open(SHEET_NAME).worksheet(WORKSHEET_NAME_USERS)
+    sheet = get_spreadsheet().worksheet(WORKSHEET_NAME_USERS)
     all_ids = sheet.col_values(1)
     try:
         row_to_update = all_ids.index(target_id) + 1
@@ -345,6 +352,16 @@ def handle_postback(event):
     data_str = event.postback.data
     data = dict(part.split('=') for part in data_str.split('&'))
     action = data.get('action')
+    
+    user_id = event.source.user_id
+    if event.source.type == 'group':
+        group_id = event.source.group_id
+        try:
+            profile = line_bot_api.get_group_member_profile(group_id, user_id)
+            if profile and profile.display_name:
+                register_group_member(group_id, user_id, profile.display_name)
+        except Exception as e_reg:
+            print(f"Không thể lấy profile để lưu thành viên postback: {e_reg}")
 
     # 1. Gia hạn User
     if action == 'renew':
@@ -376,6 +393,7 @@ def handle_postback(event):
     if action == 'complete_task':
         task_id = data.get('task_id')
         shift_type = data.get('shift')
+        target_status = data.get('target_status', 'complete')
         group_id = event.source.group_id
         user_id = event.source.user_id
 
@@ -383,7 +401,7 @@ def handle_postback(event):
             profile = line_bot_api.get_group_member_profile(group_id, user_id)
             user_name = profile.display_name
             
-            sheet = CLIENT.open(SHEET_NAME).worksheet(WORKSHEET_TRACKER_NAME)
+            sheet = get_spreadsheet().worksheet(WORKSHEET_TRACKER_NAME)
             tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
             today_str = datetime.now(tz_vietnam).strftime('%Y-%m-%d')
             
@@ -400,28 +418,73 @@ def handle_postback(event):
                     break
             
             if row_to_update != -1:
+                current_status = target_record.get('status', 'incomplete') if target_record else 'incomplete'
+                if current_status == target_status:
+                    print(f"Task {task_id} đã ở trạng thái {target_status} từ trước. Bỏ qua.")
+                    return
+                
+                tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
+                time_str = datetime.now(tz_vietnam).strftime('%H:%M')
+                new_user = f"{user_name} lúc {time_str}" if target_status == 'complete' else ''
                 range_to_update = f'F{row_to_update}:G{row_to_update}'
-                sheet.update(range_name=range_to_update, values=[['complete', user_name]])
+                sheet.update(range_name=range_to_update, values=[[target_status, new_user]])
                 
                 if target_record:
-                    target_record['status'] = 'complete'
-                    target_record['user_name'] = user_name
+                    target_record['status'] = target_status
+                    target_record['user_name'] = new_user
             
             updated_flex_content = generate_checklist_flex(group_id, shift_type, all_records_prefetched=all_records)
 
+            alt_text = "Cập nhật checklist hình ảnh" if shift_type == 'vs' else f"Cập nhật checklist ca {shift_type}"
             line_bot_api.reply_message(
                 event.reply_token,
-                FlexSendMessage(alt_text=f"Cập nhật checklist ca {shift_type}", contents=updated_flex_content)
+                FlexSendMessage(alt_text=alt_text, contents=updated_flex_content)
             )
 
         except Exception as e:
             print(f"Lỗi nghiêm trọng khi xử lý postback hoàn thành công việc: {e}")
         return
 
+    # 2.5. Hoàn thành công việc phát sinh (Adhoc task)
+    if action == 'complete_adhoc_task':
+        task_id = data.get('task_id')
+        assignee = data.get('assignee')
+        target_status = data.get('target_status', 'complete')
+        group_id = event.source.group_id
+        user_id = event.source.user_id
+
+        try:
+            profile = line_bot_api.get_group_member_profile(group_id, user_id)
+            user_name = profile.display_name
+            
+            success, resolved_assignee, task_group_hash = update_adhoc_task_status(group_id, task_id, target_status, user_name)
+            
+            if success:
+                if task_group_hash:
+                    if str(task_id).startswith('multi_'):
+                        updated_flex_content = generate_multi_adhoc_flex(group_id, task_group_hash)
+                        alt_text = "Cập nhật danh sách checklist công việc"
+                    else:
+                        updated_flex_content = generate_all_adhoc_flex(group_id, task_group_hash)
+                        alt_text = "Cập nhật công việc chung @all"
+                else:
+                    updated_flex_content = generate_adhoc_flex(group_id, resolved_assignee or assignee)
+                    alt_text = f"Cập nhật công việc phát sinh của {resolved_assignee or assignee}"
+                    
+                if updated_flex_content:
+                    line_bot_api.reply_message(
+                        event.reply_token,
+                        FlexSendMessage(alt_text=alt_text, contents=updated_flex_content)
+                    )
+        except Exception as e:
+            print(f"Lỗi nghiêm trọng khi xử lý postback hoàn thành công việc phát sinh: {e}")
+        return
+
     # 3. Check-in Ăn Sáng/Chiều
     if action == 'meal_checkin':
         session_type = data.get('session')
         staff_name = data.get('name')
+        target_status = data.get('target_status', 'done')
         group_id = getattr(event.source, 'group_id', None)
         
         if not group_id: return
@@ -438,18 +501,93 @@ def handle_postback(event):
             except:
                 clicker_name = "Unknown"
 
-        success, time_str = update_meal_status(group_id, session_type, staff_name, clicker_name)
+        status_code, time_str = update_meal_status(group_id, session_type, staff_name, clicker_name, target_status)
         
-        if success:
+        if status_code is True:
             updated_flex = generate_meal_flex(group_id, session_type)
             if updated_flex:
                 line_bot_api.reply_message(
                     event.reply_token,
                     FlexSendMessage(alt_text=f"Checklist ăn {session_type} updated", contents=updated_flex)
                 )
+        elif status_code == "already":
+            return
         else:
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ Lỗi: Không tìm thấy tên hoặc lỗi cập nhật."))
         return
+
+_group_members_sheet_cache = None
+
+def get_group_members(group_id):
+    """
+    Lấy danh sách tên thành viên trong nhóm Line, loại trừ các bot hoặc tài khoản hệ thống nếu có thể.
+    """
+    global _group_members_sheet_cache
+    member_names = []
+    # 1. Gọi API Line để lấy danh sách đầy đủ
+    try:
+        res = line_bot_api.get_group_member_ids(group_id)
+        member_ids = res.member_ids
+        for uid in member_ids:
+            try:
+                profile = line_bot_api.get_group_member_profile(group_id, uid)
+                if profile.display_name:
+                    name_lower = profile.display_name.lower()
+                    # Loại bỏ bot
+                    if 'bot' not in name_lower and name_lower != 'line':
+                        member_names.append(profile.display_name)
+            except Exception as e_prof:
+                print(f"Lỗi lấy profile cho {uid}: {e_prof}")
+    except Exception as e_api:
+        print(f"Lỗi lấy thành viên từ Line API (Có thể do tài khoản Bot Free): {e_api}")
+
+    # 2. Fallback 1: Lấy danh sách thành viên đã từng tương tác trong nhóm từ sheet group_members
+    if not member_names:
+        try:
+            from config import get_spreadsheet
+            import gspread
+            if _group_members_sheet_cache is None:
+                spreadsheet = get_spreadsheet()
+                try:
+                    _group_members_sheet_cache = spreadsheet.worksheet('group_members')
+                except gspread.exceptions.WorksheetNotFound:
+                    pass
+            
+            if _group_members_sheet_cache is not None:
+                records = _group_members_sheet_cache.get_all_records()
+                
+                # Gom tất cả display_name của group này
+                seen_names = set()
+                for r in records:
+                    if str(r.get('group_id')) == str(group_id):
+                        name = r.get('display_name')
+                        if name:
+                            seen_names.add(str(name).strip())
+                if seen_names:
+                    member_names = sorted(list(seen_names))
+                    print(f"Lấy được {len(member_names)} thành viên từ cache sheet group_members.")
+        except Exception as e_cache:
+            print(f"Lỗi lấy danh sách thành viên từ cache sheet: {e_cache}")
+
+    # 3. Fallback 2: Lấy danh sách nhân viên từ lịch làm việc hôm nay
+    if not member_names:
+        try:
+            from meal_handler import get_working_staff
+            staff_morning = get_working_staff('ansang')
+            staff_afternoon = get_working_staff('anchieu')
+            
+            all_staff = set()
+            for s_type in ['NV', 'PG']:
+                for name in staff_morning.get(s_type, []):
+                    all_staff.add(name)
+                for name in staff_afternoon.get(s_type, []):
+                    all_staff.add(name)
+            member_names = sorted(list(all_staff))
+            print(f"Sử dụng fallback lấy {len(member_names)} nhân viên từ lịch hôm nay.")
+        except Exception as e_fallback:
+            print(f"Lỗi fallback lấy nhân viên: {e_fallback}")
+            
+    return member_names
 
 # --- XỬ LÝ TIN NHẮN ---
 
@@ -459,7 +597,129 @@ def handle_message(event):
     user_msg_upper = user_message.upper()
     user_id = event.source.user_id
     source_id = getattr(event.source, 'group_id', user_id)
-    
+    # Tự động lưu/cập nhật thông tin thành viên nhóm
+    if event.source.type == 'group':
+        group_id = event.source.group_id
+        try:
+            profile = line_bot_api.get_group_member_profile(group_id, user_id)
+            if profile and profile.display_name:
+                register_group_member(group_id, user_id, profile.display_name)
+        except Exception as e_reg:
+            print(f"Không thể lấy profile để lưu thành viên: {e_reg}")
+
+    # 0. Giao công việc phát sinh (Adhoc task)
+    lines = [line.strip() for line in user_message.split('\n') if line.strip()]
+    if len(lines) >= 2 and (lines[0].lower().startswith('việc @') or lines[0].lower().startswith('viec @')):
+        group_id = getattr(event.source, 'group_id', None)
+        if not group_id:
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="⚠️ Chức năng giao việc chỉ sử dụng được trong nhóm chat."))
+            return
+            
+        header = lines[0]
+        idx_at = header.find('@')
+        idx_colon = header.find(':', idx_at)
+        
+        if idx_colon != -1:
+            assignee = header[idx_at + 1 : idx_colon].strip()
+        else:
+            assignee = header[idx_at + 1 :].strip()
+            
+        tasks = []
+        for line in lines[1:]:
+            if line.startswith(('-', '*', '–', '—', '•', '+')):
+                task_name = line[1:].strip()
+                if task_name:
+                    tasks.append(task_name)
+                    
+        if assignee and tasks:
+            try:
+                # Giao việc @all
+                if assignee.lower() == 'all':
+                    members = get_group_members(group_id)
+                    if not members:
+                        line_bot_api.reply_message(
+                            event.reply_token,
+                            TextSendMessage(text="⚠️ Không tìm thấy thành viên nào trong nhóm hoặc danh sách lịch làm việc trống.")
+                        )
+                        return
+                    
+                    reply_messages = []
+                    for task_name in tasks:
+                        task_group_hash = add_all_adhoc_tasks(group_id, members, task_name)
+                        if task_group_hash:
+                            flex_content = generate_all_adhoc_flex(group_id, task_group_hash)
+                            if flex_content:
+                                reply_messages.append(
+                                    FlexSendMessage(alt_text=f"📢 Công việc chung @all: {task_name}", contents=flex_content)
+                                )
+                    
+                    if reply_messages:
+                        line_bot_api.reply_message(event.reply_token, reply_messages[:5])
+                    else:
+                        line_bot_api.reply_message(
+                            event.reply_token,
+                            TextSendMessage(text="❌ Có lỗi xảy ra khi tạo danh sách công việc chung.")
+                        )
+                # Giao việc cá nhân
+                else:
+                    add_adhoc_tasks(group_id, assignee, tasks)
+                    flex_content = generate_adhoc_flex(group_id, assignee)
+                    if flex_content:
+                        line_bot_api.reply_message(
+                            event.reply_token,
+                            FlexSendMessage(alt_text=f"📋 Công việc phát sinh hôm nay của {assignee}", contents=flex_content)
+                        )
+                    else:
+                        line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ Có lỗi xảy ra khi tạo danh sách công việc."))
+            except Exception as e:
+                print(f"Lỗi khi xử lý lệnh giao việc: {e}")
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ Gặp lỗi khi xử lý giao việc."))
+            return
+
+    elif len(lines) >= 2 and (lines[0].lower().startswith('việc ') or lines[0].lower().startswith('viec ')):
+        group_id = getattr(event.source, 'group_id', None)
+        if not group_id:
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="⚠️ Chức năng giao việc chỉ sử dụng được trong nhóm chat."))
+            return
+            
+        header = lines[0]
+        if header.lower().startswith('việc '):
+            job_name = header[5:].strip()
+        else:
+            job_name = header[5:].strip()
+            
+        job_name = job_name.strip(' "\'').strip()
+            
+        task_assignments = []
+        for line in lines[1:]:
+            if line.startswith(('-', '*', '–', '—', '•', '+')):
+                line_content = line[1:].strip()
+                idx_at = line_content.rfind('@')
+                if idx_at != -1:
+                    sub_task = line_content[:idx_at].strip().strip(' "\'').strip()
+                    assignee = line_content[idx_at + 1:].strip().strip(' "\'').strip()
+                    if sub_task and assignee:
+                        task_assignments.append((sub_task, assignee))
+                        
+        if job_name and task_assignments:
+            try:
+                task_group_hash = add_multi_adhoc_tasks(group_id, job_name, task_assignments)
+                if task_group_hash:
+                    flex_content = generate_multi_adhoc_flex(group_id, task_group_hash)
+                    if flex_content:
+                        line_bot_api.reply_message(
+                            event.reply_token,
+                            FlexSendMessage(alt_text=f"📋 Checklist công việc: {job_name}", contents=flex_content)
+                        )
+                    else:
+                        line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ Có lỗi xảy ra khi tạo danh sách công việc."))
+                else:
+                    line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ Có lỗi xảy ra khi lưu công việc."))
+            except Exception as e:
+                print(f"Lỗi khi xử lý lệnh giao việc checklist: {e}")
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ Gặp lỗi khi xử lý giao việc."))
+            return
+
     # 1. Admin ADD
     if user_msg_upper.startswith('ADD '):
         if user_id != ADMIN_USER_ID:
@@ -529,6 +789,7 @@ def handle_message(event):
             "**✅ CHECKLIST CÔNG VIỆC:**\n"
             "• `sang` - Checklist sáng.\n"
             "• `chieu` - Checklist chiều.\n"
+            "• `vs` - Checklist hình ảnh.\n"
             "\n"
             "**📅 LỊCH LÀM VIỆC:**\n"
             "• `nv` / `pg` - Lịch hôm nay.\n"
@@ -539,6 +800,24 @@ def handle_message(event):
             "• `bxh` - Top 20."
         )
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=menu_text))
+        return
+
+    # 4.5. Checklist hình ảnh (VS)
+    if user_msg_upper == 'VS':
+        group_id = getattr(event.source, 'group_id', None)
+        if not group_id:
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="Lệnh này chỉ hoạt động trong nhóm chat."))
+            return
+        try:
+            initialize_daily_tasks(group_id, 'vs')
+            flex_content = generate_checklist_flex(group_id, 'vs')
+            if flex_content:
+                message = FlexSendMessage(alt_text="Checklist hình ảnh trước 10h sáng", contents=flex_content)
+                line_bot_api.reply_message(event.reply_token, message)
+            else:
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(text="Không thể tạo checklist hình ảnh."))
+        except Exception as e:
+            print(f"Lỗi khi xử lý lệnh checklist VS: {e}")
         return
 
     # === 5. XỬ LÝ LỆNH ĂN UỐNG ===
@@ -593,6 +872,129 @@ def handle_message(event):
             print(f"Lỗi khi xử lý lệnh checklist '{shift_type}': {e}")
         return
 
+    # === DMX SAVICO CODES: LK1, NV1, RT1 & CAO ===
+    if user_msg_upper == 'LK1':
+        try:
+            flex_msg = build_luyke_flex()
+        except Exception as e:
+            print(f"Lỗi khởi tạo báo cáo lũy kế: {e}")
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"Lỗi tạo báo cáo lũy kế: {str(e)}"))
+            return
+            
+        try:
+            line_bot_api.reply_message(event.reply_token, FlexSendMessage(alt_text="Báo Cáo Lũy Kế Savico", contents=flex_msg))
+        except Exception as e:
+            print(f"Lỗi gửi Flex LK1: {e}")
+            try:
+                line_bot_api.push_message(source_id, TextSendMessage(text=f"Lỗi gửi Flex báo cáo lũy kế: {str(e)}"))
+            except Exception as pe:
+                print(f"Lỗi gửi tin nhắn đẩy dự phòng: {pe}")
+        return
+
+    if user_msg_upper == 'NV1':
+        try:
+            flex_msg = build_nhanvien_flex()
+        except Exception as e:
+            print(f"Lỗi khởi tạo xếp hạng nhân viên: {e}")
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"Lỗi tạo xếp hạng nhân viên: {str(e)}"))
+            return
+            
+        try:
+            line_bot_api.reply_message(event.reply_token, FlexSendMessage(alt_text="Bảng Xếp Hạng Nhân Viên", contents=flex_msg))
+        except Exception as e:
+            print(f"Lỗi gửi Flex NV1: {e}")
+            try:
+                line_bot_api.push_message(source_id, TextSendMessage(text=f"Lỗi gửi Flex xếp hạng nhân viên: {str(e)}"))
+            except Exception as pe:
+                print(f"Lỗi gửi tin nhắn đẩy dự phòng: {pe}")
+        return
+
+    if user_msg_upper == 'RT1':
+        try:
+            flex_msg = build_realtime_flex()
+        except Exception as e:
+            print(f"Lỗi khởi tạo báo cáo realtime: {e}")
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"Lỗi tạo báo cáo realtime: {str(e)}"))
+            return
+            
+        try:
+            line_bot_api.reply_message(event.reply_token, FlexSendMessage(alt_text="Báo Cáo Realtime Hôm Nay", contents=flex_msg))
+        except Exception as e:
+            print(f"Lỗi gửi Flex RT1: {e}")
+            try:
+                line_bot_api.push_message(source_id, TextSendMessage(text=f"Lỗi gửi Flex báo cáo realtime: {str(e)}"))
+            except Exception as pe:
+                print(f"Lỗi gửi tin nhắn đẩy dự phòng: {pe}")
+        return
+
+    if user_msg_upper in ['RT', 'CAO'] or user_msg_upper.startswith(('RT ', 'CAO ')):
+        scrape_type = "realtime"
+        if "LK" in user_msg_upper or "LUY" in user_msg_upper:
+            scrape_type = "luyke"
+            
+        try:
+            # Kích hoạt tín hiệu trên Supabase
+            trigger_success, req_time = trigger_adhoc_scrape(scrape_type)
+            if not trigger_success:
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ Không thể kết nối Supabase để gửi tín hiệu cào số."))
+                return
+                
+            # Đợi đồng bộ cào kết quả trực tiếp
+            completed = False
+            req_prefix = req_time[:16] if req_time else ""
+            
+            # Chạy tối đa 15 giây (30 vòng lặp * 0.5 giây)
+            for _ in range(30):
+                time.sleep(0.5)
+                st_info = check_scrape_status()
+                sig_status = st_info.get("status")
+                sig_req = st_info.get("requested_at", "")
+                
+                if sig_status == "completed":
+                    if not sig_req or sig_req >= req_prefix:
+                        completed = True
+                        break
+            
+            if completed:
+                if scrape_type == "luyke":
+                    flex_msg = build_luyke_flex()
+                    line_bot_api.reply_message(event.reply_token, FlexSendMessage(alt_text="Báo Cáo Lũy Kế Savico", contents=flex_msg))
+                else:
+                    flex_msg = build_realtime_flex()
+                    line_bot_api.reply_message(event.reply_token, FlexSendMessage(alt_text="Báo Cáo Realtime Hôm Nay", contents=flex_msg))
+            else:
+                line_bot_api.reply_message(
+                    event.reply_token, 
+                    TextSendMessage(text=f"⚠️ Thời gian chờ cào dữ liệu [{scrape_type.upper()}] quá hạn. Vui lòng đảm bảo Chrome trên máy trạm đã bật và đã đăng nhập Portal BI.")
+                )
+
+        except Exception as e:
+            print(f"Lỗi xử lý tín hiệu {user_msg_upper}: {e}")
+            try:
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"❌ Có lỗi xảy ra khi cào dữ liệu: {str(e)}"))
+            except Exception as pe:
+                print(f"Lỗi gửi tin nhắn báo lỗi: {pe}")
+        return
+                        try:
+                            line_bot_api.push_message(dest_id, TextSendMessage(text=f"❌ Có lỗi xảy ra khi vẽ Flex báo cáo: {str(fe)}"))
+                        except Exception as pe:
+                            print(f"Lỗi gửi tin đẩy báo lỗi: {pe}")
+                else:
+                    try:
+                        line_bot_api.push_message(dest_id, TextSendMessage(text=f"⚠️ Thời gian chờ cào dữ liệu [{scrape_type_val.upper()}] quá hạn. Trình duyệt trạm có thể đang đóng hoặc chưa đăng nhập portal. Số liệu sẽ tiếp tục được cập nhật trong nền."))
+                    except Exception as pe:
+                        print(f"Lỗi gửi tin đẩy quá hạn: {pe}")
+
+            threading.Thread(target=poll_and_push, args=(scrape_type, source_id, req_time), daemon=True).start()
+
+        except Exception as e:
+            print(f"Lỗi xử lý tín hiệu {user_msg_upper}: {e}")
+            try:
+                line_bot_api.push_message(source_id, TextSendMessage(text=f"❌ Có lỗi xảy ra khi xử lý lệnh cào: {str(e)}"))
+            except Exception as pe:
+                print(f"Lỗi gửi tin nhắn đẩy báo lỗi: {pe}")
+        return
+
     # 7. Lịch làm việc (NV/PG)
     schedule_match = re.match(r"^(NV|PG)([2-8])$", user_msg_upper)
     if schedule_match:
@@ -619,7 +1021,7 @@ def handle_message(event):
         
     # 8. Báo cáo (ST, BXH)
     try:
-        sheet = CLIENT.open(SHEET_NAME).worksheet(WORKSHEET_NAME)
+        sheet = get_spreadsheet().worksheet(WORKSHEET_NAME)
         all_data = sheet.get_all_values()
         reply_messages = []
         cluster_names = {row[0].strip().upper() for row in all_data[1:] if len(row) > 0 and row[0]}
@@ -704,32 +1106,35 @@ def trigger_morning_tasks():
         pg_group_id = os.environ.get('PG_GROUP_ID')
         employee_group_id = os.environ.get('EMPLOYEE_GROUP_ID')
         
-        # Danh sách tin nhắn để gửi gộp
+        # 1. Gửi Lịch PG vào nhóm PG nếu nhóm PG khác nhóm NV
+        if pg_group_id and pg_group_id != employee_group_id:
+            msg_pg = send_daily_schedule('pg', return_msg_only=True)
+            if msg_pg:
+                line_bot_api.push_message(pg_group_id, msg_pg)
+                print("Đã gửi lịch PG vào nhóm PG.")
+
+        # 2. Gửi Lịch NV và Checklist Sáng vào nhóm NV
         messages_to_send = []
 
-        # 1. Lấy Lịch PG (Nếu cần)
-        # Nếu PG và Employee chung group, chúng ta sẽ gửi hết vào employee_group_id
-        if pg_group_id:
-            # Nếu PG Group ID khác Employee Group ID, phải gửi riêng (hoặc chấp nhận tốn thêm 1 tin)
-            # Ở đây tôi ưu tiên gom nếu trùng hoặc logic của bạn cho phép
+        # Nếu PG và NV chung nhóm thì gửi gộp
+        if pg_group_id and pg_group_id == employee_group_id:
             msg_pg = send_daily_schedule('pg', return_msg_only=True)
-            if msg_pg: messages_to_send.append(msg_pg)
+            if msg_pg:
+                messages_to_send.append(msg_pg)
 
-        # 2. Lấy Lịch NV
         if employee_group_id:
             msg_nv = send_daily_schedule('employee', return_msg_only=True)
-            if msg_nv: messages_to_send.append(msg_nv)
+            if msg_nv:
+                messages_to_send.append(msg_nv)
 
-        # 3. Lấy Checklist Sáng
-        if employee_group_id:
             msg_check = get_checklist_message('sang', employee_group_id)
-            if msg_check: messages_to_send.append(msg_check)
+            if msg_check:
+                messages_to_send.append(msg_check)
         
         # --- GỬI TIN NHẮN (BATCHING) ---
         if messages_to_send and employee_group_id:
-            # Gửi tối đa 5 bong bóng trong 1 lần push -> Chỉ tính 1 tin nhắn
             line_bot_api.push_message(employee_group_id, messages_to_send[:5])
-            print(f"Đã gửi gộp {len(messages_to_send)} thông báo sáng.")
+            print(f"Đã gửi gộp {len(messages_to_send)} thông báo sáng vào nhóm NV.")
         else:
             print("Không có nội dung nào để gửi sáng nay.")
 
@@ -746,24 +1151,38 @@ def trigger_afternoon_tasks():
     
     print("Cron Job: Bắt đầu tác vụ buổi chiều (GOM TIN)...")
     try:
+        pg_group_id = os.environ.get('PG_GROUP_ID')
         employee_group_id = os.environ.get('EMPLOYEE_GROUP_ID')
         
+        # 1. Gửi Lịch PG vào nhóm PG nếu nhóm PG khác nhóm NV
+        if pg_group_id and pg_group_id != employee_group_id:
+            msg_pg = send_daily_schedule('pg', return_msg_only=True)
+            if msg_pg:
+                line_bot_api.push_message(pg_group_id, msg_pg)
+                print("Đã gửi lịch PG vào nhóm PG.")
+
+        # 2. Gửi Lịch NV và Checklist Chiều vào nhóm NV
         messages_to_send = []
 
-        # 1. Lịch NV (Nếu muốn nhắc lại chiều)
+        # Nếu PG và NV chung nhóm thì gửi gộp
+        if pg_group_id and pg_group_id == employee_group_id:
+            msg_pg = send_daily_schedule('pg', return_msg_only=True)
+            if msg_pg:
+                messages_to_send.append(msg_pg)
+
         if employee_group_id:
             msg_nv = send_daily_schedule('employee', return_msg_only=True)
-            if msg_nv: messages_to_send.append(msg_nv)
+            if msg_nv:
+                messages_to_send.append(msg_nv)
 
-        # 2. Checklist Chiều
-        if employee_group_id:
             msg_check = get_checklist_message('chieu', employee_group_id)
-            if msg_check: messages_to_send.append(msg_check)
+            if msg_check:
+                messages_to_send.append(msg_check)
         
         # --- GỬI TIN NHẮN (BATCHING) ---
         if messages_to_send and employee_group_id:
             line_bot_api.push_message(employee_group_id, messages_to_send[:5])
-            print(f"Đã gửi gộp {len(messages_to_send)} thông báo chiều.")
+            print(f"Đã gửi gộp {len(messages_to_send)} thông báo chiều vào nhóm NV.")
         else:
             print("Không có nội dung nào để gửi chiều nay.")
 

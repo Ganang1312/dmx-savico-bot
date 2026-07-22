@@ -16,6 +16,14 @@ google_creds_dict = json.loads(GOOGLE_CREDS_JSON)
 CREDS = ServiceAccountCredentials.from_json_keyfile_dict(google_creds_dict, SCOPE)
 CLIENT = gspread.authorize(CREDS)
 
+_SPREADSHEET = None
+
+def get_spreadsheet():
+    global _SPREADSHEET
+    if _SPREADSHEET is None:
+        _SPREADSHEET = CLIENT.open(SHEET_NAME)
+    return _SPREADSHEET
+
 # Tên các trang tính dùng chung
 SHEET_NAME = 'DATA REATIME'
 WORKSHEET_NAME_USERS = 'allowed_users'
@@ -24,3 +32,4 @@ WORKSHEET_NAME = 'chi_tiet_cum'
 WORKSHEET_SCHEDULES_NAME = 'schedules'
 # === THÊM MỚI ===
 WORKSHEET_MEAL_TRACKER_NAME = 'meal_tracker'
+WORKSHEET_ADHOC_TASKS = 'adhoc_tasks'

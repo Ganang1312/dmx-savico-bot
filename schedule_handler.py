@@ -6,7 +6,7 @@ from linebot.models import FlexSendMessage, TextSendMessage
 import re
 
 # Import từ file cấu hình trung tâm
-from config import CLIENT, SHEET_NAME, WORKSHEET_SCHEDULES_NAME
+from config import CLIENT, SHEET_NAME, WORKSHEET_SCHEDULES_NAME, get_spreadsheet
 
 # Khởi tạo LineBotApi
 CHANNEL_ACCESS_TOKEN = os.environ.get('CHANNEL_ACCESS_TOKEN')
@@ -147,7 +147,7 @@ def send_daily_schedule(schedule_type, target_id=None, reply_token=None, day_of_
     try:
         schedule_day_str = day_of_week_str if day_of_week_str else get_vietnamese_day_of_week()
         
-        sheet = CLIENT.open(SHEET_NAME).worksheet(WORKSHEET_SCHEDULES_NAME)
+        sheet = get_spreadsheet().worksheet(WORKSHEET_SCHEDULES_NAME)
         all_schedules = sheet.get_all_records()
         
         schedule_text_for_day = next((row.get(column_to_read) for row in all_schedules if row.get('day_of_week') == schedule_day_str), None)
