@@ -522,8 +522,8 @@ def build_nhanvien_flex():
     emp_targets = {}
     active_staff_names = {}
     
-    # 1. Đọc cấu hình Target đã Khóa từ Supabase (60-40 chia theo năng lực hoặc mode đã khóa)
-    lock_config = get_locked_target_config("78109")
+    # 1. Đọc cấu hình Target đã Khóa từ Supabase (Chế độ 60-40 chia theo năng lực)
+    lock_config = get_locked_target_config()
     if lock_config and lock_config.get("is_locked") and lock_config.get("staff"):
         locked_staff = lock_config.get("staff", [])
         initial_ratios = {}
@@ -531,6 +531,7 @@ def build_nhanvien_flex():
         
         for s in locked_staff:
             raw_name = str(s.get("name", "")).strip()
+            user_id = str(s.get("userId", "")).strip()
             if " - " in raw_name:
                 raw_name = raw_name.split(" - ")[-1].strip()
             if not raw_name:
@@ -540,6 +541,8 @@ def build_nhanvien_flex():
             initial_ratios[raw_name] = locked_ratio
             sum_ratios += locked_ratio
             active_staff_names[raw_name.upper()] = raw_name
+            if user_id:
+                active_staff_names[user_id.upper()] = raw_name
             
         if sum_ratios <= 0:
             sum_ratios = 1.0
@@ -568,7 +571,7 @@ def build_nhanvien_flex():
 
     emp_actuals = {}
     for r in nv_rows:
-        name = get_key_val(r, "staffUserName", "tên nv", "Họ và tên", default=None)
+        name = get_key_val(r, "staffUserName", "tên nv", "Họ và tên", "user", "mã nv", default=None)
         if not name: 
             continue
         name_str = str(name).strip()
@@ -576,12 +579,17 @@ def build_nhanvien_flex():
         emp_actuals[name_str] = emp_actuals.get(name_str, 0.0) + actual
 
     emp_list = []
+    processed_upper = set()
     for staff_upper, clean_name in active_staff_names.items():
+        if clean_name.upper() in processed_upper:
+            continue
+        processed_upper.add(clean_name.upper())
+        
         actual = 0.0
         for act_name, val in emp_actuals.items():
-            if act_name.upper() == staff_upper:
-                actual = val
-                break
+            if act_name.upper() == staff_upper or act_name.upper() == clean_name.upper():
+                actual += val
+                
         target = emp_targets.get(clean_name, 0.0)
         pct_ht = (actual / target) if target > 0 else 0.0
         emp_list.append({

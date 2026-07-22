@@ -934,23 +934,23 @@ def handle_message(event):
             
         try:
             # Kích hoạt tín hiệu trên Supabase (Không hiển thị tin nhắn chờ văn bản)
-            trigger_success = trigger_adhoc_scrape(scrape_type)
+            trigger_success, req_time = trigger_adhoc_scrape(scrape_type)
             if not trigger_success:
                 print("Lỗi kích hoạt tín hiệu cào dữ liệu.")
                 line_bot_api.push_message(source_id, TextSendMessage(text="❌ Không thể kết nối Supabase để gửi tín hiệu cào số."))
                 return
                 
             # Chạy vòng lặp kiểm tra trạng thái cào trong thread chạy ngầm (non-blocking) để tránh Gunicorn Timeout
-            def poll_and_push(scrape_type_val, dest_id):
+            def poll_and_push(scrape_type_val, dest_id, requested_at_str):
                 completed = False
-                saw_running = False
-                for i in range(30): # Tối đa 90 giây (30 vòng lặp * 3 giây)
+                for _ in range(35): # Tối đa 105 giây (35 vòng lặp * 3 giây)
                     time.sleep(3)
-                    status = check_scrape_status()
-                    if status == "running":
-                        saw_running = True
-                    elif status == "completed":
-                        if saw_running or i >= 4:
+                    st_info = check_scrape_status()
+                    sig_status = st_info.get("status")
+                    sig_req = st_info.get("requested_at")
+                    
+                    if sig_status == "completed":
+                        if not sig_req or sig_req >= requested_at_str:
                             completed = True
                             break
                 
@@ -974,7 +974,7 @@ def handle_message(event):
                     except Exception as pe:
                         print(f"Lỗi gửi tin đẩy quá hạn: {pe}")
 
-            threading.Thread(target=poll_and_push, args=(scrape_type, source_id), daemon=True).start()
+            threading.Thread(target=poll_and_push, args=(scrape_type, source_id, req_time), daemon=True).start()
 
         except Exception as e:
             print(f"Lỗi xử lý tín hiệu {user_msg_upper}: {e}")

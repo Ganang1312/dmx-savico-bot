@@ -35,7 +35,7 @@ def get_dashboard_data(sheets_str):
         
     return result
 
-def get_locked_target_config(area_id="78109"):
+def get_locked_target_config():
     """
     Lấy cấu hình Target khóa (được lưu từ web app baocao_nhanvien theo tỷ lệ 60-40 hoặc mode chọn)
     """
@@ -43,7 +43,8 @@ def get_locked_target_config(area_id="78109"):
     now = datetime.now(tz)
     month_str = now.strftime("%Y-%m")
     
-    url = f"{SUPABASE_URL}/rest/v1/sheet_data?sheet_name=ilike.Target_Lock_{area_id}_{month_str}%25&order=updated_at.desc&limit=1"
+    # Tìm Target_Lock mới nhất theo tháng (hỗ trợ mọi areaId)
+    url = f"{SUPABASE_URL}/rest/v1/sheet_data?sheet_name=like.Target_Lock_%25_{month_str}%25&order=updated_at.desc&limit=1"
     headers = {
         "apikey": SUPABASE_KEY,
         "Authorization": f"Bearer {SUPABASE_KEY}",
@@ -65,6 +66,7 @@ def trigger_adhoc_scrape(scrape_type):
     """
     Gửi tín hiệu cào dữ liệu mới lên Supabase để Chrome Extension phát hiện
     """
+    now_iso = datetime.now().isoformat()
     try:
         url = f"{SUPABASE_URL}/rest/v1/sheet_data"
         headers = {
@@ -78,31 +80,33 @@ def trigger_adhoc_scrape(scrape_type):
             "data": {
                 "status": "pending",
                 "type": scrape_type,
-                "requested_at": datetime.now().isoformat()
+                "requested_at": now_iso
             },
-            "updated_at": datetime.now().isoformat()
+            "updated_at": now_iso
         }
         res = requests.post(url, headers=headers, json=payload, timeout=10)
-        return res.status_code in [200, 201]
+        if res.status_code in [200, 201]:
+            return True, now_iso
     except Exception as e:
         print(f"Error posting scrape signal: {e}")
-    return False
+    return False, now_iso
 
 def check_scrape_status():
     """
-    Kiểm tra trạng thái cào (pending -> running -> completed)
+    Kiểm tra chi tiết trạng thái cào (gồm status, requested_at, type)
     """
     try:
         url = f"{SUPABASE_URL}/rest/v1/sheet_data?sheet_name=eq.scrape_signals&select=data"
         headers = {
             "apikey": SUPABASE_KEY,
-            "Authorization": f"Bearer {SUPABASE_KEY}"
+            "Authorization": f"Bearer {SUPABASE_KEY}",
+            "Cache-Control": "no-cache"
         }
         res = requests.get(url, headers=headers, timeout=10)
         if res.status_code == 200:
             rows = res.json()
             if rows and len(rows) > 0:
-                return rows[0].get("data", {}).get("status", "completed")
+                return rows[0].get("data", {})
     except Exception as e:
         print(f"Error checking scrape status: {e}")
-    return "completed"
+    return {}
