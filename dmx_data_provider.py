@@ -96,11 +96,14 @@ def check_scrape_status():
     Kiểm tra chi tiết trạng thái cào (gồm status, requested_at, type)
     """
     try:
-        url = f"{SUPABASE_URL}/rest/v1/sheet_data?sheet_name=eq.scrape_signals&select=data"
+        import time
+        timestamp = int(time.time() * 1000)
+        url = f"{SUPABASE_URL}/rest/v1/sheet_data?sheet_name=eq.scrape_signals&select=data&t={timestamp}"
         headers = {
             "apikey": SUPABASE_KEY,
             "Authorization": f"Bearer {SUPABASE_KEY}",
-            "Cache-Control": "no-cache"
+            "Cache-Control": "no-cache",
+            "Pragma": "no-cache"
         }
         res = requests.get(url, headers=headers, timeout=10)
         if res.status_code == 200:
