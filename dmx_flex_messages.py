@@ -55,12 +55,21 @@ def shorten_name(name):
         ("Viễn thông", "V.Thông"),
         ("Nhóm Thi Đua", "T.Đua"),
         ("Nhóm thi đua", "T.Đua"),
+        ("NẠP RÚT TIỀN TẬN NƠI", "Nạp Rút Tiền"),
+        ("TRẢ CHẬM HOMECREDIT", "TC HomeCredit"),
+        ("TRẢ CHẬM ĐIỆN MÁY", "TC Điện Máy"),
+        ("TRẢ CHẬM", "Trả Chậm"),
+        ("MÁY LỌC KHÔNG KHÍ", "Lọc K.Khí"),
+        ("MÁY LỌC NƯỚC", "Lọc Nước"),
+        ("ĐIỆN THOẠI & PHỤ KIỆN", "Đ.Thoại & PK"),
+        ("TỦ LẠNH, TỦ ĐỒ", "Tủ Lạnh/Đông"),
+        ("DOANH THU ĐỒNG HỒ", "Đồng Hồ"),
     ]
     for old, new in replacements:
         s = s.replace(old, new)
         
-    if len(s) > 15:
-        s = s[:14] + "…"
+    if len(s) > 14:
+        s = s[:13] + "…"
     return s
 
 def shorten_staff_name(name):
@@ -158,7 +167,7 @@ def make_thidua_progress_row(idx, name, con_lai_str, ht, unit):
     color = get_color_class(ht)
     
     if con_lai_str:
-        display_name = f"{name} (thiếu {con_lai_str} {unit})"
+        display_name = f"{name} (-{con_lai_str} {unit})"
     else:
         display_name = name
         
@@ -512,14 +521,35 @@ def build_nhanvien_flex():
         
     emp_targets = {}
     active_staff_names = {}
+    raw_ratios = {}
+    sum_ratios = 0.0
+    
     if config_rows and len(config_rows) > 0:
         for r in config_rows:
-            emp_name = get_key_val(r, "Họ và tên", "tên nhân viên", default=None)
+            emp_name = get_key_val(r, "Họ và tên", "tên nhân viên", "User-Họ và tên", default=None)
+            if not emp_name:
+                continue
+            emp_name_str = str(emp_name).strip()
+            
+            target_fixed = parse_number(get_key_val(r, "Target Tháng", "Target", "mục tiêu", default=0.0))
             pct = parse_number(get_key_val(r, "% chia", "tỷ lệ %", default=0.0))
-            if emp_name and pct > 0:
+            
+            if target_fixed > 0:
+                emp_targets[emp_name_str] = target_fixed
+                active_staff_names[emp_name_str.upper()] = emp_name_str
+            elif pct > 0:
                 ratio = pct if pct <= 1.0 else pct / 100.0
-                emp_targets[str(emp_name).strip()] = ratio * total_target
-                active_staff_names[str(emp_name).strip().upper()] = str(emp_name).strip()
+                raw_ratios[emp_name_str] = ratio
+                sum_ratios += ratio
+                active_staff_names[emp_name_str.upper()] = emp_name_str
+                
+    if raw_ratios:
+        if sum_ratios <= 0:
+            sum_ratios = 1.0
+        for emp_name_str, ratio in raw_ratios.items():
+            if emp_name_str not in emp_targets:
+                norm_ratio = ratio / sum_ratios
+                emp_targets[emp_name_str] = norm_ratio * total_target
 
     emp_actuals = {}
     for r in nv_rows:
@@ -619,7 +649,6 @@ def build_nhanvien_flex():
         {"type": "text", "text": "👥 CHI TIẾT XẾP HẠNG DOANH THU NHÂN VIÊN", "size": "xxs", "color": "#0284c7", "weight": "bold", "margin": "md"},
     ]
     
-    # Table Header & Rows styled according to user image
     headers = ["#", "👤 NHÂN VIÊN", "🎯 ĐẠT / TARGET", "%HT", "⌛ CÒN LẠI"]
     weights = [1, 3, 3, 2, 2]
     aligns = ["start", "start", "center", "center", "end"]
@@ -862,7 +891,7 @@ def build_realtime_flex():
             ]
         },
         
-        # Progress Bar 1: Tiến độ thời gian (Chỉ số thiếu trên tiêu đề, %HT nằm đầu thanh tiến độ)
+        # Progress Bar 1: Tiến độ thời gian
         {
             "type": "box",
             "layout": "horizontal",
@@ -901,14 +930,14 @@ def build_realtime_flex():
             ]
         },
         
-        # Progress Bar 2: Tiến độ doanh thu ngày (Chỉ số thiếu trên tiêu đề, %HT nằm đầu thanh tiến độ)
+        # Progress Bar 2: Tiến độ DT ngày
         {
             "type": "box",
             "layout": "horizontal",
             "margin": "sm",
             "contents": [
-                {"type": "text", "text": "🎯 TIẾN ĐỘ DOANH THU NGÀY", "size": "xxs", "color": "#475569", "weight": "bold", "flex": 6},
-                {"type": "text", "text": f"(Thiếu {fmt_num(thieuDTRT)} Tr)", "size": "xxs", "color": "#dc2626", "align": "end", "flex": 4}
+                {"type": "text", "text": "🎯 TIẾN ĐỘ DT NGÀY", "size": "xxs", "color": "#475569", "weight": "bold", "flex": 6},
+                {"type": "text", "text": f"(-{fmt_num(thieuDTRT)} Tr)", "size": "xxs", "color": "#dc2626", "align": "end", "flex": 4}
             ]
         },
         {
