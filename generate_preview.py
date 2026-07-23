@@ -4,9 +4,13 @@ from dmx_flex_messages import build_realtime_flex, build_luyke_flex, build_nhanv
 
 # Sample Mock Data matching Google Sheets structure
 mock_bi = [
-    {"nhóm ngành hàng": "Điện lạnh", "doanh thu quy đổi": 9.0, "số lượng": 1, "target": 87.0},
-    {"nhóm ngành hàng": "Điện gia dụng", "doanh thu quy đổi": 6.0, "số lượng": 1, "target": 46.0},
-    {"nhóm ngành hàng": "Điện tử", "doanh thu quy đổi": 0.0, "số lượng": 0, "target": 100.0},
+    {"nhóm ngành hàng": "Điện gia dụng", "doanh thu quy đổi": 1642.0, "số lượng": 1, "target": 1612.0, "rev_kft_riserate_lastmonth": 5.9},
+    {"nhóm ngành hàng": "Điện lạnh", "doanh thu quy đổi": 1362.0, "số lượng": 1, "target": 3068.0, "rev_kft_riserate_lastmonth": -16.0},
+    {"nhóm ngành hàng": "Điện tử", "doanh thu quy đổi": 785.0, "số lượng": 1, "target": 1481.0, "rev_kft_riserate_lastmonth": -14.0},
+    {"nhóm ngành hàng": "Điện thoại mới", "doanh thu quy đổi": 680.0, "số lượng": 1, "target": 1021.0, "rev_kft_riserate_lastmonth": -12.2},
+    {"nhóm ngành hàng": "Laptop", "doanh thu quy đổi": 564.0, "số lượng": 1, "target": 425.0, "rev_kft_riserate_lastmonth": 47.9},
+    {"nhóm ngành hàng": "Phụ kiện", "doanh thu quy đổi": 467.0, "số lượng": 1, "target": 251.0, "rev_kft_riserate_lastmonth": 4.1},
+    {"nhóm ngành hàng": "Khác", "doanh thu quy đổi": 460.0, "số lượng": 0, "target": 321.0, "rev_kft_riserate_lastmonth": 14.5},
 ]
 
 mock_td = [
@@ -81,14 +85,31 @@ def main(mock_get_data):
         json.dump(rt, f, ensure_ascii=False, indent=2)
         
     lk = build_luyke_flex()
-    with open("lk1_flex.json", "w", encoding="utf-8") as f:
-        json.dump(lk, f, ensure_ascii=False, indent=2)
+    if isinstance(lk, list):
+        with open("lk1_flex_p1.json", "w", encoding="utf-8") as f:
+            json.dump(lk[0], f, ensure_ascii=False, indent=2)
+        with open("lk1_flex_p2.json", "w", encoding="utf-8") as f:
+            json.dump(lk[1], f, ensure_ascii=False, indent=2)
+        with open("lk1_flex.json", "w", encoding="utf-8") as f:
+            json.dump(lk, f, ensure_ascii=False, indent=2)
+    else:
+        with open("lk1_flex.json", "w", encoding="utf-8") as f:
+            json.dump(lk, f, ensure_ascii=False, indent=2)
         
     nv = build_nhanvien_flex()
-    with open("nv1_flex.json", "w", encoding="utf-8") as f:
-        json.dump(nv, f, ensure_ascii=False, indent=2)
+    if isinstance(nv, list):
+        with open("nv_overview_flex.json", "w", encoding="utf-8") as f:
+            json.dump(nv[0], f, ensure_ascii=False, indent=2)
+        if len(nv) > 1:
+            with open("nv_staff_1.json", "w", encoding="utf-8") as f:
+                json.dump(nv[1], f, ensure_ascii=False, indent=2)
+        with open("nv1_flex.json", "w", encoding="utf-8") as f:
+            json.dump(nv, f, ensure_ascii=False, indent=2)
+    else:
+        with open("nv1_flex.json", "w", encoding="utf-8") as f:
+            json.dump(nv, f, ensure_ascii=False, indent=2)
         
-    print("SUCCESS: Da tao thanh cong 3 file JSON:\n - rt1_flex.json\n - lk1_flex.json\n - nv1_flex.json\n")
+    print("SUCCESS: Da tao thanh cong cac file JSON:\n - rt1_flex.json\n - lk1_flex_p1.json & lk1_flex_p2.json\n - nv_overview_flex.json, nv_staff_1.json & nv1_flex.json\n")
 
 if __name__ == '__main__':
     main()

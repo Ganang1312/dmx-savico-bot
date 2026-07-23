@@ -1278,6 +1278,17 @@ def build_individual_staff_card(e, rank, total_emp=11, now_str="", thi_dua_list=
                     "layout": "vertical",
                     "margin": "xs",
                     "contents": td_rows
+                },
+                {"type": "separator", "margin": "md"},
+                {
+                    "type": "text",
+                    "text": "💡 Mẹo: Gõ 'NV1 [tên]' hoặc 'NV1 [mã user]' (VD: NV1 Dương hoặc NV1 61169) để xem 23 ngành hàng thi đua 100% miễn phí!",
+                    "size": "xxs",
+                    "color": "#0284c7",
+                    "wrap": True,
+                    "weight": "bold",
+                    "align": "center",
+                    "margin": "sm"
                 }
             ]
         }

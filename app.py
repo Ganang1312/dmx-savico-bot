@@ -962,7 +962,7 @@ def handle_message(event):
                 print(f"Lỗi gửi tin nhắn đẩy dự phòng: {pe}")
         return
 
-    if user_msg_upper in ['NV1', 'NV 1']:
+    if user_msg_upper == 'NV1' or user_msg_upper.startswith('NV1 '):
         group_id = getattr(event.source, 'group_id', None)
         target_id = group_id or getattr(event.source, 'user_id', None)
         
@@ -980,37 +980,40 @@ def handle_message(event):
             overview_bubble = flex_bubbles[0]
             staff_bubbles = flex_bubbles[1:]
 
-            overview_msg = FlexSendMessage(alt_text="🏆 Bảng Xếp Hạng NV", contents=overview_bubble)
+            # Kiểm tra xem người dùng có gõ kèm tên/mã user/thứ hạng không (VD: "NV1 Dương", "NV1 61169", "NV1 1")
+            query_param = ""
+            if user_msg_upper.startswith('NV1 '):
+                query_param = user_msg[4:].strip()
 
-            # Gom các thẻ nhân viên thành chuỗi Carousel cuộn ngang (2 thẻ / 1 Carousel)
-            carousel_messages = []
-            for i in range(0, len(staff_bubbles), 2):
-                pair = staff_bubbles[i:i+2]
-                start_num = i + 1
-                end_num = i + len(pair)
-                alt = f"🎴 Thẻ KPI NV {start_num}-{end_num}" if start_num != end_num else f"🎴 Thẻ KPI NV {start_num}"
-                c_msg = FlexSendMessage(
-                    alt_text=alt,
-                    contents={"type": "carousel", "contents": pair}
-                )
-                carousel_messages.append(c_msg)
+            if query_param:
+                query_u = query_param.upper()
+                matched_bubble = None
+                for s_b in staff_bubbles:
+                    header_txt = str(s_b.get("header", {}).get("contents", [{}])[0].get("text", "")).upper()
+                    body_txt = str(s_b.get("body", {})).upper()
+                    if query_u in header_txt or query_u in body_txt:
+                        matched_bubble = s_b
+                        break
 
-            # 1. Đợt 1 (Overview + Dãy Carousel NV1-NV2): Trả lời 100% MIỄN PHÍ bằng reply_message (~37.5KB < 50KB)
-            if carousel_messages:
-                first_reply = [overview_msg, carousel_messages[0]]
-                line_bot_api.reply_message(event.reply_token, first_reply)
-                remaining_carousels = carousel_messages[1:]
+                if not matched_bubble and query_u.isdigit():
+                    rank_idx = int(query_u)
+                    if 1 <= rank_idx <= len(staff_bubbles):
+                        matched_bubble = staff_bubbles[rank_idx - 1]
+
+                if matched_bubble:
+                    line_bot_api.reply_message(
+                        event.reply_token,
+                        FlexSendMessage(alt_text=f"🎴 Thẻ KPI Nhân Viên: {query_param}", contents=matched_bubble)
+                    )
+                else:
+                    line_bot_api.reply_message(
+                        event.reply_token,
+                        TextSendMessage(text=f"🔍 Không tìm thấy nhân viên '{query_param}'. Vui lòng thử lại với tên hoặc mã user (VD: NV1 Dương, NV1 61169 hoặc NV1 1).")
+                    )
             else:
-                line_bot_api.reply_message(event.reply_token, [overview_msg])
-                remaining_carousels = []
-
-            # 2. Đợt 2 trở đi: Push nối tiếp mỗi đợt 1 Carousel 2 thẻ (~41.8KB < 50KB), đẩy ĐẦY ĐỦ 100% tất cả 11+ nhân viên!
-            if remaining_carousels and target_id:
-                for c_msg in remaining_carousels:
-                    try:
-                        line_bot_api.push_message(target_id, c_msg)
-                    except Exception as push_err:
-                        print(f"Lỗi push đợt tiếp theo NV1 Carousel: {push_err}")
+                # Gõ "NV1": Gửi Bảng Xếp Hạng Overview 100% MIỄN PHÍ bằng reply_message (16.5KB < 50KB limit, 0 push quota!)
+                overview_msg = FlexSendMessage(alt_text="🏆 Bảng Xếp Hạng Doanh Thu NV", contents=overview_bubble)
+                line_bot_api.reply_message(event.reply_token, overview_msg)
 
         except Exception as e:
             print(f"Lỗi gửi Flex NV1: {e}")

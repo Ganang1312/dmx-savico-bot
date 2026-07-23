@@ -929,86 +929,105 @@ def generate_multi_adhoc_flex(group_id, task_group_hash):
         else:
             main_job_name = combined_name
 
-        task_components = []
-        for i, task in enumerate(filtered_tasks, start=1):
-            task_id = task.get('task_id')
-            assignee = task.get('assignee')
+        grouped_subtasks = {}
+        for task in filtered_tasks:
             task_name_val = task.get('task_name', '')
-            status = task.get('status', 'incomplete')
-            completed_by = task.get('completed_by', '')
-            completed_at = task.get('completed_at', '')
-            
             if ' | ' in task_name_val:
                 sub_task_name = task_name_val.split(' | ', 1)[1]
             else:
                 sub_task_name = task_name_val
-
-            is_complete = (status == 'complete')
-            text_decoration = "line-through" if is_complete else "none"
-            main_text_color = "#AAAAAA" if is_complete else "#111111"
-            
-            button_color = "#CCCCCC" if is_complete else "#00B33C"
-            button_label = "✓ Xong" if is_complete else "Hoàn tất"
-            target_status_param = "incomplete" if is_complete else "complete"
-            
-            task_info_contents = [
-                {
-                    "type": "text",
-                    "text": f"{i}. {sub_task_name}",
-                    "wrap": True,
-                    "weight": "bold",
-                    "size": "sm",
-                    "color": main_text_color,
-                    "decoration": text_decoration
-                },
-                {
-                    "type": "text",
-                    "text": f"👤 Giao cho: {assignee}",
-                    "color": "#888888" if is_complete else "#1565C0",
-                    "size": "xs",
-                    "margin": "xs",
-                    "decoration": text_decoration
-                }
-            ]
                 
-            task_component = {
+            if sub_task_name not in grouped_subtasks:
+                grouped_subtasks[sub_task_name] = []
+            grouped_subtasks[sub_task_name].append(task)
+
+        task_components = []
+        for sub_idx, (sub_task_name, task_list) in enumerate(grouped_subtasks.items(), start=1):
+            all_complete = all(t.get('status') == 'complete' for t in task_list)
+            main_text_color = "#AAAAAA" if all_complete else "#111111"
+            main_decoration = "line-through" if all_complete else "none"
+            
+            subtask_header_box = {
                 "type": "box",
                 "layout": "horizontal",
                 "spacing": "sm",
-                "paddingAll": "sm",
                 "alignItems": "center",
                 "contents": [
                     {
                         "type": "text",
-                        "text": "✅" if is_complete else "⏳",
+                        "text": "✅" if all_complete else "⏳",
                         "size": "md",
                         "flex": 0
                     },
                     {
-                        "type": "box",
-                        "layout": "vertical",
-                        "flex": 1,
-                        "spacing": "xs",
-                        "contents": task_info_contents
-                    },
-                    {
-                        "type": "button",
-                        "action": {
-                            "type": "postback",
-                            "label": button_label,
-                            "data": f"action=complete_adhoc_task&task_id={task_id}&assignee={assignee}&target_status={target_status_param}"
-                        },
-                        "style": "primary",
-                        "color": button_color,
-                        "height": "sm",
-                        "flex": 0,
-                        "width": "75px"
+                        "type": "text",
+                        "text": f"{sub_idx}. {sub_task_name}",
+                        "wrap": True,
+                        "weight": "bold",
+                        "size": "sm",
+                        "color": main_text_color,
+                        "decoration": main_decoration,
+                        "flex": 1
                     }
                 ]
             }
-            task_components.append(task_component)
-            task_components.append({"type": "separator"})
             
+            assignee_rows = []
+            for t in task_list:
+                t_id = t.get('task_id')
+                assignee = t.get('assignee')
+                status = t.get('status', 'incomplete')
+                is_comp = (status == 'complete')
+                text_dec = "line-through" if is_comp else "none"
+                text_col = "#888888" if is_comp else "#1565C0"
+                btn_col = "#CCCCCC" if is_comp else "#00B33C"
+                btn_lbl = "✓ Xong" if is_comp else "Hoàn tất"
+                target_status_param = "incomplete" if is_comp else "complete"
+
+                assignee_row = {
+                    "type": "box",
+                    "layout": "horizontal",
+                    "spacing": "sm",
+                    "alignItems": "center",
+                    "paddingStart": "24px",
+                    "margin": "xs",
+                    "contents": [
+                        {
+                            "type": "text",
+                            "text": f"👤 Giao cho: {assignee}",
+                            "color": text_col,
+                            "size": "xs",
+                            "decoration": text_dec,
+                            "flex": 1,
+                            "wrap": True
+                        },
+                        {
+                            "type": "button",
+                            "action": {
+                                "type": "postback",
+                                "label": btn_lbl,
+                                "data": f"action=complete_adhoc_task&task_id={t_id}&assignee={assignee}&target_status={target_status_param}"
+                            },
+                            "style": "primary",
+                            "color": btn_col,
+                            "height": "sm",
+                            "flex": 0,
+                            "width": "75px"
+                        }
+                    ]
+                }
+                assignee_rows.append(assignee_row)
+
+            subtask_container = {
+                "type": "box",
+                "layout": "vertical",
+                "paddingAll": "sm",
+                "spacing": "xs",
+                "contents": [subtask_header_box] + assignee_rows
+            }
+            task_components.append(subtask_container)
+            task_components.append({"type": "separator"})
+
         if task_components:
             task_components.pop()
             

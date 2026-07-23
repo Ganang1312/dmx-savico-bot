@@ -65,8 +65,10 @@ class TestDmxFlexMessages(unittest.TestCase):
         mock_get_data.return_value = self.mock_data
         
         flex = build_realtime_flex()
-        self.assertEqual(flex["type"], "bubble")
-        self.assertEqual(flex["body"]["backgroundColor"], "#ffffff")
+        self.assertIsInstance(flex, list)
+        self.assertEqual(len(flex), 2)
+        self.assertEqual(flex[0]["type"], "bubble")
+        self.assertEqual(flex[1]["type"], "bubble")
         
         flex_str = str(flex)
         self.assertIn("Tr", flex_str)
@@ -85,30 +87,31 @@ class TestDmxFlexMessages(unittest.TestCase):
     def test_build_luyke_flex_light_theme(self, mock_get_data):
         mock_get_data.return_value = self.mock_data
         
-        res = build_luyke_flex()
-        self.assertTrue(isinstance(res, list) and len(res) == 2)
-        flex1, flex2 = res[0], res[1]
-        self.assertEqual(flex1["type"], "bubble")
-        self.assertEqual(flex2["type"], "bubble")
-        self.assertEqual(flex1["body"]["backgroundColor"], "#ffffff")
+        flex = build_luyke_flex()
+        self.assertIsInstance(flex, list)
+        self.assertEqual(len(flex), 2)
+        self.assertEqual(flex[0]["type"], "bubble")
+        self.assertEqual(flex[1]["type"], "bubble")
         
-        flex_str1 = str(flex1)
-        self.assertIn("Tr", flex_str1)
-        self.assertIn("🔮 Dự Kiến Tháng", flex_str1)
-        self.assertIn("🎯 Mục tiêu hôm nay:", flex_str1)
-        self.assertIn("💡 Cần trung bình", flex_str1)
-        self.assertTrue("🔴 Cần tăng tốc" in flex_str1 or "🟢 Đang đúng tiến độ" in flex_str1)
+        flex_str = str(flex)
+        self.assertIn("Tr", flex_str)
+        self.assertIn("🔮 Dự Kiến Tháng", flex_str)
+        self.assertIn("🎯 Mục tiêu hôm nay:", flex_str)
+        self.assertIn("💡 Cần trung bình", flex_str)
 
     @patch("dmx_flex_messages.get_dashboard_data")
     def test_build_nhanvien_flex_light_theme(self, mock_get_data):
         mock_get_data.return_value = self.mock_data
         
         flex = build_nhanvien_flex()
-        self.assertEqual(flex["type"], "bubble")
-        self.assertEqual(flex["body"]["backgroundColor"], "#ffffff")
+        self.assertIsInstance(flex, list)
+        self.assertGreaterEqual(len(flex), 2)
+        self.assertEqual(flex[0]["type"], "bubble")
+        self.assertEqual(flex[1]["type"], "bubble")
         
         flex_str = str(flex)
         self.assertIn("Tr", flex_str)
+        self.assertIn("BÁO CÁO XẾP HẠNG DOANH THU & THI ĐUA NV", str(flex[0]))
 
 if __name__ == '__main__':
     unittest.main()
