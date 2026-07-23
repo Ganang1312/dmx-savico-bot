@@ -283,6 +283,7 @@ def build_luyke_flex():
     tDTGoc = sum(parse_number(get_key_val(b, "doanh thu", default=0.0)) for b in bi_rows)
     totalTyLeTC = tTC / tDTGoc if tDTGoc > 0 else (tTC / tDT if tDT > 0 else 0.0)
     
+    tDT_CK_total = 0.0
     parsed_bi = []
     for b in bi_rows:
         nganh = get_key_val(b, "nhóm ngành hàng", "ngành hàng", "salegroupmastername", default=None)
@@ -303,6 +304,8 @@ def build_luyke_flex():
             dt_ck = parse_number(get_key_val(b, "DT Năm ngoái", "doanh thu năm ngoái", "dt năm ngoái", "năm ngoái", "nam ngoai", "doanh thu nam ngoai", "dt nam ngoai", "doanh thu năm ngoái (cùng kỳ)", "doanh thu nam ngoai (cung ky)", "cùng kỳ", "cung ky", "tháng trước", "dt tháng trước", default=0.0))
             if dt_ck > 0:
                 tang_giam_ck = ((dt - dt_ck) / dt_ck) * 100.0
+
+        tDT_CK_total += dt_ck
 
         if dt > 0 or sl > 0:
             parsed_bi.append({
@@ -362,8 +365,8 @@ def build_luyke_flex():
             "unit": "TR" if is_dt else "SP"
         })
         
-    td_done = [x for x in parsed_td if x["ht_dk"] >= 1.0 and x["actual"] > 0]
-    td_pending = [x for x in parsed_td if x["ht_dk"] < 1.0 and x["actual"] > 0]
+    td_done = [x for x in parsed_td if x["ht_dk"] >= 1.0]
+    td_pending = [x for x in parsed_td if x["ht_dk"] < 1.0]
     td_done.sort(key=lambda x: x["ht_dk"], reverse=True)
     td_pending.sort(key=lambda x: x["ht_dk"], reverse=True)
     
@@ -596,7 +599,7 @@ def build_luyke_flex():
         row2_colors = ["#64748b", "#0f172a", "#0284c7", growth_color]
         growth_card_contents.append(make_table_row(row2_vals, weights2, aligns2, row2_colors))
 
-    tDT_CK = sum(b.get("dt_ck", 0.0) for b in parsed_bi)
+    tDT_CK = tDT_CK_total if tDT_CK_total > 0 else sum(b.get("dt_ck", 0.0) for b in parsed_bi)
     if tDT_CK > 0:
         diff_total_ck = tDT - tDT_CK
         pct_total_ck = (diff_total_ck / tDT_CK * 100)
@@ -619,18 +622,6 @@ def build_luyke_flex():
     tot2_vals = ["⭐", "TỔNG CỘNG", "100%", total_growth_str]
     tot2_colors = ["#ffffff", "#ffffff", "#ffffff", "#ffffff"]
     growth_card_contents.append(make_table_row(tot2_vals, weights2, aligns2, tot2_colors, bold=True, bg_color="#0d9488"))
-
-    body_contents.append({
-        "type": "box",
-        "layout": "vertical",
-        "backgroundColor": "#f0fdfa",
-        "borderColor": "#99f6e4",
-        "borderWidth": "1px",
-        "cornerRadius": "md",
-        "paddingAll": "sm",
-        "margin": "md",
-        "contents": growth_card_contents
-    })
 
     body_contents.append({
         "type": "box",
@@ -671,7 +662,7 @@ def build_luyke_flex():
         done_contents = [
             {"type": "text", "text": f"🏆 THI ĐUA DỰ KIẾN ĐẠT ({len(td_done)} Nhóm)", "size": "xxs", "color": "#15803d", "weight": "bold", "margin": "xs"}
         ]
-        for idx, t in enumerate(td_done[:6]):
+        for idx, t in enumerate(td_done):
             done_contents.append(make_thidua_progress_row(idx+1, t["name"], None, t["ht_dk"], t["unit"]))
             
         body_contents.append({
@@ -689,9 +680,9 @@ def build_luyke_flex():
     # Thi Đua CHƯA ĐẠT Card
     if td_pending:
         pending_contents = [
-            {"type": "text", "text": f"🎯 THI ĐUA CHƯA ĐẠT (Top {min(8, len(td_pending))}/{len(td_pending)} Nhóm Cần Tập Trung)", "size": "xxs", "color": "#b91c1c", "weight": "bold", "margin": "xs"}
+            {"type": "text", "text": f"🎯 THI ĐUA CHƯA ĐẠT ({len(td_pending)} Nhóm Cần Tập Trung)", "size": "xxs", "color": "#b91c1c", "weight": "bold", "margin": "xs"}
         ]
-        for idx, t in enumerate(td_pending[:8]):
+        for idx, t in enumerate(td_pending):
             con_lai_str = fmt_num(t['con_lai'])
             pending_contents.append(make_thidua_progress_row(idx+1, t["name"], con_lai_str, t["ht_dk"], t["unit"]))
             
