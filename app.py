@@ -1011,9 +1011,16 @@ def handle_message(event):
                         TextSendMessage(text=f"🔍 Không tìm thấy nhân viên '{query_param}'. Vui lòng thử lại với tên hoặc mã user (VD: NV1 Dương, NV1 61169 hoặc NV1 1).")
                     )
             else:
-                # Gõ "NV1": Gửi Bảng Xếp Hạng Overview 100% MIỄN PHÍ bằng reply_message (16.5KB < 50KB limit, 0 push quota!)
+                # Gõ "NV1": Gửi Bảng Xếp Hạng Overview + Dãy Carousel Thẻ NV (FULL 23 Ngành Hàng & 7 Chỉ Số) 100% MIỄN PHÍ bằng reply_message (39.2KB < 50KB limit!)
                 overview_msg = FlexSendMessage(alt_text="🏆 Bảng Xếp Hạng Doanh Thu NV", contents=overview_bubble)
-                line_bot_api.reply_message(event.reply_token, overview_msg)
+                if staff_bubbles:
+                    carousel_msg = FlexSendMessage(
+                        alt_text="🎴 Thẻ KPI Nhân Viên (Full 23 Ngành Hàng)",
+                        contents={"type": "carousel", "contents": staff_bubbles[:2]}
+                    )
+                    line_bot_api.reply_message(event.reply_token, [overview_msg, carousel_msg])
+                else:
+                    line_bot_api.reply_message(event.reply_token, overview_msg)
 
         except Exception as e:
             print(f"Lỗi gửi Flex NV1: {e}")
