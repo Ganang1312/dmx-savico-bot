@@ -959,22 +959,39 @@ def handle_message(event):
                 print(f"Lỗi gửi tin nhắn đẩy dự phòng: {pe}")
         return
 
-    if user_msg_upper == 'NV1':
+    if user_msg_upper in ['NV1', 'NV 1']:
+        group_id = getattr(event.source, 'group_id', None)
+        target_id = group_id or getattr(event.source, 'user_id', None)
+        
         try:
-            flex_msg = build_nhanvien_flex()
+            flex_bubbles = build_nhanvien_flex()
         except Exception as e:
-            print(f"Lỗi khởi tạo xếp hạng nhân viên: {e}")
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"Lỗi tạo xếp hạng nhân viên: {str(e)}"))
+            print(f"Lỗi khởi tạo báo cáo nhân viên: {e}")
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"Lỗi tạo báo cáo nhân viên: {str(e)}"))
             return
             
         try:
-            line_bot_api.reply_message(event.reply_token, FlexSendMessage(alt_text="Bảng Xếp Hạng Nhân Viên", contents=flex_msg))
+            if not isinstance(flex_bubbles, list):
+                flex_bubbles = [flex_bubbles]
+
+            all_messages = []
+            for i, b in enumerate(flex_bubbles):
+                title = "Bảng Xếp Hạng NV" if i == 0 else f"Thẻ KPI NV {i}"
+                all_messages.append(FlexSendMessage(alt_text=f"Báo Cáo Nhân Viên - {title}", contents=b))
+
+            if target_id:
+                for chunk_idx in range(0, len(all_messages), 5):
+                    chunk = all_messages[chunk_idx:chunk_idx+5]
+                    line_bot_api.push_message(target_id, chunk)
+            else:
+                line_bot_api.reply_message(event.reply_token, all_messages[:5])
         except Exception as e:
             print(f"Lỗi gửi Flex NV1: {e}")
-            try:
-                line_bot_api.push_message(source_id, TextSendMessage(text=f"Lỗi gửi Flex xếp hạng nhân viên: {str(e)}"))
-            except Exception as pe:
-                print(f"Lỗi gửi tin nhắn đẩy dự phòng: {pe}")
+            if target_id:
+                try:
+                    line_bot_api.push_message(target_id, TextSendMessage(text=f"Lỗi gửi Flex xếp hạng nhân viên: {str(e)}"))
+                except Exception as pe:
+                    print(f"Lỗi gửi tin nhắn đẩy dự phòng: {pe}")
         return
 
     if user_msg_upper == 'RT1':
