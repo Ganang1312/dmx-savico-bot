@@ -32,6 +32,7 @@ from flex_handler import (
 )
 from checklist_scheduler import send_initial_checklist, get_checklist_message 
 from meal_handler import generate_meal_flex, update_meal_status
+from vesinh_handler import generate_vesinh_flex, update_vesinh_status, get_current_vesinh_session
 from dmx_data_provider import trigger_adhoc_scrape, check_scrape_status
 from dmx_flex_messages import build_luyke_flex, build_nhanvien_flex, build_realtime_flex
 
@@ -516,6 +517,41 @@ def handle_postback(event):
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ Lỗi: Không tìm thấy tên hoặc lỗi cập nhật."))
         return
 
+    # 3.5. Check-in Vệ Sinh
+    if action == 'complete_vesinh':
+        session_type = data.get('session')
+        staff_name = data.get('name')
+        target_status = data.get('target_status', 'done')
+        group_id = getattr(event.source, 'group_id', None)
+        
+        if not group_id: return
+
+        try:
+            user_id = event.source.user_id
+            profile = line_bot_api.get_group_member_profile(group_id, user_id)
+            clicker_name = profile.display_name
+        except:
+            try:
+                profile = line_bot_api.get_profile(user_id)
+                clicker_name = profile.display_name
+            except:
+                clicker_name = "Unknown"
+
+        status_code, time_str = update_vesinh_status(group_id, session_type, staff_name, clicker_name, target_status)
+        
+        if status_code is True:
+            updated_flex = generate_vesinh_flex(group_id, session_type)
+            if updated_flex:
+                line_bot_api.reply_message(
+                    event.reply_token,
+                    FlexSendMessage(alt_text=f"Bảng phân công vệ sinh {session_type} updated", contents=updated_flex)
+                )
+        elif status_code == "already":
+            return
+        else:
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ Lỗi: Không tìm thấy tên hoặc lỗi cập nhật."))
+        return
+
 _group_members_sheet_cache = None
 
 def get_group_members(group_id):
@@ -848,6 +884,32 @@ def handle_message(event):
             except Exception as e:
                 print(f"Lỗi tạo meal flex: {e}")
                 # Không push lỗi ra group
+        return
+
+    # === 5.5 XỬ LÝ LỆNH VỆ SINH (VESINH) ===
+    if cmd_normalized.startswith('vesinh') or cmd_normalized.startswith('vesinh') or cmd_normalized in ['ve sinh', 'vệ sinh']:
+        if not hasattr(event.source, 'group_id'):
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="⚠️ Lệnh này chỉ hoạt động trong nhóm chat."))
+            return
+
+        session_type = None
+        if 'sang' in cmd_normalized:
+            session_type = 'vesinh_sang'
+        elif 'chieu' in cmd_normalized:
+            session_type = 'vesinh_chieu'
+        else:
+            session_type = get_current_vesinh_session()
+
+        if session_type:
+            try:
+                flex_content = generate_vesinh_flex(source_id, session_type)
+                if flex_content:
+                    alt = "Bảng phân công vệ sinh Ca Sáng" if session_type == 'vesinh_sang' else "Bảng phân công vệ sinh Ca Chiều"
+                    line_bot_api.reply_message(event.reply_token, FlexSendMessage(alt_text=alt, contents=flex_content))
+                else:
+                    line_bot_api.reply_message(event.reply_token, TextSendMessage(text="⚠️ Không tìm thấy dữ liệu lịch vệ sinh hoặc toàn bộ nhân sự đều OFF."))
+            except Exception as e:
+                print(f"Lỗi tạo vesinh flex: {e}")
         return
 
     # 6. Checklist công việc (Sang/Chieu)

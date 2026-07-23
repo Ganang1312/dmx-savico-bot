@@ -23,6 +23,19 @@ def parse_number(val):
     except:
         return 0.0
 
+def parse_growth_rate(val):
+    if not val:
+        return 0.0
+    val_str = str(val).strip().replace(',', '.')
+    if val_str.endswith('%'):
+        val_str = val_str[:-1].strip()
+        return parse_number(val_str)
+    
+    num = parse_number(val_str)
+    if -2.0 <= num <= 2.0 and num != 0:
+        return num * 100.0
+    return num
+
 def fmt_num(val):
     if val is None or val == '':
         return "0"
@@ -293,11 +306,11 @@ def build_luyke_flex():
         sl = parse_number(get_key_val(b, "số lượng", "quantity", default=0.0))
         tg = parse_number(get_key_val(b, "target", default=0.0))
         
-        tang_giam_ck_raw = parse_number(get_key_val(b, "rev_kft_riserate_lastmonth", "+/- dtck", "+/- so với ck", default=0.0))
+        raw_ck_val = get_key_val(b, "rev_kft_riserate_lastmonth", "+/- dtck", "+/- so với ck", default=None)
         dt_ck = 0.0
         tang_giam_ck = 0.0
-        if tang_giam_ck_raw != 0:
-            tang_giam_ck = tang_giam_ck_raw
+        if raw_ck_val is not None and str(raw_ck_val).strip() != "":
+            tang_giam_ck = parse_growth_rate(raw_ck_val)
             if (1 + tang_giam_ck / 100.0) != 0:
                 dt_ck = dt / (1 + tang_giam_ck / 100.0)
         else:
