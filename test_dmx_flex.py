@@ -85,16 +85,19 @@ class TestDmxFlexMessages(unittest.TestCase):
     def test_build_luyke_flex_light_theme(self, mock_get_data):
         mock_get_data.return_value = self.mock_data
         
-        flex = build_luyke_flex()
-        self.assertEqual(flex["type"], "bubble")
-        self.assertEqual(flex["body"]["backgroundColor"], "#ffffff")
+        res = build_luyke_flex()
+        self.assertTrue(isinstance(res, list) and len(res) == 2)
+        flex1, flex2 = res[0], res[1]
+        self.assertEqual(flex1["type"], "bubble")
+        self.assertEqual(flex2["type"], "bubble")
+        self.assertEqual(flex1["body"]["backgroundColor"], "#ffffff")
         
-        flex_str = str(flex)
-        self.assertIn("Tr", flex_str)
-        self.assertIn("🔮 Dự Kiến Tháng", flex_str)
-        self.assertIn("🎯 Mục tiêu hôm nay:", flex_str)
-        self.assertIn("💡 Cần trung bình", flex_str)
-        self.assertTrue("🔴 Cần tăng tốc" in flex_str or "🟢 Đang đúng tiến độ" in flex_str)
+        flex_str1 = str(flex1)
+        self.assertIn("Tr", flex_str1)
+        self.assertIn("🔮 Dự Kiến Tháng", flex_str1)
+        self.assertIn("🎯 Mục tiêu hôm nay:", flex_str1)
+        self.assertIn("💡 Cần trung bình", flex_str1)
+        self.assertTrue("🔴 Cần tăng tốc" in flex_str1 or "🟢 Đang đúng tiến độ" in flex_str1)
 
     @patch("dmx_flex_messages.get_dashboard_data")
     def test_build_nhanvien_flex_light_theme(self, mock_get_data):
