@@ -250,11 +250,58 @@ def build_luyke_flex():
     now = datetime.now(tz)
     now_str = now.strftime("%H:%M - %d/%m/%Y")
     
-    tDT = sum(parse_number(get_key_val(b, "Doanh thu Quy đổi", "Doanh thu", default=0.0)) for b in bi_rows)
-    tTG = sum(parse_number(get_key_val(b, "Target", "target", default=0.0)) for b in bi_rows)
+    tDT = 0.0
+    tTG = 0.0
+    tTC = 0.0
+    tDTGoc = 0.0
+    tDT_CK_total = 0.0
+    parsed_bi = []
+    
+    for b in bi_rows:
+        nganh = get_key_val(b, "nhóm ngành hàng", "ngành hàng", "salegroupmastername", default=None)
+        if not nganh or str(nganh).strip().upper() == "N/A":
+            continue
+            
+        dt = parse_number(get_key_val(b, "doanh thu quy đổi", "doanh thu", default=0.0))
+        sl = parse_number(get_key_val(b, "số lượng", "quantity", default=0.0))
+        tg = parse_number(get_key_val(b, "target", default=0.0))
+        dtGoc = parse_number(get_key_val(b, "doanh thu", default=0.0))
+        dtTC = parse_number(get_key_val(b, "revenue_installment", "doanh thu trả chậm", default=0.0))
+        
+        tDT += dt
+        tTG += tg
+        tTC += dtTC
+        tDTGoc += dtGoc
+
+        raw_ck_val = get_key_val(b, "rev_kft_riserate_lastmonth", "+/- dtck", "+/- so với ck", default=None)
+        dt_ck = 0.0
+        tang_giam_ck = 0.0
+        if raw_ck_val is not None and str(raw_ck_val).strip() != "":
+            tang_giam_ck = parse_growth_rate(raw_ck_val)
+            if (1 + tang_giam_ck / 100.0) != 0:
+                dt_ck = dt / (1 + tang_giam_ck / 100.0)
+        else:
+            dt_ck = parse_number(get_key_val(b, "DT Năm ngoái", "doanh thu năm ngoái", "dt năm ngoái", "năm ngoái", "nam ngoai", "doanh thu nam ngoai", "dt nam ngoai", "doanh thu năm ngoái (cùng kỳ)", "doanh thu nam ngoai (cung ky)", "cùng kỳ", "cung ky", "tháng trước", "dt tháng trước", default=0.0))
+            if dt_ck > 0:
+                tang_giam_ck = ((dt - dt_ck) / dt_ck) * 100.0
+
+        tDT_CK_total += dt_ck
+
+        if dt > 0 or sl > 0:
+            parsed_bi.append({
+                "name": shorten_name(nganh),
+                "sl": int(sl),
+                "dt": dt,
+                "tg": tg,
+                "dt_ck": dt_ck,
+                "tang_giam_ck": tang_giam_ck,
+                "ht": dt / tg if tg > 0 else 0.0
+            })
+    parsed_bi.sort(key=lambda x: x["dt"], reverse=True)
     if tTG <= 0:
         tTG = 1500.0
-        
+    totalTyLeTC = tTC / tDTGoc if tDTGoc > 0 else (tTC / tDT if tDT > 0 else 0.0)
+    
     current_day = now.day
     days_in_month = (datetime(now.year, now.month + 1, 1) - datetime(now.year, now.month, 1)).days if now.month < 12 else 31
     days_passed = days_in_month if current_day == 1 else current_day - 1
@@ -292,46 +339,6 @@ def build_luyke_flex():
     is_on_track = totalHT >= expected_pacing_pct
     status_badge_text = "🟢 Đang đúng tiến độ" if is_on_track else "🔴 Cần tăng tốc"
 
-    tTC = sum(parse_number(get_key_val(b, "revenue_installment", "doanh thu trả chậm", default=0.0)) for b in bi_rows)
-    tDTGoc = sum(parse_number(get_key_val(b, "doanh thu", default=0.0)) for b in bi_rows)
-    totalTyLeTC = tTC / tDTGoc if tDTGoc > 0 else (tTC / tDT if tDT > 0 else 0.0)
-    
-    tDT_CK_total = 0.0
-    parsed_bi = []
-    for b in bi_rows:
-        nganh = get_key_val(b, "nhóm ngành hàng", "ngành hàng", "salegroupmastername", default=None)
-        if not nganh or str(nganh).strip().upper() == "N/A":
-            continue
-        dt = parse_number(get_key_val(b, "doanh thu quy đổi", default=0.0))
-        sl = parse_number(get_key_val(b, "số lượng", "quantity", default=0.0))
-        tg = parse_number(get_key_val(b, "target", default=0.0))
-        
-        raw_ck_val = get_key_val(b, "rev_kft_riserate_lastmonth", "+/- dtck", "+/- so với ck", default=None)
-        dt_ck = 0.0
-        tang_giam_ck = 0.0
-        if raw_ck_val is not None and str(raw_ck_val).strip() != "":
-            tang_giam_ck = parse_growth_rate(raw_ck_val)
-            if (1 + tang_giam_ck / 100.0) != 0:
-                dt_ck = dt / (1 + tang_giam_ck / 100.0)
-        else:
-            dt_ck = parse_number(get_key_val(b, "DT Năm ngoái", "doanh thu năm ngoái", "dt năm ngoái", "năm ngoái", "nam ngoai", "doanh thu nam ngoai", "dt nam ngoai", "doanh thu năm ngoái (cùng kỳ)", "doanh thu nam ngoai (cung ky)", "cùng kỳ", "cung ky", "tháng trước", "dt tháng trước", default=0.0))
-            if dt_ck > 0:
-                tang_giam_ck = ((dt - dt_ck) / dt_ck) * 100.0
-
-        tDT_CK_total += dt_ck
-
-        if dt > 0 or sl > 0:
-            parsed_bi.append({
-                "name": shorten_name(nganh),
-                "sl": int(sl),
-                "dt": dt,
-                "tg": tg,
-                "dt_ck": dt_ck,
-                "tang_giam_ck": tang_giam_ck,
-                "ht": dt / tg if tg > 0 else 0.0
-            })
-    parsed_bi.sort(key=lambda x: x["dt"], reverse=True)
-    
     config_map = {}
     for c in config_rows:
         ten = get_key_val(c, "ngành hàng", "nhóm ngành hàng", default=None)

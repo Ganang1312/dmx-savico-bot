@@ -861,7 +861,8 @@ def handle_message(event):
     meal_cmds = ['ansang', 'anchieu', 'an', 'ăn']
     
     if cmd_normalized in meal_cmds:
-        if not hasattr(event.source, 'group_id'):
+        group_id = getattr(event.source, 'group_id', None)
+        if not group_id:
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text="⚠️ Lệnh này chỉ hoạt động trong nhóm chat."))
             return
 
@@ -875,7 +876,7 @@ def handle_message(event):
 
         if session_type:
             try:
-                flex_content = generate_meal_flex(source_id, session_type)
+                flex_content = generate_meal_flex(group_id, session_type)
                 if flex_content:
                     alt = "Check list ăn trưa" if session_type == 'ansang' else "Check list ăn tối"
                     line_bot_api.reply_message(event.reply_token, FlexSendMessage(alt_text=alt, contents=flex_content))
@@ -887,8 +888,9 @@ def handle_message(event):
         return
 
     # === 5.5 XỬ LÝ LỆNH VỆ SINH (VESINH) ===
-    if cmd_normalized.startswith('vesinh') or cmd_normalized.startswith('vesinh') or cmd_normalized in ['ve sinh', 'vệ sinh']:
-        if not hasattr(event.source, 'group_id'):
+    if cmd_normalized.startswith('vesinh') or cmd_normalized in ['ve sinh', 'vệ sinh']:
+        group_id = getattr(event.source, 'group_id', None)
+        if not group_id:
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text="⚠️ Lệnh này chỉ hoạt động trong nhóm chat."))
             return
 
@@ -902,7 +904,7 @@ def handle_message(event):
 
         if session_type:
             try:
-                flex_content = generate_vesinh_flex(source_id, session_type)
+                flex_content = generate_vesinh_flex(group_id, session_type)
                 if flex_content:
                     alt = "Bảng phân công vệ sinh Ca Sáng" if session_type == 'vesinh_sang' else "Bảng phân công vệ sinh Ca Chiều"
                     line_bot_api.reply_message(event.reply_token, FlexSendMessage(alt_text=alt, contents=flex_content))
