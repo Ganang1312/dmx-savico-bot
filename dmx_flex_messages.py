@@ -249,8 +249,36 @@ def build_luyke_flex():
     
     totalHT = tDT / tTG if tTG > 0 else 0.0
     totalDKThang = (tDT / days_passed) * days_in_month if days_passed > 0 else 0.0
+    totalHTDK = (totalDKThang / tTG) if tTG > 0 else 0.0
     revRem = max(0.0, tTG - tDT)
     
+    target_co_dinh = tTG / days_in_month
+    target_bu_tru = (tTG - tDT) / days_remaining
+    if target_bu_tru < 0:
+        target_bu_tru = 0.0
+
+    holiday_target = 0.0
+    if config_rows:
+        for r in config_rows:
+            day_val = parse_number(get_key_val(r, "ngày", "Ngày", default=0.0))
+            if int(day_val) == current_day:
+                holiday_target = parse_number(get_key_val(r, "Mục tiêu", "mục tiêu ngày", "mục tiêu", default=0.0))
+                if holiday_target > 0:
+                    break
+
+    is_weekend = now.weekday() in [5, 6]
+    target_today = 0.0
+    if holiday_target > 0:
+        target_today = holiday_target
+    elif is_weekend:
+        target_today = target_co_dinh * 2
+    else:
+        target_today = target_co_dinh if target_bu_tru < target_co_dinh else target_bu_tru
+
+    expected_pacing_pct = (days_passed / days_in_month) if days_in_month > 0 else 0.0
+    is_on_track = totalHT >= expected_pacing_pct
+    status_badge_text = "🟢 Đang đúng tiến độ" if is_on_track else "🔴 Cần tăng tốc"
+
     tTC = sum(parse_number(get_key_val(b, "revenue_installment", "doanh thu trả chậm", default=0.0)) for b in bi_rows)
     tDTGoc = sum(parse_number(get_key_val(b, "doanh thu", default=0.0)) for b in bi_rows)
     totalTyLeTC = tTC / tDTGoc if tDTGoc > 0 else (tTC / tDT if tDT > 0 else 0.0)
@@ -385,7 +413,7 @@ def build_luyke_flex():
                     "cornerRadius": "md",
                     "contents": [
                         {"type": "text", "text": "🔮 Dự Kiến Tháng", "size": "xs", "color": "#ffffff", "weight": "bold", "align": "center"},
-                        {"type": "text", "text": f"{fmt_num(totalDKThang)} Tr", "size": "sm", "color": "#ffffff", "weight": "bold", "align": "center", "margin": "xs"}
+                        {"type": "text", "text": f"{fmt_num(totalDKThang)} Tr ({totalHTDK*100:.0f}%)", "size": "sm", "color": "#ffffff", "weight": "bold", "align": "center", "margin": "xs"}
                     ]
                 }
             ]
@@ -444,6 +472,7 @@ def build_luyke_flex():
                 }
             ]
         },
+        {"type": "text", "text": f"🎯 Mục tiêu hôm nay: {fmt_num(target_today)} Tr/ngày", "size": "xs", "color": "#d97706", "weight": "bold", "align": "center", "margin": "xs"},
         {"type": "separator", "color": "#cbd5e1", "margin": "md"}
     ]
     
@@ -455,15 +484,56 @@ def build_luyke_flex():
     body_contents.append({"type": "separator", "color": "#cbd5e1", "margin": "xs"})
     
     for idx, b in enumerate(parsed_bi[:6]):
-        vals = [idx+1, b["name"], fmt_num(b["sl"]), fmt_num(b["dt"]), fmt_num(b["tg"]), f"{b['ht']*100:.0f}%"]
+        ty_trong = (b["dt"] / tDT * 100) if tDT > 0 else 0.0
+        vals = [idx+1, f"{b['name']} ({ty_trong:.0f}%)", fmt_num(b["sl"]), fmt_num(b["dt"]), fmt_num(b["tg"]), f"{b['ht']*100:.0f}%"]
         colors = ["#64748b", "#0f172a", "#0f172a", "#0284c7", "#475569", get_color_class(b["ht"])]
         body_contents.append(make_table_row(vals, weights, aligns, colors))
+        body_contents.append({
+            "type": "box",
+            "layout": "vertical",
+            "backgroundColor": "#e2e8f0",
+            "height": "3px",
+            "cornerRadius": "sm",
+            "margin": "xs",
+            "contents": [
+                {
+                    "type": "box",
+                    "layout": "vertical",
+                    "backgroundColor": get_color_class(b["ht"]),
+                    "height": "3px",
+                    "cornerRadius": "sm",
+                    "width": f"{min(100, round(b['ht'] * 100))}%",
+                    "contents": [{"type": "filler"}]
+                }
+            ]
+        })
         body_contents.append({"type": "separator", "color": "#f1f5f9", "margin": "xs"})
     
     tot_sl = sum(x["sl"] for x in parsed_bi)
     tot_vals = ["⭐", "TỔNG CỘNG", fmt_num(tot_sl), fmt_num(tDT), fmt_num(tTG), f"{totalHT*100:.0f}%"]
     tot_colors = ["#ffffff", "#ffffff", "#ffffff", "#ffffff", "#ffffff", "#ffffff"]
     body_contents.append(make_table_row(tot_vals, weights, aligns, tot_colors, bold=True, bg_color="#f59e0b"))
+
+    body_contents.append({
+        "type": "box",
+        "layout": "vertical",
+        "backgroundColor": "#f8fafc",
+        "borderColor": "#cbd5e1",
+        "borderWidth": "1px",
+        "cornerRadius": "md",
+        "paddingAll": "sm",
+        "margin": "md",
+        "contents": [
+            {
+                "type": "text",
+                "text": f"💡 Cần trung bình {fmt_num(target_today)} Tr/ngày trong {days_remaining} ngày còn lại để cán đích {fmt_num(tTG)} Tr.",
+                "size": "xxs",
+                "color": "#475569",
+                "wrap": True,
+                "weight": "bold"
+            }
+        ]
+    })
 
     if td_done:
         body_contents.append({"type": "separator", "color": "#cbd5e1", "margin": "md"})
@@ -490,7 +560,7 @@ def build_luyke_flex():
             "paddingAll": "md",
             "contents": [
                 {"type": "text", "text": "📊 BÁO CÁO LŨY KẾ CỤM SAVICO", "weight": "bold", "size": "sm", "color": "#ffffff", "align": "center"},
-                {"type": "text", "text": f"🕒 Cập nhật: {now_str}", "size": "xxs", "color": "#dbeafe", "align": "center", "margin": "xs"}
+                {"type": "text", "text": f"🕒 Cập nhật: {now_str} • {status_badge_text}", "size": "xxs", "color": "#dbeafe", "align": "center", "margin": "xs"}
             ]
         },
         "body": {
@@ -810,6 +880,9 @@ def build_realtime_flex():
     if elapsed_hours > 13: elapsed_hours = 13.0
     time_ratio = elapsed_hours / 13.0
     
+    is_rt_on_track = htChung >= time_ratio
+    status_badge_text = "🟢 Vượt nhịp độ" if is_rt_on_track else "🔴 Chậm nhịp độ"
+
     bi_map = {x["name"].lower().strip(): x["dt"] for x in parsed_rt_bi}
     
     thi_dua_luy_ke = {}
@@ -990,10 +1063,25 @@ def build_realtime_flex():
                     ]
                 }
             ]
-        },
-        {"type": "separator", "color": "#cbd5e1", "margin": "md"},
-        
-        # Larger KPI Boxes with Icons
+        }
+    ]
+
+    if time_ratio > htChung and (time_ratio - htChung) >= 0.15:
+        gap_pct = round((time_ratio - htChung) * 100)
+        body_contents.append({
+            "type": "text",
+            "text": f"⚠️ Đang chậm {gap_pct}% so với nhịp độ thời gian khung giờ!",
+            "size": "xxs",
+            "color": "#dc2626",
+            "weight": "bold",
+            "align": "center",
+            "margin": "xs"
+        })
+
+    body_contents.append({"type": "separator", "color": "#cbd5e1", "margin": "md"})
+    
+    # Larger KPI Boxes with Icons
+    body_contents.extend([
         {
             "type": "box",
             "layout": "horizontal",
@@ -1059,7 +1147,7 @@ def build_realtime_flex():
             ]
         },
         {"type": "separator", "color": "#cbd5e1", "margin": "md"}
-    ]
+    ])
     
     # Revenue Table
     body_contents.append({"type": "text", "text": "⚡ CHI TIẾT DOANH THU HÔM NAY", "size": "xxs", "color": "#0284c7", "weight": "bold", "margin": "md"})
@@ -1070,9 +1158,29 @@ def build_realtime_flex():
     body_contents.append({"type": "separator", "color": "#cbd5e1", "margin": "xs"})
     
     for idx, b in enumerate(parsed_rt_bi[:6]):
-        vals = [idx+1, b["name"], fmt_num(b["sl"]), fmt_num(b["dt"]), fmt_num(b["tg"]), f"{b['ht']*100:.0f}%"]
+        ty_trong_rt = (b["dt"] / rt_total * 100) if rt_total > 0 else 0.0
+        vals = [idx+1, f"{b['name']} ({ty_trong_rt:.0f}%)", fmt_num(b["sl"]), fmt_num(b["dt"]), fmt_num(b["tg"]), f"{b['ht']*100:.0f}%"]
         colors = ["#64748b", "#0f172a", "#0f172a", "#0284c7", "#475569", get_color_class(b["ht"])]
         body_contents.append(make_table_row(vals, weights, aligns, colors))
+        body_contents.append({
+            "type": "box",
+            "layout": "vertical",
+            "backgroundColor": "#e2e8f0",
+            "height": "3px",
+            "cornerRadius": "sm",
+            "margin": "xs",
+            "contents": [
+                {
+                    "type": "box",
+                    "layout": "vertical",
+                    "backgroundColor": get_color_class(b["ht"]),
+                    "height": "3px",
+                    "cornerRadius": "sm",
+                    "width": f"{min(100, round(b['ht'] * 100))}%",
+                    "contents": [{"type": "filler"}]
+                }
+            ]
+        })
         body_contents.append({"type": "separator", "color": "#f1f5f9", "margin": "xs"})
         
     tot_sl = sum(x["sl"] for x in parsed_rt_bi)
@@ -1080,6 +1188,34 @@ def build_realtime_flex():
     tot_vals = ["⭐", "TỔNG CỘNG", fmt_num(tot_sl), fmt_num(rt_total), fmt_num(rt_tTarget), f"{totalHTCol2*100:.0f}%"]
     tot_colors = ["#ffffff", "#ffffff", "#ffffff", "#ffffff", "#ffffff", "#ffffff"]
     body_contents.append(make_table_row(tot_vals, weights, aligns, tot_colors, bold=True, bg_color="#f59e0b"))
+
+    rem_hours = max(0.5, 13.0 - elapsed_hours)
+    if thieuDTRT > 0:
+        req_speed = thieuDTRT / rem_hours
+        insight_msg = f"💡 Còn thiếu {fmt_num(thieuDTRT)} Tr để hoàn thành Target ngày ({fmt_num(target_today)} Tr). Cần trung bình ~{req_speed:.1f} Tr/giờ trong {rem_hours:.1f}h còn lại."
+    else:
+        insight_msg = f"🎉 Xuất sắc! Siêu thị đã hoàn thành Target doanh thu ngày hôm nay ({fmt_num(rt_total)}/{fmt_num(target_today)} Tr)."
+
+    body_contents.append({
+        "type": "box",
+        "layout": "vertical",
+        "backgroundColor": "#f8fafc",
+        "borderColor": "#cbd5e1",
+        "borderWidth": "1px",
+        "cornerRadius": "md",
+        "paddingAll": "sm",
+        "margin": "md",
+        "contents": [
+            {
+                "type": "text",
+                "text": insight_msg,
+                "size": "xxs",
+                "color": "#475569",
+                "wrap": True,
+                "weight": "bold"
+            }
+        ]
+    })
 
     # Compete List
     if td_done:
@@ -1107,7 +1243,7 @@ def build_realtime_flex():
             "paddingAll": "md",
             "contents": [
                 {"type": "text", "text": "⚡ BÁO CÁO REALTIME HÔM NAY", "weight": "bold", "size": "sm", "color": "#ffffff", "align": "center"},
-                {"type": "text", "text": f"🕒 Cập nhật: {now_str}", "size": "xxs", "color": "#e0f2fe", "align": "center", "margin": "xs"}
+                {"type": "text", "text": f"🕒 Cập nhật: {now_str} • {status_badge_text}", "size": "xxs", "color": "#e0f2fe", "align": "center", "margin": "xs"}
             ]
         },
         "body": {

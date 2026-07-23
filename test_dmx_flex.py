@@ -70,6 +70,8 @@ class TestDmxFlexMessages(unittest.TestCase):
         
         flex_str = str(flex)
         self.assertIn("Tr", flex_str)
+        self.assertTrue("🔴 Chậm nhịp độ" in flex_str or "🟢 Vượt nhịp độ" in flex_str)
+        self.assertTrue("💡" in flex_str or "🎉" in flex_str)
 
     @patch("dmx_flex_messages.get_dashboard_data")
     def test_build_realtime_flex_all_23_compete_items(self, mock_get_data):
@@ -89,6 +91,10 @@ class TestDmxFlexMessages(unittest.TestCase):
         
         flex_str = str(flex)
         self.assertIn("Tr", flex_str)
+        self.assertIn("🔮 Dự Kiến Tháng", flex_str)
+        self.assertIn("🎯 Mục tiêu hôm nay:", flex_str)
+        self.assertIn("💡 Cần trung bình", flex_str)
+        self.assertTrue("🔴 Cần tăng tốc" in flex_str or "🟢 Đang đúng tiến độ" in flex_str)
 
     @patch("dmx_flex_messages.get_dashboard_data")
     def test_build_nhanvien_flex_light_theme(self, mock_get_data):
