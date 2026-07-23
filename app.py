@@ -980,15 +980,15 @@ def handle_message(event):
                 alt = "🏆 Bảng Xếp Hạng NV" if i == 0 else f"🎴 Thẻ KPI NV {i}"
                 all_messages.append(FlexSendMessage(alt_text=alt, contents=b))
 
-            # 1. Đợt 1 (5 tin đầu tiên: Bảng Xếp Hạng + 4 Thẻ NV Top): Trả lời 100% MIỄN PHÍ bằng reply_message
-            first_chunk = all_messages[:5]
+            # 1. Đợt 1 (3 tin đầu: Bảng Xếp Hạng + 2 Thẻ NV Top): Trả lời 100% MIỄN PHÍ bằng reply_message (payload ~26KB < 50KB)
+            first_chunk = all_messages[:3]
             line_bot_api.reply_message(event.reply_token, first_chunk)
 
-            # 2. Đợt 2 trở đi (Các thẻ nhân viên còn lại): Push nối tiếp nếu có target_id
-            remaining_msgs = all_messages[5:]
+            # 2. Đợt 2 trở đi: Push nối tiếp mỗi đợt 3 tin nhắn (payload ~37KB < 50KB), đảm bảo gửi ĐẦY ĐỦ 100% tất cả 11+ nhân viên!
+            remaining_msgs = all_messages[3:]
             if remaining_msgs and target_id:
-                for chunk_idx in range(0, len(remaining_msgs), 5):
-                    chunk = remaining_msgs[chunk_idx:chunk_idx+5]
+                for chunk_idx in range(0, len(remaining_msgs), 3):
+                    chunk = remaining_msgs[chunk_idx:chunk_idx+3]
                     try:
                         line_bot_api.push_message(target_id, chunk)
                     except Exception as push_err:

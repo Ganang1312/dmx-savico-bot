@@ -845,7 +845,7 @@ def build_leaderboard_overview_bubble(emp_list, now_str):
             "backgroundColor": row_bg,
             "margin": "xs",
             "contents": [
-                # STT + Rank Delta
+                # STT
                 {
                     "type": "box",
                     "layout": "vertical",
@@ -859,14 +859,6 @@ def build_leaderboard_overview_bubble(emp_list, now_str):
                             "size": "xxs",
                             "color": "#d97706" if rank <= 3 else "#0f172a",
                             "align": "center"
-                        },
-                        {
-                            "type": "text",
-                            "text": f"▲+{rank_delta}" if rank_delta > 0 else f"{rank_delta}",
-                            "size": "xxs",
-                            "color": "#16a34a" if rank_delta >= 0 else "#dc2626",
-                            "align": "center",
-                            "margin": "xs"
                         }
                     ]
                 },
@@ -898,13 +890,6 @@ def build_leaderboard_overview_bubble(emp_list, now_str):
                             "weight": "bold",
                             "size": "xxs",
                             "color": "#b45309"
-                        },
-                        {
-                            "type": "text",
-                            "text": f"▲+{score_delta:.1f}",
-                            "size": "xxs",
-                            "color": "#16a34a",
-                            "margin": "xs"
                         }
                     ]
                 },
@@ -921,13 +906,6 @@ def build_leaderboard_overview_bubble(emp_list, now_str):
                             "weight": "bold",
                             "size": "xxs",
                             "color": "#0284c7"
-                        },
-                        {
-                            "type": "text",
-                            "text": f"▲+{td_delta}",
-                            "size": "xxs",
-                            "color": "#16a34a",
-                            "margin": "xs"
                         }
                     ]
                 },
@@ -1047,6 +1025,9 @@ def build_individual_staff_card(e, rank, total_emp=11, now_str="", thi_dua_list=
             {"name": "💻 Laptop", "m_tieu": "174k", "target": 87, "actual": 85, "con_lai": 2, "ht": 98.2, "du_kien": 138.4},
             {"name": "🏢 ĐIỆN TỬ & ĐIỆN LẠNH LG", "m_tieu": "990k", "target": 119, "actual": 110, "con_lai": 9, "ht": 92.5, "du_kien": 130.4},
             {"name": "💳 TRẢ CHẬM HOMECREDIT", "m_tieu": "780k", "target": 39, "actual": 32, "con_lai": 7, "ht": 82.1, "du_kien": 115.7},
+            {"name": "📱 Sim Tổng", "m_tieu": "1", "target": 4, "actual": 3, "con_lai": 1, "ht": 79.2, "du_kien": 111.6},
+            {"name": "⌚ DOANH THU ĐỒNG HỒ", "m_tieu": "399k", "target": 16, "actual": 12, "con_lai": 4, "ht": 77.4, "du_kien": 109.1},
+            {"name": "🎧 Đồng hồ - Phụ kiện", "m_tieu": "5", "target": 140, "actual": 94, "con_lai": 46, "ht": 67.0, "du_kien": 94.5},
         ]
 
     # Bảng chi tiết Ngành hàng Thi đua (Thêm cột MT - Mục tiêu)
@@ -1058,13 +1039,13 @@ def build_individual_staff_card(e, rank, total_emp=11, now_str="", thi_dua_list=
         "paddingAll": "xs",
         "contents": [
             {"type": "text", "text": "#", "size": "xxs", "weight": "bold", "flex": 1, "align": "center"},
-            {"type": "text", "text": "NGÀNH", "size": "xxs", "weight": "bold", "flex": 4},
+            {"type": "text", "text": "NGÀNH", "size": "xxs", "weight": "bold", "flex": 5},
             {"type": "text", "text": "MT", "size": "xxs", "weight": "bold", "flex": 2, "align": "center"},
             {"type": "text", "text": "TG", "size": "xxs", "weight": "bold", "flex": 2, "align": "center"},
             {"type": "text", "text": "LK", "size": "xxs", "weight": "bold", "flex": 2, "align": "center"},
             {"type": "text", "text": "CÒN", "size": "xxs", "weight": "bold", "flex": 2, "align": "center"},
-            {"type": "text", "text": "%HT", "size": "xxs", "weight": "bold", "flex": 2, "align": "center"},
-            {"type": "text", "text": "DK", "size": "xxs", "weight": "bold", "flex": 2, "align": "end"}
+            {"type": "text", "text": "%HT", "size": "xxs", "weight": "bold", "flex": 3, "align": "center"},
+            {"type": "text", "text": "DK", "size": "xxs", "weight": "bold", "flex": 3, "align": "end"}
         ]
     })
     td_rows.append({"type": "separator", "color": "#cbd5e1", "margin": "xs"})
@@ -1072,6 +1053,9 @@ def build_individual_staff_card(e, rank, total_emp=11, now_str="", thi_dua_list=
     for i, td in enumerate(thi_dua_list, 1):
         ht_val = td.get("ht", 0.0)
         ht_color = "#16a34a" if ht_val >= 100 else ("#0284c7" if ht_val >= 80 else "#d97706")
+        ht_str = f"{ht_val:.0f}%" if ht_val >= 100 else f"{ht_val:.1f}%"
+        dk_val = td.get("du_kien", 0.0)
+        dk_str = f"{dk_val:.0f}%" if dk_val >= 100 else f"{dk_val:.1f}%"
         
         td_rows.append({
             "type": "box",
@@ -1080,13 +1064,13 @@ def build_individual_staff_card(e, rank, total_emp=11, now_str="", thi_dua_list=
             "margin": "xs",
             "contents": [
                 {"type": "text", "text": str(i), "size": "xxs", "flex": 1, "align": "center", "weight": "bold"},
-                {"type": "text", "text": td["name"], "size": "xxs", "flex": 4, "wrap": True, "weight": "bold", "color": "#0f172a"},
+                {"type": "text", "text": td["name"], "size": "xxs", "flex": 5, "wrap": True, "weight": "bold", "color": "#0f172a"},
                 {"type": "text", "text": str(td.get("m_tieu", "🏆")), "size": "xxs", "flex": 2, "align": "center", "color": "#16a34a" if td.get("m_tieu") == "🏆" else "#475569"},
                 {"type": "text", "text": str(td["target"]), "size": "xxs", "flex": 2, "align": "center"},
                 {"type": "text", "text": str(td["actual"]), "size": "xxs", "flex": 2, "align": "center", "weight": "bold", "color": "#0284c7"},
                 {"type": "text", "text": str(td["con_lai"]), "size": "xxs", "flex": 2, "align": "center", "color": "#dc2626" if td["con_lai"] != "🏆" else "#16a34a"},
-                {"type": "text", "text": f"{ht_val:.1f}%", "size": "xxs", "flex": 2, "align": "center", "weight": "bold", "color": ht_color},
-                {"type": "text", "text": f"{td.get('du_kien', 0.0):.1f}%", "size": "xxs", "flex": 2, "align": "end", "weight": "bold", "color": "#16a34a"}
+                {"type": "text", "text": ht_str, "size": "xxs", "flex": 3, "align": "center", "weight": "bold", "color": ht_color},
+                {"type": "text", "text": dk_str, "size": "xxs", "flex": 3, "align": "end", "weight": "bold", "color": "#16a34a"}
             ]
         })
         td_rows.append({"type": "separator", "color": "#f1f5f9", "margin": "xs"})
@@ -1219,7 +1203,7 @@ def build_individual_staff_card(e, rank, total_emp=11, now_str="", thi_dua_list=
                         }
                     ]
                 },
-                # 5 Pill Cards tô màu đậm (Solid Backgrounds)
+                # 5 Pill Cards tô màu đậm (Solid Backgrounds) với bo tròn góc md và Icon minh họa
                 {
                     "type": "box",
                     "layout": "horizontal",
@@ -1227,37 +1211,37 @@ def build_individual_staff_card(e, rank, total_emp=11, now_str="", thi_dua_list=
                     "spacing": "xs",
                     "contents": [
                         {
-                            "type": "box", "layout": "vertical", "flex": 1, "backgroundColor": "#0284c7", "cornerRadius": "xs", "paddingAll": "xs", "align": "center",
+                            "type": "box", "layout": "vertical", "flex": 1, "backgroundColor": "#0284c7", "cornerRadius": "md", "paddingAll": "xs", "align": "center",
                             "contents": [
-                                {"type": "text", "text": "TG", "size": "xxs", "color": "#ffffff", "weight": "bold"},
+                                {"type": "text", "text": "🎯 TG", "size": "xxs", "color": "#ffffff", "weight": "bold"},
                                 {"type": "text", "text": fmt_num(target_val), "size": "xs", "color": "#ffffff", "weight": "bold", "margin": "xs"}
                             ]
                         },
                         {
-                            "type": "box", "layout": "vertical", "flex": 1, "backgroundColor": "#ea580c", "cornerRadius": "xs", "paddingAll": "xs", "align": "center",
+                            "type": "box", "layout": "vertical", "flex": 1, "backgroundColor": "#ea580c", "cornerRadius": "md", "paddingAll": "xs", "align": "center",
                             "contents": [
-                                {"type": "text", "text": "LK", "size": "xxs", "color": "#ffffff", "weight": "bold"},
+                                {"type": "text", "text": "💰 LK", "size": "xxs", "color": "#ffffff", "weight": "bold"},
                                 {"type": "text", "text": fmt_num(actual_val), "size": "xs", "color": "#ffffff", "weight": "bold", "margin": "xs"}
                             ]
                         },
                         {
-                            "type": "box", "layout": "vertical", "flex": 1, "backgroundColor": "#dc2626", "cornerRadius": "xs", "paddingAll": "xs", "align": "center",
+                            "type": "box", "layout": "vertical", "flex": 1, "backgroundColor": "#dc2626", "cornerRadius": "md", "paddingAll": "xs", "align": "center",
                             "contents": [
-                                {"type": "text", "text": "CÒN", "size": "xxs", "color": "#ffffff", "weight": "bold"},
+                                {"type": "text", "text": "⌛ CÒN", "size": "xxs", "color": "#ffffff", "weight": "bold"},
                                 {"type": "text", "text": fmt_num(con_lai_val), "size": "xs", "color": "#ffffff", "weight": "bold", "margin": "xs"}
                             ]
                         },
                         {
-                            "type": "box", "layout": "vertical", "flex": 1, "backgroundColor": "#16a34a", "cornerRadius": "xs", "paddingAll": "xs", "align": "center",
+                            "type": "box", "layout": "vertical", "flex": 1, "backgroundColor": "#16a34a", "cornerRadius": "md", "paddingAll": "xs", "align": "center",
                             "contents": [
-                                {"type": "text", "text": "DK", "size": "xxs", "color": "#ffffff", "weight": "bold"},
-                                {"type": "text", "text": f"{du_kien_pct:.1f}%", "size": "xs", "color": "#ffffff", "weight": "bold", "margin": "xs"}
+                                {"type": "text", "text": "🔮 DK", "size": "xxs", "color": "#ffffff", "weight": "bold"},
+                                {"type": "text", "text": f"{du_kien_pct:.0f}%" if du_kien_pct >= 100 else f"{du_kien_pct:.1f}%", "size": "xs", "color": "#ffffff", "weight": "bold", "margin": "xs"}
                             ]
                         },
                         {
-                            "type": "box", "layout": "vertical", "flex": 1, "backgroundColor": "#475569", "cornerRadius": "xs", "paddingAll": "xs", "align": "center",
+                            "type": "box", "layout": "vertical", "flex": 1, "backgroundColor": "#475569", "cornerRadius": "md", "paddingAll": "xs", "align": "center",
                             "contents": [
-                                {"type": "text", "text": "MT", "size": "xxs", "color": "#ffffff", "weight": "bold"},
+                                {"type": "text", "text": "📅 MT", "size": "xxs", "color": "#ffffff", "weight": "bold"},
                                 {"type": "text", "text": str(m_tieu_ngay), "size": "xs", "color": "#ffffff", "weight": "bold", "margin": "xs"}
                             ]
                         }
