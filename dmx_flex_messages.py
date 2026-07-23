@@ -838,7 +838,7 @@ def build_leaderboard_overview_bubble(emp_list, now_str):
                             "text": str(rank),
                             "weight": "bold",
                             "size": "xs",
-                            "color": "#ffffff",
+                            "color": "#d97706" if rank <= 3 else "#0f172a",
                             "align": "center"
                         },
                         {

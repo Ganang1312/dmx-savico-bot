@@ -981,11 +981,10 @@ def handle_message(event):
                 FlexSendMessage(alt_text="🏆 Bảng Xếp Hạng Doanh Thu & Thi Đua NV", contents=overview_bubble)
             )
 
-            # 2. Tin nhắn 2+: Gom các Thẻ KPI NV thành Carousel vuốt ngang (10 thẻ/carousel)
-            # Giúp gửi được đầy đủ 20+ thẻ nhân viên hoàn toàn MIỄN PHÍ bằng 1 reply_message duy nhất!
+            # 2. Tin nhắn 2+: Gom các Thẻ KPI NV thành Carousel vuốt ngang (3 thẻ/carousel để đảm bảo payload JSON luôn < 30KB)
             if staff_bubbles:
-                for idx in range(0, len(staff_bubbles), 10):
-                    chunk = staff_bubbles[idx:idx+10]
+                for idx in range(0, len(staff_bubbles), 3):
+                    chunk = staff_bubbles[idx:idx+3]
                     carousel_contents = {
                         "type": "carousel",
                         "contents": chunk
@@ -993,7 +992,7 @@ def handle_message(event):
                     alt = f"🎴 Thẻ KPI Nhân Viên ({idx+1}-{idx+len(chunk)})"
                     reply_messages.append(FlexSendMessage(alt_text=alt, contents=carousel_contents))
 
-            # Gửi 100% miễn phí bằng reply_message (Hỗ trợ tối đa 5 Message objects)
+            # Gửi 100% miễn phí bằng reply_message (Tối đa 5 Message objects, tổng payload luôn < 40KB)
             line_bot_api.reply_message(event.reply_token, reply_messages[:5])
 
         except Exception as e:
