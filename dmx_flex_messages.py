@@ -355,7 +355,7 @@ def build_luyke_flex():
     td_pending.sort(key=lambda x: x["ht_dk"], reverse=True)
     
     # 6 Larger Hero KPI Cards Grid (2x3)
-    body_contents1 = [
+    body_contents = [
         {
             "type": "box",
             "layout": "horizontal",
@@ -531,7 +531,7 @@ def build_luyke_flex():
     tot_colors = ["#ffffff", "#ffffff", "#ffffff", "#ffffff", "#ffffff", "#ffffff"]
     table_card_contents.append(make_table_row(tot_vals, weights1, aligns1, tot_colors, bold=True, bg_color="#f59e0b"))
 
-    body_contents1.append({
+    body_contents.append({
         "type": "box",
         "layout": "vertical",
         "backgroundColor": "#ffffff",
@@ -587,13 +587,18 @@ def build_luyke_flex():
         else:
             total_growth_str = f"▼ -{fmt_num(abs(diff_total_ck))} Tr ({pct_total_ck:.0f}%)"
     else:
-        total_growth_str = f"Dự kiến {totalHTDK*100:.0f}%"
+        diff_total_tg = tDT - tTG
+        pct_total_tg = (diff_total_tg / tTG * 100) if tTG > 0 else 0.0
+        if diff_total_tg >= 0:
+            total_growth_str = f"▲ +{fmt_num(diff_total_tg)} Tr (+{pct_total_tg:.0f}%)"
+        else:
+            total_growth_str = f"▼ -{fmt_num(abs(diff_total_tg))} Tr ({pct_total_tg:.0f}%)"
 
     tot2_vals = ["⭐", "TỔNG CỘNG", "100%", total_growth_str]
     tot2_colors = ["#ffffff", "#ffffff", "#ffffff", "#ffffff"]
     growth_card_contents.append(make_table_row(tot2_vals, weights2, aligns2, tot2_colors, bold=True, bg_color="#0d9488"))
 
-    body_contents1.append({
+    body_contents.append({
         "type": "box",
         "layout": "vertical",
         "backgroundColor": "#f0fdfa",
@@ -605,8 +610,8 @@ def build_luyke_flex():
         "contents": growth_card_contents
     })
 
-    # Smart Insight Card (Cuối Phần 1)
-    body_contents1.append({
+    # Smart Insight Card
+    body_contents.append({
         "type": "box",
         "layout": "vertical",
         "backgroundColor": "#fffbeb",
@@ -627,40 +632,15 @@ def build_luyke_flex():
         ]
     })
 
-    flex_bubble1 = {
-        "type": "bubble",
-        "size": "mega",
-        "header": {
-            "type": "box",
-            "layout": "vertical",
-            "backgroundColor": "#1e40af",
-            "paddingAll": "md",
-            "contents": [
-                {"type": "text", "text": "📊 BÁO CÁO LŨY KẾ CỤM SAVICO (P.1)", "weight": "bold", "size": "sm", "color": "#ffffff", "align": "center"},
-                {"type": "text", "text": f"🕒 Cập nhật: {now_str} • {status_badge_text}", "size": "xxs", "color": "#dbeafe", "align": "center", "margin": "xs"}
-            ]
-        },
-        "body": {
-            "type": "box",
-            "layout": "vertical",
-            "backgroundColor": "#ffffff",
-            "paddingAll": "md",
-            "contents": body_contents1
-        }
-    }
-
-    # ==================== PHẦN 2: THÔNG TIN THI ĐUA CỤM ====================
-    body_contents2 = []
-
     # Thi Đua ĐÃ ĐẠT Card
     if td_done:
         done_contents = [
             {"type": "text", "text": f"🏆 THI ĐUA DỰ KIẾN ĐẠT ({len(td_done)} Nhóm)", "size": "xxs", "color": "#15803d", "weight": "bold", "margin": "xs"}
         ]
-        for idx, t in enumerate(td_done):
+        for idx, t in enumerate(td_done[:6]):
             done_contents.append(make_thidua_progress_row(idx+1, t["name"], None, t["ht_dk"], t["unit"]))
             
-        body_contents2.append({
+        body_contents.append({
             "type": "box",
             "layout": "vertical",
             "backgroundColor": "#f0fdf4",
@@ -668,20 +648,20 @@ def build_luyke_flex():
             "borderWidth": "1px",
             "cornerRadius": "md",
             "paddingAll": "sm",
-            "margin": "xs",
+            "margin": "md",
             "contents": done_contents
         })
             
-    # Thi Đua CHƯA ĐẠT Card (Hiển thị 100% toàn bộ nhóm)
+    # Thi Đua CHƯA ĐẠT Card
     if td_pending:
         pending_contents = [
-            {"type": "text", "text": f"🎯 THI ĐUA CHƯA ĐẠT ({len(td_pending)} Nhóm Cần Tập Trung)", "size": "xxs", "color": "#b91c1c", "weight": "bold", "margin": "xs"}
+            {"type": "text", "text": f"🎯 THI ĐUA CHƯA ĐẠT (Top {min(8, len(td_pending))}/{len(td_pending)} Nhóm Cần Tập Trung)", "size": "xxs", "color": "#b91c1c", "weight": "bold", "margin": "xs"}
         ]
-        for idx, t in enumerate(td_pending):
+        for idx, t in enumerate(td_pending[:8]):
             con_lai_str = fmt_num(t['con_lai'])
             pending_contents.append(make_thidua_progress_row(idx+1, t["name"], con_lai_str, t["ht_dk"], t["unit"]))
             
-        body_contents2.append({
+        body_contents.append({
             "type": "box",
             "layout": "vertical",
             "backgroundColor": "#fef2f2",
@@ -693,17 +673,17 @@ def build_luyke_flex():
             "contents": pending_contents
         })
 
-    flex_bubble2 = {
+    flex_bubble = {
         "type": "bubble",
         "size": "mega",
         "header": {
             "type": "box",
             "layout": "vertical",
-            "backgroundColor": "#0f766e",
+            "backgroundColor": "#1e40af",
             "paddingAll": "md",
             "contents": [
-                {"type": "text", "text": "🏆 THÔNG TIN THI ĐUA CỤM SAVICO (P.2)", "weight": "bold", "size": "sm", "color": "#ffffff", "align": "center"},
-                {"type": "text", "text": f"🕒 Đạt: {len(td_done)}/{len(parsed_td)} Nhóm • Chưa đạt: {len(td_pending)} Nhóm", "size": "xxs", "color": "#ccfbf1", "align": "center", "margin": "xs"}
+                {"type": "text", "text": "📊 BÁO CÁO LŨY KẾ CỤM SAVICO", "weight": "bold", "size": "sm", "color": "#ffffff", "align": "center"},
+                {"type": "text", "text": f"🕒 Cập nhật: {now_str} • {status_badge_text}", "size": "xxs", "color": "#dbeafe", "align": "center", "margin": "xs"}
             ]
         },
         "body": {
@@ -711,11 +691,11 @@ def build_luyke_flex():
             "layout": "vertical",
             "backgroundColor": "#ffffff",
             "paddingAll": "md",
-            "contents": body_contents2
+            "contents": body_contents
         }
     }
 
-    return [flex_bubble1, flex_bubble2]
+    return flex_bubble
 
 def build_nhanvien_flex():
     data = get_dashboard_data("Config_ThiDua,Data_NV_BI,Data_BI,Data_Realtime_NV")

@@ -875,21 +875,14 @@ def handle_message(event):
     # === DMX SAVICO CODES: LK1, NV1, RT1 & CAO ===
     if user_msg_upper in ['LK1', 'LK', 'LK 1']:
         try:
-            flex_msgs = build_luyke_flex()
+            flex_msg = build_luyke_flex()
         except Exception as e:
             print(f"Lỗi khởi tạo báo cáo lũy kế: {e}")
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"Lỗi tạo báo cáo lũy kế: {str(e)}"))
             return
             
         try:
-            if isinstance(flex_msgs, list) and len(flex_msgs) >= 2:
-                send_payload = [
-                    FlexSendMessage(alt_text="📊 Báo Cáo Doanh Thu Lũy Kế Savico (P.1)", contents=flex_msgs[0]),
-                    FlexSendMessage(alt_text="🏆 Báo Cáo Thi Đua Cụm Savico (P.2)", contents=flex_msgs[1])
-                ]
-                line_bot_api.reply_message(event.reply_token, send_payload)
-            else:
-                line_bot_api.reply_message(event.reply_token, FlexSendMessage(alt_text="Báo Cáo Lũy Kế Savico", contents=flex_msgs))
+            line_bot_api.reply_message(event.reply_token, FlexSendMessage(alt_text="Báo Cáo Lũy Kế Savico", contents=flex_msg))
         except Exception as e:
             print(f"Lỗi gửi Flex LK1: {e}")
             try:
