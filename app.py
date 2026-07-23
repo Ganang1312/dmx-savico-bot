@@ -873,7 +873,7 @@ def handle_message(event):
         return
 
     # === DMX SAVICO CODES: LK1, NV1, RT1 & CAO ===
-    if user_msg_upper == 'LK1':
+    if user_msg_upper in ['LK1', 'LK', 'LK 1']:
         try:
             flex_msg = build_luyke_flex()
         except Exception as e:

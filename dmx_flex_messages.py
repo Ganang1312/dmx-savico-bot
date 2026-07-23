@@ -55,28 +55,21 @@ def shorten_name(name):
         ("Viễn thông", "V.Thông"),
         ("Nhóm Thi Đua", "T.Đua"),
         ("Nhóm thi đua", "T.Đua"),
-        ("NẠP RÚT TIỀN TẬN NƠI", "Nạp & Rút Tiền"),
+        ("NẠP RÚT TIỀN TẬN NƠI", "Nạp Rút Tiền"),
         ("TRẢ CHẬM HOMECREDIT", "TC HomeCredit"),
         ("TRẢ CHẬM ĐIỆN MÁY", "TC Điện Máy"),
         ("TRẢ CHẬM", "Trả Chậm"),
-        ("MÁY LỌC KHÔNG KHÍ", "Lọc Khí/Hút Ẩm"),
+        ("MÁY LỌC KHÔNG KHÍ", "Lọc K.Khí"),
         ("MÁY LỌC NƯỚC", "Lọc Nước"),
         ("ĐIỆN THOẠI & PHỤ KIỆN", "Đ.Thoại & PK"),
-        ("ĐIỆN THOẠI & ", "Đ.Thoại & PK"),
-        ("ĐIỆN TỬ & ĐIỆN LẠNH", "Đ.Tử & Đ.Lạnh"),
-        ("ĐIỆN TỬ & ĐIỆ", "Đ.Tử & Đ.Lạnh"),
-        ("TỦ LẠNH, TỦ ĐỒ", "Tủ Lạnh / Đông"),
-        ("TỦ LẠNH, TỦ Đ", "Tủ Lạnh / Đông"),
-        ("Đồng hồ - P.K", "Đồng Hồ & PK"),
+        ("TỦ LẠNH, TỦ ĐỒ", "Tủ Lạnh/Đông"),
         ("DOANH THU ĐỒNG HỒ", "Đồng Hồ"),
-        ("FECREDIT, SHI", "FE Credit / Shinhan"),
-        ("TC Điện Máy V", "TC Điện Máy"),
     ]
     for old, new in replacements:
         s = s.replace(old, new)
         
-    if len(s) > 25:
-        s = s[:24] + "…"
+    if len(s) > 14:
+        s = s[:13] + "…"
     return s
 
 def shorten_staff_name(name):
@@ -532,7 +525,6 @@ def build_luyke_flex():
                 }
             ]
         })
-        table_card_contents.append({"type": "separator", "color": "#f1f5f9", "margin": "xs"})
     
     tot_sl = sum(x["sl"] for x in parsed_bi)
     tot_vals = ["⭐", "TỔNG CỘNG", fmt_num(tot_sl), fmt_num(tDT), fmt_num(tTG), f"{totalHT*100:.0f}%"]
@@ -559,7 +551,6 @@ def build_luyke_flex():
     weights2 = [1, 4, 2, 4]
     aligns2 = ["start", "start", "center", "end"]
     growth_card_contents.append(make_table_header(headers2, weights2, aligns2, bg_color="#0f766e"))
-    growth_card_contents.append({"type": "separator", "color": "#cbd5e1", "margin": "xs"})
 
     for idx, b in enumerate(parsed_bi[:6]):
         ty_trong = (b["dt"] / tDT * 100) if tDT > 0 else 0.0
@@ -586,7 +577,6 @@ def build_luyke_flex():
         row2_vals = [idx+1, b['name'], f"{ty_trong:.0f}%", growth_text]
         row2_colors = ["#64748b", "#0f172a", "#0284c7", growth_color]
         growth_card_contents.append(make_table_row(row2_vals, weights2, aligns2, row2_colors))
-        growth_card_contents.append({"type": "separator", "color": "#f1f5f9", "margin": "xs"})
 
     tot2_vals = ["⭐", "TỔNG CỘNG", "100%", f"Dự kiến {totalHTDK*100:.0f}%"]
     tot2_colors = ["#ffffff", "#ffffff", "#ffffff", "#ffffff"]
@@ -629,12 +619,10 @@ def build_luyke_flex():
     # Thi Đua ĐÃ ĐẠT Card
     if td_done:
         done_contents = [
-            {"type": "text", "text": "🏆 THI ĐUA DỰ KIẾN ĐẠT (DKHT ≥ 100%)", "size": "xxs", "color": "#15803d", "weight": "bold", "margin": "xs"},
-            {"type": "separator", "color": "#bbf7d0", "margin": "xs"}
+            {"type": "text", "text": f"🏆 THI ĐUA DỰ KIẾN ĐẠT ({len(td_done)} Nhóm)", "size": "xxs", "color": "#15803d", "weight": "bold", "margin": "xs"}
         ]
-        for idx, t in enumerate(td_done):
+        for idx, t in enumerate(td_done[:6]):
             done_contents.append(make_thidua_progress_row(idx+1, t["name"], None, t["ht_dk"], t["unit"]))
-            done_contents.append({"type": "separator", "color": "#f1f5f9", "margin": "xs"})
             
         body_contents.append({
             "type": "box",
@@ -651,13 +639,11 @@ def build_luyke_flex():
     # Thi Đua CHƯA ĐẠT Card
     if td_pending:
         pending_contents = [
-            {"type": "text", "text": "🎯 THI ĐUA CHƯA ĐẠT (DKHT < 100%)", "size": "xxs", "color": "#b91c1c", "weight": "bold", "margin": "xs"},
-            {"type": "separator", "color": "#fecaca", "margin": "xs"}
+            {"type": "text", "text": f"🎯 THI ĐUA CHƯA ĐẠT (Top {min(7, len(td_pending))}/{len(td_pending)} Nhóm Cần Tập Trung)", "size": "xxs", "color": "#b91c1c", "weight": "bold", "margin": "xs"}
         ]
-        for idx, t in enumerate(td_pending):
+        for idx, t in enumerate(td_pending[:7]):
             con_lai_str = fmt_num(t['con_lai'])
             pending_contents.append(make_thidua_progress_row(idx+1, t["name"], con_lai_str, t["ht_dk"], t["unit"]))
-            pending_contents.append({"type": "separator", "color": "#f1f5f9", "margin": "xs"})
             
         body_contents.append({
             "type": "box",
