@@ -960,9 +960,6 @@ def handle_message(event):
         return
 
     if user_msg_upper in ['NV1', 'NV 1']:
-        group_id = getattr(event.source, 'group_id', None)
-        target_id = group_id or getattr(event.source, 'user_id', None)
-        
         try:
             flex_bubbles = build_nhanvien_flex()
         except Exception as e:
@@ -974,24 +971,37 @@ def handle_message(event):
             if not isinstance(flex_bubbles, list):
                 flex_bubbles = [flex_bubbles]
 
-            all_messages = []
-            for i, b in enumerate(flex_bubbles):
-                title = "Bảng Xếp Hạng NV" if i == 0 else f"Thẻ KPI NV {i}"
-                all_messages.append(FlexSendMessage(alt_text=f"Báo Cáo Nhân Viên - {title}", contents=b))
+            overview_bubble = flex_bubbles[0]
+            staff_bubbles = flex_bubbles[1:]
 
-            if target_id:
-                for chunk_idx in range(0, len(all_messages), 5):
-                    chunk = all_messages[chunk_idx:chunk_idx+5]
-                    line_bot_api.push_message(target_id, chunk)
-            else:
-                line_bot_api.reply_message(event.reply_token, all_messages[:5])
+            reply_messages = []
+            
+            # 1. Tin nhắn 1: Bảng Xếp Hạng NV Overview
+            reply_messages.append(
+                FlexSendMessage(alt_text="🏆 Bảng Xếp Hạng Doanh Thu & Thi Đua NV", contents=overview_bubble)
+            )
+
+            # 2. Tin nhắn 2+: Gom các Thẻ KPI NV thành Carousel vuốt ngang (10 thẻ/carousel)
+            # Giúp gửi được đầy đủ 20+ thẻ nhân viên hoàn toàn MIỄN PHÍ bằng 1 reply_message duy nhất!
+            if staff_bubbles:
+                for idx in range(0, len(staff_bubbles), 10):
+                    chunk = staff_bubbles[idx:idx+10]
+                    carousel_contents = {
+                        "type": "carousel",
+                        "contents": chunk
+                    }
+                    alt = f"🎴 Thẻ KPI Nhân Viên ({idx+1}-{idx+len(chunk)})"
+                    reply_messages.append(FlexSendMessage(alt_text=alt, contents=carousel_contents))
+
+            # Gửi 100% miễn phí bằng reply_message (Hỗ trợ tối đa 5 Message objects)
+            line_bot_api.reply_message(event.reply_token, reply_messages[:5])
+
         except Exception as e:
             print(f"Lỗi gửi Flex NV1: {e}")
-            if target_id:
-                try:
-                    line_bot_api.push_message(target_id, TextSendMessage(text=f"Lỗi gửi Flex xếp hạng nhân viên: {str(e)}"))
-                except Exception as pe:
-                    print(f"Lỗi gửi tin nhắn đẩy dự phòng: {pe}")
+            try:
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"Lỗi gửi Flex xếp hạng nhân viên: {str(e)}"))
+            except Exception as pe:
+                print(f"Lỗi gửi reply dự phòng: {pe}")
         return
 
     if user_msg_upper == 'RT1':
