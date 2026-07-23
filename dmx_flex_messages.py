@@ -291,7 +291,19 @@ def build_luyke_flex():
         dt = parse_number(get_key_val(b, "doanh thu quy đổi", default=0.0))
         sl = parse_number(get_key_val(b, "số lượng", "quantity", default=0.0))
         tg = parse_number(get_key_val(b, "target", default=0.0))
-        dt_ck = parse_number(get_key_val(b, "DT Năm ngoái", "doanh thu năm ngoái", "dt năm ngoái", "năm ngoái", "nam ngoai", "doanh thu nam ngoai", "dt nam ngoai", "doanh thu năm ngoái (cùng kỳ)", "doanh thu nam ngoai (cung ky)", "cùng kỳ", "cung ky", "tháng trước", "dt tháng trước", default=0.0))
+        
+        tang_giam_ck_raw = parse_number(get_key_val(b, "rev_kft_riserate_lastmonth", "+/- dtck", "+/- so với ck", default=0.0))
+        dt_ck = 0.0
+        tang_giam_ck = 0.0
+        if tang_giam_ck_raw != 0:
+            tang_giam_ck = tang_giam_ck_raw
+            if (1 + tang_giam_ck / 100.0) != 0:
+                dt_ck = dt / (1 + tang_giam_ck / 100.0)
+        else:
+            dt_ck = parse_number(get_key_val(b, "DT Năm ngoái", "doanh thu năm ngoái", "dt năm ngoái", "năm ngoái", "nam ngoai", "doanh thu nam ngoai", "dt nam ngoai", "doanh thu năm ngoái (cùng kỳ)", "doanh thu nam ngoai (cung ky)", "cùng kỳ", "cung ky", "tháng trước", "dt tháng trước", default=0.0))
+            if dt_ck > 0:
+                tang_giam_ck = ((dt - dt_ck) / dt_ck) * 100.0
+
         if dt > 0 or sl > 0:
             parsed_bi.append({
                 "name": shorten_name(nganh),
@@ -299,6 +311,7 @@ def build_luyke_flex():
                 "dt": dt,
                 "tg": tg,
                 "dt_ck": dt_ck,
+                "tang_giam_ck": tang_giam_ck,
                 "ht": dt / tg if tg > 0 else 0.0
             })
     parsed_bi.sort(key=lambda x: x["dt"], reverse=True)
@@ -548,30 +561,35 @@ def build_luyke_flex():
         {"type": "text", "text": "📈 TỶ TRỌNG & TĂNG TRƯỜNG CÙNG KỲ", "size": "xxs", "color": "#0f766e", "weight": "bold", "margin": "xs"}
     ]
     headers2 = ["STT", "Ngành hàng", "Tỷ trọng", "vs Cùng kỳ"]
-    weights2 = [1, 4, 2, 4]
+    weights2 = [1, 3, 2, 5]
     aligns2 = ["start", "start", "center", "end"]
     growth_card_contents.append(make_table_header(headers2, weights2, aligns2, bg_color="#0f766e"))
 
     for idx, b in enumerate(parsed_bi[:6]):
         ty_trong = (b["dt"] / tDT * 100) if tDT > 0 else 0.0
         dt_ck_val = b.get("dt_ck", 0.0)
+        pct_ck = b.get("tang_giam_ck", 0.0)
         
-        if dt_ck_val > 0:
-            diff_ck = b["dt"] - dt_ck_val
-            pct_ck = (diff_ck / dt_ck_val * 100)
+        if dt_ck_val > 0 or pct_ck != 0:
+            diff_ck = b["dt"] - dt_ck_val if dt_ck_val > 0 else (b["dt"] * (pct_ck / 100.0) if pct_ck != 0 else 0.0)
+            sign_str = "+" if diff_ck >= 0 else ""
+            pct_sign_str = "+" if pct_ck >= 0 else ""
             if diff_ck >= 0:
-                growth_text = f"▲ +{fmt_num(diff_ck)} Tr (+{pct_ck:.0f}%)"
+                growth_text = f"▲ {pct_sign_str}{pct_ck:.1f}% ({sign_str}{fmt_num(diff_ck)} Tr)"
                 growth_color = "#16a34a"
             else:
-                growth_text = f"▼ -{fmt_num(abs(diff_ck))} Tr ({pct_ck:.0f}%)"
+                growth_text = f"▼ {pct_ck:.1f}% (-{fmt_num(abs(diff_ck))} Tr)"
                 growth_color = "#dc2626"
         else:
             diff_tg = b["dt"] - b["tg"]
+            pct_tg = (diff_tg / b["tg"] * 100) if b["tg"] > 0 else 0.0
+            sign_str = "+" if diff_tg >= 0 else ""
+            pct_sign_str = "+" if pct_tg >= 0 else ""
             if diff_tg >= 0:
-                growth_text = f"▲ +{fmt_num(diff_tg)} Tr"
+                growth_text = f"▲ {pct_sign_str}{pct_tg:.1f}% ({sign_str}{fmt_num(diff_tg)} Tr)"
                 growth_color = "#16a34a"
             else:
-                growth_text = f"▼ -{fmt_num(abs(diff_tg))} Tr"
+                growth_text = f"▼ {pct_tg:.1f}% (-{fmt_num(abs(diff_tg))} Tr)"
                 growth_color = "#dc2626"
 
         row2_vals = [idx+1, b['name'], f"{ty_trong:.0f}%", growth_text]
@@ -582,21 +600,37 @@ def build_luyke_flex():
     if tDT_CK > 0:
         diff_total_ck = tDT - tDT_CK
         pct_total_ck = (diff_total_ck / tDT_CK * 100)
+        sign_str = "+" if diff_total_ck >= 0 else ""
+        pct_sign_str = "+" if pct_total_ck >= 0 else ""
         if diff_total_ck >= 0:
-            total_growth_str = f"▲ +{fmt_num(diff_total_ck)} Tr (+{pct_total_ck:.0f}%)"
+            total_growth_str = f"▲ {pct_sign_str}{pct_total_ck:.1f}% ({sign_str}{fmt_num(diff_total_ck)} Tr)"
         else:
-            total_growth_str = f"▼ -{fmt_num(abs(diff_total_ck))} Tr ({pct_total_ck:.0f}%)"
+            total_growth_str = f"▼ {pct_total_ck:.1f}% (-{fmt_num(abs(diff_total_ck))} Tr)"
     else:
         diff_total_tg = tDT - tTG
         pct_total_tg = (diff_total_tg / tTG * 100) if tTG > 0 else 0.0
+        sign_str = "+" if diff_total_tg >= 0 else ""
+        pct_sign_str = "+" if pct_total_tg >= 0 else ""
         if diff_total_tg >= 0:
-            total_growth_str = f"▲ +{fmt_num(diff_total_tg)} Tr (+{pct_total_tg:.0f}%)"
+            total_growth_str = f"▲ {pct_sign_str}{pct_total_tg:.1f}% ({sign_str}{fmt_num(diff_total_tg)} Tr)"
         else:
-            total_growth_str = f"▼ -{fmt_num(abs(diff_total_tg))} Tr ({pct_total_tg:.0f}%)"
+            total_growth_str = f"▼ {pct_total_tg:.1f}% (-{fmt_num(abs(diff_total_tg))} Tr)"
 
     tot2_vals = ["⭐", "TỔNG CỘNG", "100%", total_growth_str]
     tot2_colors = ["#ffffff", "#ffffff", "#ffffff", "#ffffff"]
     growth_card_contents.append(make_table_row(tot2_vals, weights2, aligns2, tot2_colors, bold=True, bg_color="#0d9488"))
+
+    body_contents.append({
+        "type": "box",
+        "layout": "vertical",
+        "backgroundColor": "#f0fdfa",
+        "borderColor": "#99f6e4",
+        "borderWidth": "1px",
+        "cornerRadius": "md",
+        "paddingAll": "sm",
+        "margin": "md",
+        "contents": growth_card_contents
+    })
 
     body_contents.append({
         "type": "box",
