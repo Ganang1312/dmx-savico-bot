@@ -814,15 +814,18 @@ def build_leaderboard_overview_bubble(emp_list, now_str):
             {"type": "text", "text": "👤 NV", "size": "xxs", "color": "#ffffff", "weight": "bold", "flex": 3, "align": "start"},
             {"type": "text", "text": "⭐ ĐIỂM", "size": "xxs", "color": "#ffffff", "weight": "bold", "flex": 2, "align": "center"},
             {"type": "text", "text": "🏅 TĐ", "size": "xxs", "color": "#ffffff", "weight": "bold", "flex": 2, "align": "center"},
-            {"type": "text", "text": "💼 DT", "size": "xxs", "color": "#ffffff", "weight": "bold", "flex": 4, "align": "center"}
+            {"type": "text", "text": "💼 DT", "size": "xxs", "color": "#ffffff", "weight": "bold", "flex": 5, "align": "center"}
         ]
     })
     rows_contents.append({"type": "separator", "color": "#cbd5e1", "margin": "xs"})
 
     for idx, e in enumerate(emp_list):
         rank = idx + 1
-        user_id = e.get("user_id", "")
-        name_code = shorten_staff_name_user(e.get("name", ""), user_id)
+        user_id = str(e.get("user_id", "")).strip()
+        full_name = str(e.get("name", "")).strip()
+        
+        # Tách Tên NV (Dòng 1) và User ID (Dòng 2) chuẩn yêu cầu người dùng
+        first_name = full_name.split(" - ")[-1].split()[-1] if full_name else "NV"
         row_bg = "#fef3c7" if rank <= 3 else ("#f8fafc" if rank % 2 == 0 else "#ffffff")
         
         actual_val = e.get("actual", 0.0)
@@ -831,12 +834,9 @@ def build_leaderboard_overview_bubble(emp_list, now_str):
         pct_val = e.get("pct", 0.0) * 100.0
         
         score_val = e.get("diem", 90.0 - rank * 3.5)
-        score_delta = e.get("score_delta", 1.5)
         
         td_passed = e.get("td_passed", max(1, 10 - rank))
         td_total = e.get("td_total", 23)
-        td_delta = e.get("td_delta", 1)
-        rank_delta = e.get("rank_delta", 20 - rank)
 
         row_box = {
             "type": "box",
@@ -862,7 +862,7 @@ def build_leaderboard_overview_bubble(emp_list, now_str):
                         }
                     ]
                 },
-                # Tên nhân viên (Tên-User_ID)
+                # Tên nhân viên dòng 1 (Tên), dòng 2 (User_ID nhỏ hơn)
                 {
                     "type": "box",
                     "layout": "vertical",
@@ -870,10 +870,17 @@ def build_leaderboard_overview_bubble(emp_list, now_str):
                     "contents": [
                         {
                             "type": "text",
-                            "text": name_code,
+                            "text": first_name,
                             "weight": "bold",
                             "size": "xxs",
                             "color": "#0f172a"
+                        },
+                        {
+                            "type": "text",
+                            "text": f"ID:{user_id}" if user_id and user_id != "NV" else "",
+                            "size": "xxs",
+                            "color": "#64748b",
+                            "margin": "xs"
                         }
                     ]
                 },
@@ -909,11 +916,11 @@ def build_leaderboard_overview_bubble(emp_list, now_str):
                         }
                     ]
                 },
-                # Doanh thu
+                # Doanh thu (Mở rộng flex: 5 để %HT không bao giờ bị cắt 9...)
                 {
                     "type": "box",
                     "layout": "vertical",
-                    "flex": 4,
+                    "flex": 5,
                     "contents": [
                         {
                             "type": "box",
@@ -934,7 +941,7 @@ def build_leaderboard_overview_bubble(emp_list, now_str):
                                     "weight": "bold",
                                     "color": "#d97706",
                                     "align": "end",
-                                    "flex": 1
+                                    "flex": 2
                                 }
                             ]
                         },
@@ -983,7 +990,10 @@ def build_individual_staff_card(e, rank, total_emp=11, now_str="", thi_dua_list=
     """
     name = e.get("name", "Nhân Viên")
     user_id = e.get("user_id", "90509")
-    name_code = shorten_staff_name_user(name, user_id)
+    full_name = str(name).strip()
+    first_name = full_name.split(" - ")[-1].split()[-1] if full_name else "NV"
+    name_code = f"{first_name}-{user_id}" if user_id else first_name
+    
     actual_val = e.get("actual", 0.0)
     target_val = e.get("target", 0.0)
     con_lai_val = max(0.0, target_val - actual_val)
@@ -991,9 +1001,6 @@ def build_individual_staff_card(e, rank, total_emp=11, now_str="", thi_dua_list=
     
     score_val = e.get("diem", 96.4 - (rank - 1) * 3.5)
     rank_delta = e.get("rank_delta", 22)
-    td_passed = e.get("td_passed", 9)
-    td_total = e.get("td_total", 23)
-    td_pct = (td_passed / td_total * 100.0) if td_total > 0 else 0.0
     
     du_kien_pct = pct_val * 1.4 if pct_val > 0 else 100.0
     m_tieu_ngay = max(1, int(round(con_lai_val / 10.0))) if con_lai_val > 0 else 0
@@ -1028,9 +1035,26 @@ def build_individual_staff_card(e, rank, total_emp=11, now_str="", thi_dua_list=
             {"name": "📱 Sim Tổng", "m_tieu": "1", "target": 4, "actual": 3, "con_lai": 1, "ht": 79.2, "du_kien": 111.6},
             {"name": "⌚ DOANH THU ĐỒNG HỒ", "m_tieu": "399k", "target": 16, "actual": 12, "con_lai": 4, "ht": 77.4, "du_kien": 109.1},
             {"name": "🎧 Đồng hồ - Phụ kiện", "m_tieu": "5", "target": 140, "actual": 94, "con_lai": 46, "ht": 67.0, "du_kien": 94.5},
+            {"name": "❄️ Tủ Lạnh", "m_tieu": "1.2M", "target": 45, "actual": 30, "con_lai": 15, "ht": 66.7, "du_kien": 93.3},
+            {"name": "🧊 Máy Lạnh", "m_tieu": "800k", "target": 30, "actual": 18, "con_lai": 12, "ht": 60.0, "du_kien": 84.0},
+            {"name": "♨️ Gia Dụng Nóng", "m_tieu": "500k", "target": 80, "actual": 45, "con_lai": 35, "ht": 56.3, "du_kien": 78.8},
+            {"name": "💧 Lọc Nước", "m_tieu": "1M", "target": 20, "actual": 10, "con_lai": 10, "ht": 50.0, "du_kien": 70.0},
+            {"name": "🔋 Phụ Kiện Sạc", "m_tieu": "200k", "target": 100, "actual": 48, "con_lai": 52, "ht": 48.0, "du_kien": 67.2},
+            {"name": "🛞 Xe Đạp", "m_tieu": "500k", "target": 10, "actual": 4, "con_lai": 6, "ht": 40.0, "du_kien": 56.0},
+            {"name": "📺 Tivi OLED", "m_tieu": "2M", "target": 15, "actual": 5, "con_lai": 10, "ht": 33.3, "du_kien": 46.6},
+            {"name": "🔊 Loa Karaoke", "m_tieu": "600k", "target": 25, "actual": 8, "con_lai": 17, "ht": 32.0, "du_kien": 44.8},
+            {"name": "🍲 Nồi Cơm Điện", "m_tieu": "150k", "target": 60, "actual": 18, "con_lai": 42, "ht": 30.0, "du_kien": 42.0},
+            {"name": "💨 Quạt Ép", "m_tieu": "100k", "target": 40, "actual": 11, "con_lai": 29, "ht": 27.5, "du_kien": 38.5},
+            {"name": "🔌 Bàn Ủi", "m_tieu": "80k", "target": 35, "actual": 9, "con_lai": 26, "ht": 25.7, "du_kien": 36.0},
+            {"name": "⚡ Micro", "m_tieu": "50k", "target": 20, "actual": 4, "con_lai": 16, "ht": 20.0, "du_kien": 28.0},
+            {"name": "📶 Cáp Chuyển", "m_tieu": "30k", "target": 50, "actual": 8, "con_lai": 42, "ht": 16.0, "du_kien": 22.4},
         ]
 
-    # Bảng chi tiết Ngành hàng Thi đua (Thêm cột MT - Mục tiêu)
+    td_passed = sum(1 for td in thi_dua_list if td.get("ht", 0.0) >= 100 or td.get("con_lai") == "🏆")
+    td_total = len(thi_dua_list)
+    td_pct = (td_passed / td_total * 100.0) if td_total > 0 else 0.0
+
+    # Bảng chi tiết Ngành hàng Thi đua (Thêm cột MT - Mục tiêu, Căn Giữa Dữ Liệu)
     td_rows = []
     td_rows.append({
         "type": "box",
@@ -1045,7 +1069,7 @@ def build_individual_staff_card(e, rank, total_emp=11, now_str="", thi_dua_list=
             {"type": "text", "text": "LK", "size": "xxs", "weight": "bold", "flex": 2, "align": "center"},
             {"type": "text", "text": "CÒN", "size": "xxs", "weight": "bold", "flex": 2, "align": "center"},
             {"type": "text", "text": "%HT", "size": "xxs", "weight": "bold", "flex": 3, "align": "center"},
-            {"type": "text", "text": "DK", "size": "xxs", "weight": "bold", "flex": 3, "align": "end"}
+            {"type": "text", "text": "DK", "size": "xxs", "weight": "bold", "flex": 3, "align": "center"}
         ]
     })
     td_rows.append({"type": "separator", "color": "#cbd5e1", "margin": "xs"})
@@ -1070,10 +1094,9 @@ def build_individual_staff_card(e, rank, total_emp=11, now_str="", thi_dua_list=
                 {"type": "text", "text": str(td["actual"]), "size": "xxs", "flex": 2, "align": "center", "weight": "bold", "color": "#0284c7"},
                 {"type": "text", "text": str(td["con_lai"]), "size": "xxs", "flex": 2, "align": "center", "color": "#dc2626" if td["con_lai"] != "🏆" else "#16a34a"},
                 {"type": "text", "text": ht_str, "size": "xxs", "flex": 3, "align": "center", "weight": "bold", "color": ht_color},
-                {"type": "text", "text": dk_str, "size": "xxs", "flex": 3, "align": "end", "weight": "bold", "color": "#16a34a"}
+                {"type": "text", "text": dk_str, "size": "xxs", "flex": 3, "align": "center", "weight": "bold", "color": "#16a34a"}
             ]
         })
-        td_rows.append({"type": "separator", "color": "#f1f5f9", "margin": "xs"})
 
     bubble = {
         "type": "bubble",
@@ -1203,7 +1226,7 @@ def build_individual_staff_card(e, rank, total_emp=11, now_str="", thi_dua_list=
                         }
                     ]
                 },
-                # 5 Pill Cards tô màu đậm (Solid Backgrounds) với bo tròn góc md và Icon minh họa
+                # 5 Pill Cards tô màu đậm (Solid Backgrounds) với bo tròn góc md và Icon minh họa - CĂN GIỮA DỮ LIỆU
                 {
                     "type": "box",
                     "layout": "horizontal",
@@ -1213,36 +1236,36 @@ def build_individual_staff_card(e, rank, total_emp=11, now_str="", thi_dua_list=
                         {
                             "type": "box", "layout": "vertical", "flex": 1, "backgroundColor": "#0284c7", "cornerRadius": "md", "paddingAll": "xs", "align": "center",
                             "contents": [
-                                {"type": "text", "text": "🎯 TG", "size": "xxs", "color": "#ffffff", "weight": "bold"},
-                                {"type": "text", "text": fmt_num(target_val), "size": "xs", "color": "#ffffff", "weight": "bold", "margin": "xs"}
+                                {"type": "text", "text": "🎯 TG", "size": "xxs", "color": "#ffffff", "weight": "bold", "align": "center"},
+                                {"type": "text", "text": fmt_num(target_val), "size": "xs", "color": "#ffffff", "weight": "bold", "margin": "xs", "align": "center"}
                             ]
                         },
                         {
                             "type": "box", "layout": "vertical", "flex": 1, "backgroundColor": "#ea580c", "cornerRadius": "md", "paddingAll": "xs", "align": "center",
                             "contents": [
-                                {"type": "text", "text": "💰 LK", "size": "xxs", "color": "#ffffff", "weight": "bold"},
-                                {"type": "text", "text": fmt_num(actual_val), "size": "xs", "color": "#ffffff", "weight": "bold", "margin": "xs"}
+                                {"type": "text", "text": "💰 LK", "size": "xxs", "color": "#ffffff", "weight": "bold", "align": "center"},
+                                {"type": "text", "text": fmt_num(actual_val), "size": "xs", "color": "#ffffff", "weight": "bold", "margin": "xs", "align": "center"}
                             ]
                         },
                         {
                             "type": "box", "layout": "vertical", "flex": 1, "backgroundColor": "#dc2626", "cornerRadius": "md", "paddingAll": "xs", "align": "center",
                             "contents": [
-                                {"type": "text", "text": "⌛ CÒN", "size": "xxs", "color": "#ffffff", "weight": "bold"},
-                                {"type": "text", "text": fmt_num(con_lai_val), "size": "xs", "color": "#ffffff", "weight": "bold", "margin": "xs"}
+                                {"type": "text", "text": "⌛ CÒN", "size": "xxs", "color": "#ffffff", "weight": "bold", "align": "center"},
+                                {"type": "text", "text": fmt_num(con_lai_val), "size": "xs", "color": "#ffffff", "weight": "bold", "margin": "xs", "align": "center"}
                             ]
                         },
                         {
                             "type": "box", "layout": "vertical", "flex": 1, "backgroundColor": "#16a34a", "cornerRadius": "md", "paddingAll": "xs", "align": "center",
                             "contents": [
-                                {"type": "text", "text": "🔮 DK", "size": "xxs", "color": "#ffffff", "weight": "bold"},
-                                {"type": "text", "text": f"{du_kien_pct:.0f}%" if du_kien_pct >= 100 else f"{du_kien_pct:.1f}%", "size": "xs", "color": "#ffffff", "weight": "bold", "margin": "xs"}
+                                {"type": "text", "text": "🔮 DK", "size": "xxs", "color": "#ffffff", "weight": "bold", "align": "center"},
+                                {"type": "text", "text": f"{du_kien_pct:.0f}%" if du_kien_pct >= 100 else f"{du_kien_pct:.1f}%", "size": "xs", "color": "#ffffff", "weight": "bold", "margin": "xs", "align": "center"}
                             ]
                         },
                         {
                             "type": "box", "layout": "vertical", "flex": 1, "backgroundColor": "#475569", "cornerRadius": "md", "paddingAll": "xs", "align": "center",
                             "contents": [
-                                {"type": "text", "text": "📅 MT", "size": "xxs", "color": "#ffffff", "weight": "bold"},
-                                {"type": "text", "text": str(m_tieu_ngay), "size": "xs", "color": "#ffffff", "weight": "bold", "margin": "xs"}
+                                {"type": "text", "text": "📅 MT", "size": "xxs", "color": "#ffffff", "weight": "bold", "align": "center"},
+                                {"type": "text", "text": str(m_tieu_ngay), "size": "xs", "color": "#ffffff", "weight": "bold", "margin": "xs", "align": "center"}
                             ]
                         }
                     ]
@@ -1262,15 +1285,23 @@ def build_individual_staff_card(e, rank, total_emp=11, now_str="", thi_dua_list=
     return bubble
 
 def build_nhanvien_flex():
-    data = get_dashboard_data("Config_ThiDua,Data_NV_BI,Data_BI,Data_Realtime_NV,Data_NV_ThiDua")
+    data = get_dashboard_data("Config_ThiDua,Data_NV_BI,Data_BI,Data_Realtime_NV,Data_NV_ThiDua,Data_ThiDua")
     config_rows = data.get("Config_ThiDua", [])
     bi_rows = data.get("Data_BI", [])
     nv_rows = data.get("Data_Realtime_NV", [])
     if not nv_rows:
         nv_rows = data.get("Data_NV_BI", [])
+    
+    td_store_rows = data.get("Data_ThiDua", [])
+    nv_td_rows = data.get("Data_NV_ThiDua", [])
         
     tz = pytz.timezone('Asia/Ho_Chi_Minh')
-    now_str = datetime.now(tz).strftime("%H:%M - %d/%m/%Y")
+    now = datetime.now(tz)
+    now_str = now.strftime("%H:%M - %d/%m/%Y")
+    
+    current_day = now.day
+    days_in_month = (datetime(now.year, now.month + 1, 1) - datetime(now.year, now.month, 1)).days if now.month < 12 else 31
+    days_passed = days_in_month if current_day == 1 else current_day - 1
     
     tDT = sum(parse_number(get_key_val(b, "Doanh thu Quy đổi", "Doanh thu", default=0.0)) for b in bi_rows if get_key_val(b, "nhóm ngành hàng", default="") != "N/A")
     total_target = sum(parse_number(get_key_val(b, "Target", "target", default=0.0)) for b in bi_rows if get_key_val(b, "nhóm ngành hàng", default="") != "N/A")
@@ -1297,7 +1328,7 @@ def build_nhanvien_flex():
             locked_ratio = parse_number(s.get("lockedRatio", s.get("targetRatio", 0.0)))
             initial_ratios[raw_name] = locked_ratio
             sum_ratios += locked_ratio
-            active_staff_names[raw_name.upper()] = {"name": raw_name, "user_id": user_id}
+            active_staff_names[raw_name.upper()] = {"name": raw_name, "user_id": user_id, "ratio": locked_ratio}
             
         if sum_ratios <= 0:
             sum_ratios = 1.0
@@ -1321,7 +1352,7 @@ def build_nhanvien_flex():
             ratio = pct if pct <= 1.0 else pct / 100.0
             
             emp_targets[emp_name_str] = ratio * total_target
-            active_staff_names[emp_name_str.upper()] = {"name": emp_name_str, "user_id": str(user_id).strip()}
+            active_staff_names[emp_name_str.upper()] = {"name": emp_name_str, "user_id": str(user_id).strip(), "ratio": ratio}
 
     emp_actuals = {}
     for r in nv_rows:
@@ -1332,11 +1363,38 @@ def build_nhanvien_flex():
         actual = parse_number(get_key_val(r, "Doanh thu Quy đổi", "Doanh thu", "Value_Compe", default=0.0))
         emp_actuals[name_str] = emp_actuals.get(name_str, 0.0) + actual
 
+    # 23 Ngành Hàng Thi Đua Map từ Data_ThiDua và Data_NV_ThiDua theo cơ chế baocao_nhanvien
+    store_cat_targets = {}
+    for r in td_store_rows:
+        nganh = get_key_val(r, "maingroupname", "main group name", "nhóm ngành hàng", "nhóm ngành hàng chính", "programname", default=None)
+        if not nganh or str(nganh).strip() == "" or str(nganh).strip() == "N/A":
+            continue
+        tg = parse_number(get_key_val(r, "target", "mục tiêu", default=0.0))
+        if tg <= 0:
+            continue
+        nganh_str = str(nganh).strip()
+        nganh_clean = nganh_str.lower()
+        if nganh_clean not in store_cat_targets:
+            store_cat_targets[nganh_clean] = {"name": nganh_str, "store_target": tg}
+
+    nv_td_actuals = {}
+    for r in nv_td_rows:
+        user = get_key_val(r, "staffuser", "user", "mã nv", "employeeid", default=None)
+        nganh = get_key_val(r, "programname", "nhóm ngành hàng", "nhóm ngành hàng chính", default=None)
+        if not user or not nganh:
+            continue
+        user_clean = str(user).strip().upper()
+        nganh_clean = str(nganh).strip().lower()
+        actual = parse_number(get_key_val(r, "value_compe", "thực hiện", "đã bán", default=0.0))
+        key = (user_clean, nganh_clean)
+        nv_td_actuals[key] = nv_td_actuals.get(key, 0.0) + actual
+
     emp_list = []
     processed_upper = set()
     for staff_upper, staff_info in active_staff_names.items():
         clean_name = staff_info["name"] if isinstance(staff_info, dict) else str(staff_info)
         user_id = staff_info.get("user_id", "") if isinstance(staff_info, dict) else ""
+        ratio = staff_info.get("ratio", 0.1) if isinstance(staff_info, dict) else 0.1
         
         if clean_name.upper() in processed_upper:
             continue
@@ -1349,12 +1407,40 @@ def build_nhanvien_flex():
                 
         target = emp_targets.get(clean_name, 0.0)
         pct_ht = (actual / target) if target > 0 else 0.0
+        
+        # Build 23 thi dua items for this employee
+        staff_td_items = []
+        if store_cat_targets:
+            for cat_clean, cat_info in store_cat_targets.items():
+                cat_name = cat_info["name"]
+                cat_store_tg = cat_info["store_target"]
+                staff_cat_tg = max(1.0, round(cat_store_tg * ratio))
+                
+                staff_cat_act = nv_td_actuals.get((user_id.upper(), cat_clean), 0.0)
+                if staff_cat_act == 0.0:
+                    staff_cat_act = nv_td_actuals.get((clean_name.upper(), cat_clean), 0.0)
+                    
+                con_lai = max(0.0, staff_cat_tg - staff_cat_act)
+                ht_val = (staff_cat_act / staff_cat_tg * 100.0) if staff_cat_tg > 0 else 0.0
+                dk_val = ((staff_cat_act / days_passed) * days_in_month / staff_cat_tg * 100.0) if staff_cat_tg > 0 else 0.0
+                
+                staff_td_items.append({
+                    "name": cat_name,
+                    "m_tieu": "🏆" if staff_cat_act >= staff_cat_tg else f"{int(staff_cat_tg)}",
+                    "target": int(staff_cat_tg),
+                    "actual": int(staff_cat_act),
+                    "con_lai": "🏆" if staff_cat_act >= staff_cat_tg else int(con_lai),
+                    "ht": ht_val,
+                    "du_kien": dk_val
+                })
+        
         emp_list.append({
             "name": clean_name,
             "user_id": user_id or "NV",
             "actual": actual,
             "target": target,
-            "pct": pct_ht
+            "pct": pct_ht,
+            "thi_dua_list": staff_td_items if staff_td_items else None
         })
         
     emp_list.sort(key=lambda x: x["actual"], reverse=True)
@@ -1362,11 +1448,11 @@ def build_nhanvien_flex():
     # 1. Bubble 1: Bảng Xếp Hạng NV Overview
     overview_bubble = build_leaderboard_overview_bubble(emp_list, now_str)
     
-    # 2. Bubbles 2..N: Thẻ KPI Chi Tiết Từng NV
+    # 2. Bubbles 2..N: Thẻ KPI Chi Tiết Từng NV (Truyền 23 ngành hàng thi đua)
     all_bubbles = [overview_bubble]
     total_emp = len(emp_list)
     for idx, e in enumerate(emp_list, start=1):
-        staff_bubble = build_individual_staff_card(e, idx, total_emp, now_str)
+        staff_bubble = build_individual_staff_card(e, idx, total_emp, now_str, thi_dua_list=e.get("thi_dua_list"))
         all_bubbles.append(staff_bubble)
         
     return all_bubbles
@@ -1650,7 +1736,7 @@ def build_realtime_flex():
             "margin": "xs"
         })
 
-    body_contents = [
+    body_contents_rt1 = [
         {
             "type": "box",
             "layout": "vertical",
@@ -1763,7 +1849,6 @@ def build_realtime_flex():
                 }
             ]
         })
-        table_card_contents.append({"type": "separator", "color": "#f1f5f9", "margin": "xs"})
         
     tot_sl = sum(x["sl"] for x in parsed_rt_bi)
     totalHTCol2 = rt_total / rt_tTarget if rt_tTarget > 0 else 0.0
@@ -1771,7 +1856,7 @@ def build_realtime_flex():
     tot_colors = ["#ffffff", "#ffffff", "#ffffff", "#ffffff", "#ffffff", "#ffffff"]
     table_card_contents.append(make_table_row(tot_vals, weights, aligns, tot_colors, bold=True, bg_color="#f59e0b"))
 
-    body_contents.append({
+    body_contents_rt1.append({
         "type": "box",
         "layout": "vertical",
         "backgroundColor": "#ffffff",
@@ -1783,7 +1868,7 @@ def build_realtime_flex():
         "contents": table_card_contents
     })
 
-    # Insight Box
+    # Insight Box (Nhận xét dưới cùng Phần 1)
     rem_hours = max(0.5, 13.0 - elapsed_hours)
     if thieuDTRT > 0:
         req_speed = thieuDTRT / rem_hours
@@ -1791,7 +1876,7 @@ def build_realtime_flex():
     else:
         insight_msg = f"🎉 Xuất sắc! Siêu thị đã hoàn thành Target doanh thu ngày hôm nay ({fmt_num(rt_total)}/{fmt_num(target_today)} Tr)."
 
-    body_contents.append({
+    body_contents_rt1.append({
         "type": "box",
         "layout": "vertical",
         "backgroundColor": "#fffbeb",
@@ -1812,7 +1897,30 @@ def build_realtime_flex():
         ]
     })
 
-    # Compete List Cards (Đã đạt & Chưa đạt)
+    flex_bubble_rt1 = {
+        "type": "bubble",
+        "size": "mega",
+        "header": {
+            "type": "box",
+            "layout": "vertical",
+            "backgroundColor": "#0284c7",
+            "paddingAll": "md",
+            "contents": [
+                {"type": "text", "text": "⚡ BÁO CÁO REALTIME (P.1: DOANH THU & TIẾN ĐỘ)", "weight": "bold", "size": "sm", "color": "#ffffff", "align": "center"},
+                {"type": "text", "text": f"🕒 Cập nhật: {now_str} • {status_badge_text}", "size": "xxs", "color": "#e0f2fe", "align": "center", "margin": "xs"}
+            ]
+        },
+        "body": {
+            "type": "box",
+            "layout": "vertical",
+            "backgroundColor": "#ffffff",
+            "paddingAll": "md",
+            "contents": body_contents_rt1
+        }
+    }
+
+    # Card 2: Các nhóm hàng thi đua hôm nay (Đã đạt & Chưa đạt)
+    body_contents_rt2 = []
     if td_done:
         done_contents = [
             {"type": "text", "text": "🏆 THI ĐUA ĐÃ ĐẠT CHỈ TIÊU NGÀY", "size": "xxs", "color": "#15803d", "weight": "bold", "margin": "xs"},
@@ -1820,9 +1928,8 @@ def build_realtime_flex():
         ]
         for idx, t in enumerate(td_done):
             done_contents.append(make_thidua_progress_row(idx+1, t["name"], None, t["ht"], t["unit"]))
-            done_contents.append({"type": "separator", "color": "#f1f5f9", "margin": "xs"})
             
-        body_contents.append({
+        body_contents_rt2.append({
             "type": "box",
             "layout": "vertical",
             "backgroundColor": "#f0fdf4",
@@ -1842,9 +1949,8 @@ def build_realtime_flex():
         for idx, t in enumerate(td_pending):
             con_lai_str = fmt_num(t['con_lai'])
             pending_contents.append(make_thidua_progress_row(idx+1, t["name"], con_lai_str, t["ht"], t["unit"]))
-            pending_contents.append({"type": "separator", "color": "#f1f5f9", "margin": "xs"})
             
-        body_contents.append({
+        body_contents_rt2.append({
             "type": "box",
             "layout": "vertical",
             "backgroundColor": "#fef2f2",
@@ -1856,17 +1962,17 @@ def build_realtime_flex():
             "contents": pending_contents
         })
 
-    flex_bubble = {
+    flex_bubble_rt2 = {
         "type": "bubble",
         "size": "mega",
         "header": {
             "type": "box",
             "layout": "vertical",
-            "backgroundColor": "#0284c7",
+            "backgroundColor": "#0f766e",
             "paddingAll": "md",
             "contents": [
-                {"type": "text", "text": "⚡ BÁO CÁO REALTIME HÔM NAY", "weight": "bold", "size": "sm", "color": "#ffffff", "align": "center"},
-                {"type": "text", "text": f"🕒 Cập nhật: {now_str} • {status_badge_text}", "size": "xxs", "color": "#e0f2fe", "align": "center", "margin": "xs"}
+                {"type": "text", "text": "⚡ BÁO CÁO REALTIME (P.2: NHÓM HÀNG THI ĐUA)", "weight": "bold", "size": "sm", "color": "#ffffff", "align": "center"},
+                {"type": "text", "text": f"🕒 Cập nhật: {now_str} • {rt_cntVD}/{len(parsed_td)} Nhóm Đạt Target", "size": "xxs", "color": "#ccfbf1", "align": "center", "margin": "xs"}
             ]
         },
         "body": {
@@ -1874,7 +1980,8 @@ def build_realtime_flex():
             "layout": "vertical",
             "backgroundColor": "#ffffff",
             "paddingAll": "md",
-            "contents": body_contents
+            "contents": body_contents_rt2
         }
     }
-    return flex_bubble
+
+    return [flex_bubble_rt1, flex_bubble_rt2]

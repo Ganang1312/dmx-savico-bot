@@ -728,14 +728,17 @@ def handle_message(event):
             
         task_assignments = []
         for line in lines[1:]:
-            if line.startswith(('-', '*', '–', '—', '•', '+')):
-                line_content = line[1:].strip()
-                idx_at = line_content.rfind('@')
-                if idx_at != -1:
-                    sub_task = line_content[:idx_at].strip().strip(' "\'').strip()
-                    assignee = line_content[idx_at + 1:].strip().strip(' "\'').strip()
-                    if sub_task and assignee:
-                        task_assignments.append((sub_task, assignee))
+            line_str = line.strip()
+            if line_str.startswith(('-', '*', '–', '—', '•', '+')):
+                line_content = line_str[1:].strip()
+                first_at = line_content.find('@')
+                if first_at != -1:
+                    sub_task = line_content[:first_at].strip().strip(' "\'').strip()
+                    mentions_text = line_content[first_at:]
+                    raw_mentions = [m.strip().strip(' "\'').strip() for m in mentions_text.split('@') if m.strip()]
+                    if sub_task and raw_mentions:
+                        for assignee in raw_mentions:
+                            task_assignments.append((sub_task, assignee))
                         
         if job_name and task_assignments:
             try:
@@ -947,8 +950,8 @@ def handle_message(event):
             
         try:
             if isinstance(flex_msg, list):
-                messages = [FlexSendMessage(alt_text=f"Báo Cáo Lũy Kế Savico P.{i+1}", contents=b) for i, b in enumerate(flex_msg)]
-                line_bot_api.reply_message(event.reply_token, messages)
+                carousel_content = {"type": "carousel", "contents": flex_msg}
+                line_bot_api.reply_message(event.reply_token, FlexSendMessage(alt_text="📊 BÁO CÁO LŨY KẾ (Cuộn Ngang P.1 & P.2)", contents=carousel_content))
             else:
                 line_bot_api.reply_message(event.reply_token, FlexSendMessage(alt_text="Báo Cáo Lũy Kế Savico", contents=flex_msg))
         except Exception as e:
@@ -974,25 +977,40 @@ def handle_message(event):
             if not isinstance(flex_bubbles, list):
                 flex_bubbles = [flex_bubbles]
 
-            # Mỗi thẻ KPI là 1 tin nhắn độc lập (Single Message per Card)
-            all_messages = []
-            for i, b in enumerate(flex_bubbles):
-                alt = "🏆 Bảng Xếp Hạng NV" if i == 0 else f"🎴 Thẻ KPI NV {i}"
-                all_messages.append(FlexSendMessage(alt_text=alt, contents=b))
+            overview_bubble = flex_bubbles[0]
+            staff_bubbles = flex_bubbles[1:]
 
-            # 1. Đợt 1 (3 tin đầu: Bảng Xếp Hạng + 2 Thẻ NV Top): Trả lời 100% MIỄN PHÍ bằng reply_message (payload ~26KB < 50KB)
-            first_chunk = all_messages[:3]
-            line_bot_api.reply_message(event.reply_token, first_chunk)
+            overview_msg = FlexSendMessage(alt_text="🏆 Bảng Xếp Hạng NV", contents=overview_bubble)
 
-            # 2. Đợt 2 trở đi: Push nối tiếp mỗi đợt 3 tin nhắn (payload ~37KB < 50KB), đảm bảo gửi ĐẦY ĐỦ 100% tất cả 11+ nhân viên!
-            remaining_msgs = all_messages[3:]
-            if remaining_msgs and target_id:
-                for chunk_idx in range(0, len(remaining_msgs), 3):
-                    chunk = remaining_msgs[chunk_idx:chunk_idx+3]
+            # Gom các thẻ nhân viên thành chuỗi Carousel cuộn ngang (2 thẻ / 1 Carousel)
+            carousel_messages = []
+            for i in range(0, len(staff_bubbles), 2):
+                pair = staff_bubbles[i:i+2]
+                start_num = i + 1
+                end_num = i + len(pair)
+                alt = f"🎴 Thẻ KPI NV {start_num}-{end_num}" if start_num != end_num else f"🎴 Thẻ KPI NV {start_num}"
+                c_msg = FlexSendMessage(
+                    alt_text=alt,
+                    contents={"type": "carousel", "contents": pair}
+                )
+                carousel_messages.append(c_msg)
+
+            # 1. Đợt 1 (Overview + Dãy Carousel NV1-NV2): Trả lời 100% MIỄN PHÍ bằng reply_message (~37.5KB < 50KB)
+            if carousel_messages:
+                first_reply = [overview_msg, carousel_messages[0]]
+                line_bot_api.reply_message(event.reply_token, first_reply)
+                remaining_carousels = carousel_messages[1:]
+            else:
+                line_bot_api.reply_message(event.reply_token, [overview_msg])
+                remaining_carousels = []
+
+            # 2. Đợt 2 trở đi: Push nối tiếp mỗi đợt 1 Carousel 2 thẻ (~41.8KB < 50KB), đẩy ĐẦY ĐỦ 100% tất cả 11+ nhân viên!
+            if remaining_carousels and target_id:
+                for c_msg in remaining_carousels:
                     try:
-                        line_bot_api.push_message(target_id, chunk)
+                        line_bot_api.push_message(target_id, c_msg)
                     except Exception as push_err:
-                        print(f"Lỗi push đợt tiếp theo NV1: {push_err}")
+                        print(f"Lỗi push đợt tiếp theo NV1 Carousel: {push_err}")
 
         except Exception as e:
             print(f"Lỗi gửi Flex NV1: {e}")
@@ -1011,7 +1029,11 @@ def handle_message(event):
             return
             
         try:
-            line_bot_api.reply_message(event.reply_token, FlexSendMessage(alt_text="Báo Cáo Realtime Hôm Nay", contents=flex_msg))
+            if isinstance(flex_msg, list):
+                carousel_content = {"type": "carousel", "contents": flex_msg}
+                line_bot_api.reply_message(event.reply_token, FlexSendMessage(alt_text="⚡ BÁO CÁO REALTIME (Cuộn Ngang P.1 & P.2)", contents=carousel_content))
+            else:
+                line_bot_api.reply_message(event.reply_token, FlexSendMessage(alt_text="⚡ Báo Cáo Realtime Hôm Nay", contents=flex_msg))
         except Exception as e:
             print(f"Lỗi gửi Flex RT1: {e}")
             try:
