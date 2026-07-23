@@ -291,12 +291,14 @@ def build_luyke_flex():
         dt = parse_number(get_key_val(b, "doanh thu quy đổi", default=0.0))
         sl = parse_number(get_key_val(b, "số lượng", "quantity", default=0.0))
         tg = parse_number(get_key_val(b, "target", default=0.0))
+        dt_ck = parse_number(get_key_val(b, "DT Năm ngoái", "doanh thu năm ngoái", "dt năm ngoái", "năm ngoái", "nam ngoai", "doanh thu nam ngoai", "dt nam ngoai", "doanh thu năm ngoái (cùng kỳ)", "doanh thu nam ngoai (cung ky)", "cùng kỳ", "cung ky", "tháng trước", "dt tháng trước", default=0.0))
         if dt > 0 or sl > 0:
             parsed_bi.append({
                 "name": shorten_name(nganh),
                 "sl": int(sl),
                 "dt": dt,
                 "tg": tg,
+                "dt_ck": dt_ck,
                 "ht": dt / tg if tg > 0 else 0.0
             })
     parsed_bi.sort(key=lambda x: x["dt"], reverse=True)
@@ -352,7 +354,7 @@ def build_luyke_flex():
     td_done.sort(key=lambda x: x["ht_dk"], reverse=True)
     td_pending.sort(key=lambda x: x["ht_dk"], reverse=True)
     
-    # Larger KPI Cards
+    # 6 Larger Hero KPI Cards Grid (2x3)
     body_contents = [
         {
             "type": "box",
@@ -450,45 +452,92 @@ def build_luyke_flex():
                 }
             ]
         },
-        {"type": "separator", "color": "#cbd5e1", "margin": "md"},
-        {"type": "text", "text": "📈 TIẾN ĐỘ HOÀN THÀNH THÁNG", "size": "xxs", "color": "#0f172a", "align": "center", "margin": "md", "weight": "bold"},
-        {"type": "text", "text": f"{totalHT*100:.0f}%", "size": "lg", "color": get_color_class(totalHT), "weight": "bold", "align": "center"},
+        
+        # Progress Card Container
         {
             "type": "box",
             "layout": "vertical",
-            "backgroundColor": "#e2e8f0",
-            "height": "6px",
+            "backgroundColor": "#f0f9ff",
+            "borderColor": "#bae6fd",
+            "borderWidth": "1px",
+            "paddingAll": "sm",
             "cornerRadius": "md",
-            "margin": "xs",
+            "margin": "md",
             "contents": [
+                {"type": "text", "text": "📈 TIẾN ĐỘ HOÀN THÀNH THÁNG", "size": "xxs", "color": "#0f172a", "align": "center", "weight": "bold"},
+                {"type": "text", "text": f"{totalHT*100:.0f}%", "size": "lg", "color": get_color_class(totalHT), "weight": "bold", "align": "center"},
                 {
                     "type": "box",
                     "layout": "vertical",
-                    "backgroundColor": get_color_class(totalHT),
+                    "backgroundColor": "#e2e8f0",
                     "height": "6px",
                     "cornerRadius": "md",
-                    "width": f"{min(100, round(totalHT * 100))}%",
-                    "contents": [{"type": "filler"}]
-                }
+                    "margin": "xs",
+                    "contents": [
+                        {
+                            "type": "box",
+                            "layout": "vertical",
+                            "backgroundColor": get_color_class(totalHT),
+                            "height": "6px",
+                            "cornerRadius": "md",
+                            "width": f"{min(100, round(totalHT * 100))}%",
+                            "contents": [{"type": "filler"}]
+                        }
+                    ]
+                },
+                {"type": "text", "text": f"🎯 Mục tiêu hôm nay: {fmt_num(target_today)} Tr/ngày", "size": "xs", "color": "#d97706", "weight": "bold", "align": "center", "margin": "xs"}
             ]
-        },
-        {"type": "text", "text": f"🎯 Mục tiêu hôm nay: {fmt_num(target_today)} Tr/ngày", "size": "xs", "color": "#d97706", "weight": "bold", "align": "center", "margin": "xs"},
-        {"type": "separator", "color": "#cbd5e1", "margin": "md"}
+        }
     ]
     
-    body_contents.append({"type": "text", "text": "📊 CHI TIẾT DOANH THU LŨY KẾ", "size": "xxs", "color": "#0284c7", "weight": "bold", "margin": "md"})
+    # Category Revenue & Growth Table Card Container
+    table_card_contents = [
+        {"type": "text", "text": "📊 CHI TIẾT DOANH THU & TĂNG TRƯỜNG CÙNG KỲ", "size": "xxs", "color": "#0284c7", "weight": "bold", "margin": "xs"}
+    ]
     headers = ["STT", "Ngành hàng", "SL", "DTQĐ", "Target", "%HT"]
     weights = [1, 3, 1, 2, 2, 2]
     aligns = ["start", "start", "center", "center", "center", "end"]
-    body_contents.append(make_table_header(headers, weights, aligns, bg_color="#0284c7"))
-    body_contents.append({"type": "separator", "color": "#cbd5e1", "margin": "xs"})
+    table_card_contents.append(make_table_header(headers, weights, aligns, bg_color="#0284c7"))
+    table_card_contents.append({"type": "separator", "color": "#cbd5e1", "margin": "xs"})
     
     for idx, b in enumerate(parsed_bi[:6]):
         ty_trong = (b["dt"] / tDT * 100) if tDT > 0 else 0.0
+        dt_ck_val = b.get("dt_ck", 0.0)
+        
+        if dt_ck_val > 0:
+            diff_ck = b["dt"] - dt_ck_val
+            pct_ck = (diff_ck / dt_ck_val * 100)
+            if diff_ck >= 0:
+                growth_text = f" 📈 CK: ▲ +{fmt_num(diff_ck)}T (+{pct_ck:.0f}%)"
+                growth_color = "#16a34a"
+            else:
+                growth_text = f" 📉 CK: ▼ -{fmt_num(abs(diff_ck))}T ({pct_ck:.0f}%)"
+                growth_color = "#dc2626"
+        else:
+            diff_tg = b["dt"] - b["tg"]
+            if diff_tg >= 0:
+                growth_text = f" 🎯 vs Target: ▲ +{fmt_num(diff_tg)}T"
+                growth_color = "#16a34a"
+            else:
+                growth_text = f" 🎯 vs Target: ▼ -{fmt_num(abs(diff_tg))}T"
+                growth_color = "#dc2626"
+
         vals = [idx+1, f"{b['name']} ({ty_trong:.0f}%)", fmt_num(b["sl"]), fmt_num(b["dt"]), fmt_num(b["tg"]), f"{b['ht']*100:.0f}%"]
         colors = ["#64748b", "#0f172a", "#0f172a", "#0284c7", "#475569", get_color_class(b["ht"])]
-        body_contents.append(make_table_row(vals, weights, aligns, colors))
-        body_contents.append({
+        table_card_contents.append(make_table_row(vals, weights, aligns, colors))
+        
+        # Subline: Tăng trưởng cùng kỳ indicator text
+        table_card_contents.append({
+            "type": "box",
+            "layout": "horizontal",
+            "margin": "xs",
+            "contents": [
+                {"type": "text", "text": growth_text, "size": "xxs", "color": growth_color, "weight": "bold", "flex": 1, "align": "start"}
+            ]
+        })
+        
+        # Mini 3px progress bar
+        table_card_contents.append({
             "type": "box",
             "layout": "vertical",
             "backgroundColor": "#e2e8f0",
@@ -507,18 +556,31 @@ def build_luyke_flex():
                 }
             ]
         })
-        body_contents.append({"type": "separator", "color": "#f1f5f9", "margin": "xs"})
+        table_card_contents.append({"type": "separator", "color": "#f1f5f9", "margin": "xs"})
     
     tot_sl = sum(x["sl"] for x in parsed_bi)
     tot_vals = ["⭐", "TỔNG CỘNG", fmt_num(tot_sl), fmt_num(tDT), fmt_num(tTG), f"{totalHT*100:.0f}%"]
     tot_colors = ["#ffffff", "#ffffff", "#ffffff", "#ffffff", "#ffffff", "#ffffff"]
-    body_contents.append(make_table_row(tot_vals, weights, aligns, tot_colors, bold=True, bg_color="#f59e0b"))
+    table_card_contents.append(make_table_row(tot_vals, weights, aligns, tot_colors, bold=True, bg_color="#f59e0b"))
 
     body_contents.append({
         "type": "box",
         "layout": "vertical",
-        "backgroundColor": "#f8fafc",
-        "borderColor": "#cbd5e1",
+        "backgroundColor": "#ffffff",
+        "borderColor": "#e2e8f0",
+        "borderWidth": "1px",
+        "cornerRadius": "md",
+        "paddingAll": "sm",
+        "margin": "md",
+        "contents": table_card_contents
+    })
+
+    # Smart Insight Card
+    body_contents.append({
+        "type": "box",
+        "layout": "vertical",
+        "backgroundColor": "#fffbeb",
+        "borderColor": "#fde68a",
         "borderWidth": "1px",
         "cornerRadius": "md",
         "paddingAll": "sm",
@@ -528,27 +590,57 @@ def build_luyke_flex():
                 "type": "text",
                 "text": f"💡 Cần trung bình {fmt_num(target_today)} Tr/ngày trong {days_remaining} ngày còn lại để cán đích {fmt_num(tTG)} Tr.",
                 "size": "xxs",
-                "color": "#475569",
+                "color": "#92400e",
                 "wrap": True,
                 "weight": "bold"
             }
         ]
     })
 
+    # Thi Đua ĐÃ ĐẠT Card
     if td_done:
-        body_contents.append({"type": "separator", "color": "#cbd5e1", "margin": "md"})
-        body_contents.append({"type": "text", "text": "🏆 THI ĐUA DỰ KIẾN ĐẠT (DKHT ≥ 100%)", "size": "xxs", "color": "#16a34a", "weight": "bold", "margin": "md"})
+        done_contents = [
+            {"type": "text", "text": "🏆 THI ĐUA DỰ KIẾN ĐẠT (DKHT ≥ 100%)", "size": "xxs", "color": "#15803d", "weight": "bold", "margin": "xs"},
+            {"type": "separator", "color": "#bbf7d0", "margin": "xs"}
+        ]
         for idx, t in enumerate(td_done):
-            body_contents.append(make_thidua_progress_row(idx+1, t["name"], None, t["ht_dk"], t["unit"]))
-            body_contents.append({"type": "separator", "color": "#f1f5f9", "margin": "xs"})
+            done_contents.append(make_thidua_progress_row(idx+1, t["name"], None, t["ht_dk"], t["unit"]))
+            done_contents.append({"type": "separator", "color": "#f1f5f9", "margin": "xs"})
             
+        body_contents.append({
+            "type": "box",
+            "layout": "vertical",
+            "backgroundColor": "#f0fdf4",
+            "borderColor": "#bbf7d0",
+            "borderWidth": "1px",
+            "cornerRadius": "md",
+            "paddingAll": "sm",
+            "margin": "md",
+            "contents": done_contents
+        })
+            
+    # Thi Đua CHƯA ĐẠT Card
     if td_pending:
-        body_contents.append({"type": "separator", "color": "#cbd5e1", "margin": "md"})
-        body_contents.append({"type": "text", "text": "🎯 THI ĐUA CHƯA ĐẠT (DKHT < 100%)", "size": "xxs", "color": "#dc2626", "weight": "bold", "margin": "md"})
+        pending_contents = [
+            {"type": "text", "text": "🎯 THI ĐUA CHƯA ĐẠT (DKHT < 100%)", "size": "xxs", "color": "#b91c1c", "weight": "bold", "margin": "xs"},
+            {"type": "separator", "color": "#fecaca", "margin": "xs"}
+        ]
         for idx, t in enumerate(td_pending):
             con_lai_str = fmt_num(t['con_lai'])
-            body_contents.append(make_thidua_progress_row(idx+1, t["name"], con_lai_str, t["ht_dk"], t["unit"]))
-            body_contents.append({"type": "separator", "color": "#f1f5f9", "margin": "xs"})
+            pending_contents.append(make_thidua_progress_row(idx+1, t["name"], con_lai_str, t["ht_dk"], t["unit"]))
+            pending_contents.append({"type": "separator", "color": "#f1f5f9", "margin": "xs"})
+            
+        body_contents.append({
+            "type": "box",
+            "layout": "vertical",
+            "backgroundColor": "#fef2f2",
+            "borderColor": "#fecaca",
+            "borderWidth": "1px",
+            "cornerRadius": "md",
+            "paddingAll": "sm",
+            "margin": "md",
+            "contents": pending_contents
+        })
             
     flex_bubble = {
         "type": "bubble",
