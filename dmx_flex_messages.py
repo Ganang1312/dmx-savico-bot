@@ -872,7 +872,7 @@ def build_realtime_flex():
     rt_tc_pct = (rt_tTC / rt_total * 100) if rt_total > 0 else 0.0
     
     tongDTHienTai = lk_tDT + rt_total
-    duKienThang = (tongDTHienTai / days_passed) * days_in_month if days_passed > 0 else 0.0
+    duKienThang = (tongDTHienTai / current_day) * days_in_month if current_day > 0 else 0.0
     ptDuKienThang = (duKienThang / lk_tTG * 100) if lk_tTG > 0 else 0.0
     
     elapsed_hours = (now.hour + now.minute / 60.0) - 9.0
@@ -963,35 +963,22 @@ def build_realtime_flex():
     td_done.sort(key=lambda x: x["ht"], reverse=True)
     td_pending.sort(key=lambda x: x["ht"], reverse=True)
     
-    body_contents = [
-        # Realtime summary box
+    # Overview & Progress Container Card
+    overview_contents = [
         {
-            "type": "box",
-            "layout": "vertical",
-            "backgroundColor": "#eff6ff",
-            "borderColor": "#0284c7",
-            "borderWidth": "light",
-            "paddingAll": "sm",
-            "cornerRadius": "md",
-            "margin": "sm",
-            "contents": [
-                {
-                    "type": "text",
-                    "text": f"🔥 Với DT hôm nay đạt 🚀 {fmt_num(rt_total)} TR, LK siêu thị đạt 💰 {fmt_num(tongDTHienTai)} TR. DK hết tháng về đích 🎯 {fmt_num(duKienThang)} TR ({ptDuKienThang:.1f}%).",
-                    "size": "xxs",
-                    "color": "#1e40af",
-                    "weight": "bold",
-                    "wrap": True,
-                    "align": "center"
-                }
-            ]
+            "type": "text",
+            "text": f"🔥 Với DT hôm nay đạt 🚀 {fmt_num(rt_total)} TR, LK siêu thị đạt 💰 {fmt_num(tongDTHienTai)} TR. DK hết tháng về đích 🎯 {fmt_num(duKienThang)} TR ({ptDuKienThang:.1f}%).",
+            "size": "xxs",
+            "color": "#1e40af",
+            "weight": "bold",
+            "wrap": True,
+            "align": "center"
         },
-        
-        # Progress Bar 1: Tiến độ thời gian
+        {"type": "separator", "color": "#cbd5e1", "margin": "sm"},
         {
             "type": "box",
             "layout": "horizontal",
-            "margin": "md",
+            "margin": "sm",
             "contents": [
                 {"type": "text", "text": "🕒 TIẾN ĐỘ THỜI GIAN", "size": "xxs", "color": "#475569", "weight": "bold", "flex": 6},
                 {"type": "text", "text": f"(Còn {(13.0 - elapsed_hours):.1f}h)", "size": "xxs", "color": "#64748b", "align": "end", "flex": 4}
@@ -1025,8 +1012,6 @@ def build_realtime_flex():
                 }
             ]
         },
-        
-        # Progress Bar 2: Tiến độ DT ngày
         {
             "type": "box",
             "layout": "horizontal",
@@ -1068,7 +1053,7 @@ def build_realtime_flex():
 
     if time_ratio > htChung and (time_ratio - htChung) >= 0.15:
         gap_pct = round((time_ratio - htChung) * 100)
-        body_contents.append({
+        overview_contents.append({
             "type": "text",
             "text": f"⚠️ Đang chậm {gap_pct}% so với nhịp độ thời gian khung giờ!",
             "size": "xxs",
@@ -1078,10 +1063,19 @@ def build_realtime_flex():
             "margin": "xs"
         })
 
-    body_contents.append({"type": "separator", "color": "#cbd5e1", "margin": "md"})
-    
-    # Larger KPI Boxes with Icons
-    body_contents.extend([
+    body_contents = [
+        {
+            "type": "box",
+            "layout": "vertical",
+            "backgroundColor": "#f0f9ff",
+            "borderColor": "#bae6fd",
+            "borderWidth": "1px",
+            "paddingAll": "sm",
+            "cornerRadius": "md",
+            "margin": "xs",
+            "contents": overview_contents
+        },
+        # 4 Hero KPI Cards Grid
         {
             "type": "box",
             "layout": "horizontal",
@@ -1145,24 +1139,25 @@ def build_realtime_flex():
                     ]
                 }
             ]
-        },
-        {"type": "separator", "color": "#cbd5e1", "margin": "md"}
-    ])
+        }
+    ]
     
-    # Revenue Table
-    body_contents.append({"type": "text", "text": "⚡ CHI TIẾT DOANH THU HÔM NAY", "size": "xxs", "color": "#0284c7", "weight": "bold", "margin": "md"})
+    # Revenue Table Container Card
+    table_card_contents = [
+        {"type": "text", "text": "⚡ CHI TIẾT DOANH THU HÔM NAY", "size": "xxs", "color": "#0284c7", "weight": "bold", "margin": "xs"}
+    ]
     headers = ["STT", "Ngành hàng", "SL", "DTQĐ", "Target", "%HT"]
     weights = [1, 3, 1, 2, 2, 2]
     aligns = ["start", "start", "center", "center", "center", "end"]
-    body_contents.append(make_table_header(headers, weights, aligns, bg_color="#0284c7"))
-    body_contents.append({"type": "separator", "color": "#cbd5e1", "margin": "xs"})
+    table_card_contents.append(make_table_header(headers, weights, aligns, bg_color="#0284c7"))
+    table_card_contents.append({"type": "separator", "color": "#cbd5e1", "margin": "xs"})
     
     for idx, b in enumerate(parsed_rt_bi[:6]):
         ty_trong_rt = (b["dt"] / rt_total * 100) if rt_total > 0 else 0.0
         vals = [idx+1, f"{b['name']} ({ty_trong_rt:.0f}%)", fmt_num(b["sl"]), fmt_num(b["dt"]), fmt_num(b["tg"]), f"{b['ht']*100:.0f}%"]
         colors = ["#64748b", "#0f172a", "#0f172a", "#0284c7", "#475569", get_color_class(b["ht"])]
-        body_contents.append(make_table_row(vals, weights, aligns, colors))
-        body_contents.append({
+        table_card_contents.append(make_table_row(vals, weights, aligns, colors))
+        table_card_contents.append({
             "type": "box",
             "layout": "vertical",
             "backgroundColor": "#e2e8f0",
@@ -1181,14 +1176,27 @@ def build_realtime_flex():
                 }
             ]
         })
-        body_contents.append({"type": "separator", "color": "#f1f5f9", "margin": "xs"})
+        table_card_contents.append({"type": "separator", "color": "#f1f5f9", "margin": "xs"})
         
     tot_sl = sum(x["sl"] for x in parsed_rt_bi)
     totalHTCol2 = rt_total / rt_tTarget if rt_tTarget > 0 else 0.0
     tot_vals = ["⭐", "TỔNG CỘNG", fmt_num(tot_sl), fmt_num(rt_total), fmt_num(rt_tTarget), f"{totalHTCol2*100:.0f}%"]
     tot_colors = ["#ffffff", "#ffffff", "#ffffff", "#ffffff", "#ffffff", "#ffffff"]
-    body_contents.append(make_table_row(tot_vals, weights, aligns, tot_colors, bold=True, bg_color="#f59e0b"))
+    table_card_contents.append(make_table_row(tot_vals, weights, aligns, tot_colors, bold=True, bg_color="#f59e0b"))
 
+    body_contents.append({
+        "type": "box",
+        "layout": "vertical",
+        "backgroundColor": "#ffffff",
+        "borderColor": "#e2e8f0",
+        "borderWidth": "1px",
+        "cornerRadius": "md",
+        "paddingAll": "sm",
+        "margin": "md",
+        "contents": table_card_contents
+    })
+
+    # Insight Box
     rem_hours = max(0.5, 13.0 - elapsed_hours)
     if thieuDTRT > 0:
         req_speed = thieuDTRT / rem_hours
@@ -1199,8 +1207,8 @@ def build_realtime_flex():
     body_contents.append({
         "type": "box",
         "layout": "vertical",
-        "backgroundColor": "#f8fafc",
-        "borderColor": "#cbd5e1",
+        "backgroundColor": "#fffbeb",
+        "borderColor": "#fde68a",
         "borderWidth": "1px",
         "cornerRadius": "md",
         "paddingAll": "sm",
@@ -1210,29 +1218,57 @@ def build_realtime_flex():
                 "type": "text",
                 "text": insight_msg,
                 "size": "xxs",
-                "color": "#475569",
+                "color": "#92400e",
                 "wrap": True,
                 "weight": "bold"
             }
         ]
     })
 
-    # Compete List
+    # Compete List Cards (Đã đạt & Chưa đạt)
     if td_done:
-        body_contents.append({"type": "separator", "color": "#cbd5e1", "margin": "md"})
-        body_contents.append({"type": "text", "text": "🏆 THI ĐUA ĐÃ ĐẠT CHỈ TIÊU NGÀY", "size": "xxs", "color": "#16a34a", "weight": "bold", "margin": "md"})
+        done_contents = [
+            {"type": "text", "text": "🏆 THI ĐUA ĐÃ ĐẠT CHỈ TIÊU NGÀY", "size": "xxs", "color": "#15803d", "weight": "bold", "margin": "xs"},
+            {"type": "separator", "color": "#bbf7d0", "margin": "xs"}
+        ]
         for idx, t in enumerate(td_done):
-            body_contents.append(make_thidua_progress_row(idx+1, t["name"], None, t["ht"], t["unit"]))
-            body_contents.append({"type": "separator", "color": "#f1f5f9", "margin": "xs"})
+            done_contents.append(make_thidua_progress_row(idx+1, t["name"], None, t["ht"], t["unit"]))
+            done_contents.append({"type": "separator", "color": "#f1f5f9", "margin": "xs"})
             
+        body_contents.append({
+            "type": "box",
+            "layout": "vertical",
+            "backgroundColor": "#f0fdf4",
+            "borderColor": "#bbf7d0",
+            "borderWidth": "1px",
+            "cornerRadius": "md",
+            "paddingAll": "sm",
+            "margin": "md",
+            "contents": done_contents
+        })
+
     if td_pending:
-        body_contents.append({"type": "separator", "color": "#cbd5e1", "margin": "md"})
-        body_contents.append({"type": "text", "text": "🎯 THI ĐUA CHƯA ĐẠT CHỈ TIÊU NGÀY", "size": "xxs", "color": "#dc2626", "weight": "bold", "margin": "md"})
+        pending_contents = [
+            {"type": "text", "text": "🎯 THI ĐUA CHƯA ĐẠT CHỈ TIÊU NGÀY", "size": "xxs", "color": "#b91c1c", "weight": "bold", "margin": "xs"},
+            {"type": "separator", "color": "#fecaca", "margin": "xs"}
+        ]
         for idx, t in enumerate(td_pending):
             con_lai_str = fmt_num(t['con_lai'])
-            body_contents.append(make_thidua_progress_row(idx+1, t["name"], con_lai_str, t["ht"], t["unit"]))
-            body_contents.append({"type": "separator", "color": "#f1f5f9", "margin": "xs"})
+            pending_contents.append(make_thidua_progress_row(idx+1, t["name"], con_lai_str, t["ht"], t["unit"]))
+            pending_contents.append({"type": "separator", "color": "#f1f5f9", "margin": "xs"})
             
+        body_contents.append({
+            "type": "box",
+            "layout": "vertical",
+            "backgroundColor": "#fef2f2",
+            "borderColor": "#fecaca",
+            "borderWidth": "1px",
+            "cornerRadius": "md",
+            "paddingAll": "sm",
+            "margin": "md",
+            "contents": pending_contents
+        })
+
     flex_bubble = {
         "type": "bubble",
         "size": "mega",
