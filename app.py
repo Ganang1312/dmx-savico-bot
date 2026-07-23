@@ -882,7 +882,11 @@ def handle_message(event):
             return
             
         try:
-            line_bot_api.reply_message(event.reply_token, FlexSendMessage(alt_text="Báo Cáo Lũy Kế Savico", contents=flex_msg))
+            if isinstance(flex_msg, list):
+                messages = [FlexSendMessage(alt_text=f"Báo Cáo Lũy Kế Savico P.{i+1}", contents=b) for i, b in enumerate(flex_msg)]
+                line_bot_api.reply_message(event.reply_token, messages)
+            else:
+                line_bot_api.reply_message(event.reply_token, FlexSendMessage(alt_text="Báo Cáo Lũy Kế Savico", contents=flex_msg))
         except Exception as e:
             print(f"Lỗi gửi Flex LK1: {e}")
             try:
@@ -962,7 +966,11 @@ def handle_message(event):
                     try:
                         if scrape_type_val == "luyke":
                             flex_msg = build_luyke_flex()
-                            line_bot_api.push_message(dest_id, FlexSendMessage(alt_text="Báo Cáo Lũy Kế Savico", contents=flex_msg))
+                            if isinstance(flex_msg, list):
+                                messages = [FlexSendMessage(alt_text=f"Báo Cáo Lũy Kế Savico P.{i+1}", contents=b) for i, b in enumerate(flex_msg)]
+                                line_bot_api.push_message(dest_id, messages)
+                            else:
+                                line_bot_api.push_message(dest_id, FlexSendMessage(alt_text="Báo Cáo Lũy Kế Savico", contents=flex_msg))
                         else:
                             flex_msg = build_realtime_flex()
                             line_bot_api.push_message(dest_id, FlexSendMessage(alt_text="Báo Cáo Realtime Hôm Nay", contents=flex_msg))

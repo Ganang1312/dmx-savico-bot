@@ -657,6 +657,29 @@ def build_luyke_flex():
         ]
     })
 
+    flex_bubble_p1 = {
+        "type": "bubble",
+        "size": "mega",
+        "header": {
+            "type": "box",
+            "layout": "vertical",
+            "backgroundColor": "#1e40af",
+            "paddingAll": "md",
+            "contents": [
+                {"type": "text", "text": "📊 BÁO CÁO LŨY KẾ (P.1: DOANH THU & TỶ TRỌNG)", "weight": "bold", "size": "sm", "color": "#ffffff", "align": "center"},
+                {"type": "text", "text": f"🕒 Cập nhật: {now_str} • {status_badge_text}", "size": "xxs", "color": "#dbeafe", "align": "center", "margin": "xs"}
+            ]
+        },
+        "body": {
+            "type": "box",
+            "layout": "vertical",
+            "backgroundColor": "#ffffff",
+            "paddingAll": "md",
+            "contents": body_contents
+        }
+    }
+
+    body_contents_p2 = []
     # Thi Đua ĐÃ ĐẠT Card
     if td_done:
         done_contents = [
@@ -665,7 +688,7 @@ def build_luyke_flex():
         for idx, t in enumerate(td_done):
             done_contents.append(make_thidua_progress_row(idx+1, t["name"], None, t["ht_dk"], t["unit"]))
             
-        body_contents.append({
+        body_contents_p2.append({
             "type": "box",
             "layout": "vertical",
             "backgroundColor": "#f0fdf4",
@@ -686,7 +709,7 @@ def build_luyke_flex():
             con_lai_str = fmt_num(t['con_lai'])
             pending_contents.append(make_thidua_progress_row(idx+1, t["name"], con_lai_str, t["ht_dk"], t["unit"]))
             
-        body_contents.append({
+        body_contents_p2.append({
             "type": "box",
             "layout": "vertical",
             "backgroundColor": "#fef2f2",
@@ -698,17 +721,17 @@ def build_luyke_flex():
             "contents": pending_contents
         })
 
-    flex_bubble = {
+    flex_bubble_p2 = {
         "type": "bubble",
         "size": "mega",
         "header": {
             "type": "box",
             "layout": "vertical",
-            "backgroundColor": "#1e40af",
+            "backgroundColor": "#0f766e",
             "paddingAll": "md",
             "contents": [
-                {"type": "text", "text": "📊 BÁO CÁO LŨY KẾ CỤM SAVICO", "weight": "bold", "size": "sm", "color": "#ffffff", "align": "center"},
-                {"type": "text", "text": f"🕒 Cập nhật: {now_str} • {status_badge_text}", "size": "xxs", "color": "#dbeafe", "align": "center", "margin": "xs"}
+                {"type": "text", "text": "🏆 BÁO CÁO LŨY KẾ (P.2: NGÀNH HÀNG THI ĐUA)", "weight": "bold", "size": "sm", "color": "#ffffff", "align": "center"},
+                {"type": "text", "text": f"🕒 Cập nhật: {now_str} • {cnt_dk}/{len(parsed_td)} Nhóm Đạt DK", "size": "xxs", "color": "#ccfbf1", "align": "center", "margin": "xs"}
             ]
         },
         "body": {
@@ -716,11 +739,11 @@ def build_luyke_flex():
             "layout": "vertical",
             "backgroundColor": "#ffffff",
             "paddingAll": "md",
-            "contents": body_contents
+            "contents": body_contents_p2
         }
     }
 
-    return flex_bubble
+    return [flex_bubble_p1, flex_bubble_p2]
 
 def build_nhanvien_flex():
     data = get_dashboard_data("Config_ThiDua,Data_NV_BI,Data_BI,Data_Realtime_NV")
