@@ -175,12 +175,18 @@ def get_color_class(pct):
     else:
         return "#dc2626" # Red
 
-def make_thidua_progress_row(idx, name, con_lai_str, ht, unit):
+def make_thidua_progress_row(idx, name, con_lai_str, ht, unit, mt_ngay_str=None):
     ht_pct = round(ht * 100)
     color = get_color_class(ht)
     
+    parts = []
     if con_lai_str:
-        display_name = f"{name} (-{con_lai_str} {unit})"
+        parts.append(f"-{con_lai_str} {unit}")
+    if mt_ngay_str:
+        parts.append(f"🎯 {mt_ngay_str}")
+        
+    if parts:
+        display_name = f"{name} ({' • '.join(parts)})"
     else:
         display_name = name
         
@@ -375,6 +381,12 @@ def build_luyke_flex():
             cnt_dk += 1
             
         con_lai = max(0.0, tg - actual)
+        mt_ngay_val = (con_lai / days_remaining) if days_remaining > 0 else 0.0
+        if is_dt:
+            mt_ngay_str = f"{mt_ngay_val:.1f} Tr/N" if mt_ngay_val > 0 else "0 Tr/N"
+        else:
+            mt_ngay_str = f"{int(round(mt_ngay_val))} SP/N" if mt_ngay_val >= 1 else (f"{mt_ngay_val:.1f} SP/N" if mt_ngay_val > 0 else "0 SP/N")
+
         parsed_td.append({
             "name": shorten_name(nganh),
             "actual": actual,
@@ -382,7 +394,8 @@ def build_luyke_flex():
             "target": tg,
             "ht": ht_target,
             "ht_dk": ht_du_kien,
-            "unit": "TR" if is_dt else "SP"
+            "unit": "TR" if is_dt else "SP",
+            "mt_ngay_str": mt_ngay_str
         })
         
     td_done = [x for x in parsed_td if x["ht_dk"] >= 1.0]
@@ -727,7 +740,7 @@ def build_luyke_flex():
         ]
         for idx, t in enumerate(td_pending):
             con_lai_str = fmt_num(t['con_lai'])
-            pending_contents.append(make_thidua_progress_row(idx+1, t["name"], con_lai_str, t["ht_dk"], t["unit"]))
+            pending_contents.append(make_thidua_progress_row(idx+1, t["name"], con_lai_str, t["ht_dk"], t["unit"], t.get("mt_ngay_str")))
             
         body_contents_p2.append({
             "type": "box",
@@ -765,21 +778,27 @@ def build_luyke_flex():
 
     return [flex_bubble_p1, flex_bubble_p2]
 
-def shorten_staff_name(full_name):
+def shorten_staff_name_user(full_name, user_id=None):
     if not full_name:
-        return ""
+        return f"NV-{user_id}" if user_id else "NV"
     full_name = str(full_name).strip()
+    extracted_user = user_id
     if " - " in full_name:
-        full_name = full_name.split(" - ")[-1].strip()
-    parts = full_name.split()
-    if len(parts) <= 2:
-        return full_name
-    abbr = ".".join(p[0].upper() for p in parts[:-1]) + "." + parts[-1]
-    return abbr
+        parts = full_name.split(" - ")
+        if not extracted_user and parts[0].strip().isdigit():
+            extracted_user = parts[0].strip()
+        full_name = parts[-1].strip()
+    
+    name_parts = full_name.split()
+    first_name = name_parts[-1] if name_parts else full_name
+    
+    if extracted_user:
+        return f"{first_name}-{extracted_user}"
+    return first_name
 
 def build_leaderboard_overview_bubble(emp_list, now_str):
     """
-    Tin nhắn 1: Bảng Xếp Hạng Doanh Thu & Thi Đua Tất Cả Nhân Viên (Chuẩn Ảnh 1)
+    Tin nhắn 1: Bảng Xếp Hạng Doanh Thu & Thi Đua Tất Cả Nhân Viên (Chuẩn Ảnh 1 mới)
     """
     rows_contents = []
     
@@ -792,18 +811,18 @@ def build_leaderboard_overview_bubble(emp_list, now_str):
         "cornerRadius": "xs",
         "contents": [
             {"type": "text", "text": "#", "size": "xxs", "color": "#ffffff", "weight": "bold", "flex": 1, "align": "center"},
-            {"type": "text", "text": "👤 NHÂN VIÊN", "size": "xxs", "color": "#ffffff", "weight": "bold", "flex": 3, "align": "start"},
+            {"type": "text", "text": "👤 NV", "size": "xxs", "color": "#ffffff", "weight": "bold", "flex": 3, "align": "start"},
             {"type": "text", "text": "⭐ ĐIỂM", "size": "xxs", "color": "#ffffff", "weight": "bold", "flex": 2, "align": "center"},
-            {"type": "text", "text": "🏅 T.ĐUA", "size": "xxs", "color": "#ffffff", "weight": "bold", "flex": 2, "align": "center"},
-            {"type": "text", "text": "💼 DOANH THU", "size": "xxs", "color": "#ffffff", "weight": "bold", "flex": 4, "align": "center"}
+            {"type": "text", "text": "🏅 TĐ", "size": "xxs", "color": "#ffffff", "weight": "bold", "flex": 2, "align": "center"},
+            {"type": "text", "text": "💼 DT", "size": "xxs", "color": "#ffffff", "weight": "bold", "flex": 4, "align": "center"}
         ]
     })
     rows_contents.append({"type": "separator", "color": "#cbd5e1", "margin": "xs"})
 
     for idx, e in enumerate(emp_list):
         rank = idx + 1
-        short_name = shorten_staff_name(e["name"])
-        rank_bg = "#eab308" if rank == 1 else ("#94a3b8" if rank == 2 else ("#d97706" if rank == 3 else "#64748b"))
+        user_id = e.get("user_id", "")
+        name_code = shorten_staff_name_user(e.get("name", ""), user_id)
         row_bg = "#fef3c7" if rank <= 3 else ("#f8fafc" if rank % 2 == 0 else "#ffffff")
         
         actual_val = e.get("actual", 0.0)
@@ -837,7 +856,7 @@ def build_leaderboard_overview_bubble(emp_list, now_str):
                             "type": "text",
                             "text": str(rank),
                             "weight": "bold",
-                            "size": "xs",
+                            "size": "xxs",
                             "color": "#d97706" if rank <= 3 else "#0f172a",
                             "align": "center"
                         },
@@ -851,7 +870,7 @@ def build_leaderboard_overview_bubble(emp_list, now_str):
                         }
                     ]
                 },
-                # Tên nhân viên
+                # Tên nhân viên (Tên-User_ID)
                 {
                     "type": "box",
                     "layout": "vertical",
@@ -859,9 +878,9 @@ def build_leaderboard_overview_bubble(emp_list, now_str):
                     "contents": [
                         {
                             "type": "text",
-                            "text": short_name,
+                            "text": name_code,
                             "weight": "bold",
-                            "size": "xs",
+                            "size": "xxs",
                             "color": "#0f172a"
                         }
                     ]
@@ -877,7 +896,7 @@ def build_leaderboard_overview_bubble(emp_list, now_str):
                             "type": "text",
                             "text": f"{score_val:.1f}",
                             "weight": "bold",
-                            "size": "xs",
+                            "size": "xxs",
                             "color": "#b45309"
                         },
                         {
@@ -900,7 +919,7 @@ def build_leaderboard_overview_bubble(emp_list, now_str):
                             "type": "text",
                             "text": f"{td_passed}/{td_total}",
                             "weight": "bold",
-                            "size": "xs",
+                            "size": "xxs",
                             "color": "#0284c7"
                         },
                         {
@@ -943,7 +962,7 @@ def build_leaderboard_overview_bubble(emp_list, now_str):
                         },
                         {
                             "type": "text",
-                            "text": f"⌛ CÒN LẠI {fmt_num(con_lai_val)}",
+                            "text": f"⌛ CÒN {fmt_num(con_lai_val)}",
                             "size": "xxs",
                             "color": "#dc2626",
                             "weight": "bold",
@@ -980,12 +999,13 @@ def build_leaderboard_overview_bubble(emp_list, now_str):
     }
     return bubble
 
-def build_individual_staff_card(e, rank, now_str, thi_dua_list=None):
+def build_individual_staff_card(e, rank, total_emp=11, now_str="", thi_dua_list=None):
     """
-    Tin nhắn 2..N: Thẻ KPI Chi Tiết Từng Nhân Viên (Chuẩn Ảnh 2)
+    Tin nhắn 2..N: Thẻ KPI Chi Tiết Từng Nhân Viên (Chuẩn Ảnh 2 mới - Single Card)
     """
     name = e.get("name", "Nhân Viên")
     user_id = e.get("user_id", "90509")
+    name_code = shorten_staff_name_user(name, user_id)
     actual_val = e.get("actual", 0.0)
     target_val = e.get("target", 0.0)
     con_lai_val = max(0.0, target_val - actual_val)
@@ -1000,8 +1020,23 @@ def build_individual_staff_card(e, rank, now_str, thi_dua_list=None):
     du_kien_pct = pct_val * 1.4 if pct_val > 0 else 100.0
     m_tieu_ngay = max(1, int(round(con_lai_val / 10.0))) if con_lai_val > 0 else 0
 
-    header_bg = "#eab308" if rank == 1 else ("#94a3b8" if rank == 2 else ("#d97706" if rank == 3 else "#0f766e"))
-    tagline = "🥇 Dẫn đầu cuộc đua, tuyệt vời!" if rank == 1 else ("🥈 Á quân xuất sắc!" if rank == 2 else "🥉 Top 3 xuất sắc!")
+    # Phân định màu header & tagline dựa trên Rank thực tế
+    bottom_cutoff = int(total_emp * 0.7) if total_emp > 0 else 8
+    if rank == 1:
+        header_bg = "#eab308" # Vàng Gold
+        tagline = "🥇 Dẫn đầu cuộc đua, tuyệt vời!"
+    elif rank == 2:
+        header_bg = "#64748b" # Xám Bạc
+        tagline = "🥈 Á quân xuất sắc!"
+    elif rank == 3:
+        header_bg = "#d97706" # Đồng Amber
+        tagline = "🥉 Top 3 xuất sắc!"
+    elif rank > bottom_cutoff:
+        header_bg = "#dc2626" # Đỏ Cảnh Báo cho Bottom 30%
+        tagline = "⚠️ Cảnh báo: Thuộc nhóm cuối, cần bứt phá!"
+    else:
+        header_bg = "#0f766e" # Xanh Teal nhóm trung bình
+        tagline = "💪 Đang nỗ lực gia tăng tốc độ!"
 
     if not thi_dua_list:
         thi_dua_list = [
@@ -1012,12 +1047,9 @@ def build_individual_staff_card(e, rank, now_str, thi_dua_list=None):
             {"name": "💻 Laptop", "m_tieu": "174k", "target": 87, "actual": 85, "con_lai": 2, "ht": 98.2, "du_kien": 138.4},
             {"name": "🏢 ĐIỆN TỬ & ĐIỆN LẠNH LG", "m_tieu": "990k", "target": 119, "actual": 110, "con_lai": 9, "ht": 92.5, "du_kien": 130.4},
             {"name": "💳 TRẢ CHẬM HOMECREDIT", "m_tieu": "780k", "target": 39, "actual": 32, "con_lai": 7, "ht": 82.1, "du_kien": 115.7},
-            {"name": "📱 Sim Tổng", "m_tieu": "1", "target": 4, "actual": 3, "con_lai": 1, "ht": 79.2, "du_kien": 111.6},
-            {"name": "⌚ DOANH THU ĐỒNG HỒ", "m_tieu": "399k", "target": 16, "actual": 12, "con_lai": 4, "ht": 77.4, "du_kien": 109.1},
-            {"name": "🎧 Đồng hồ - Phụ kiện", "m_tieu": "5", "target": 140, "actual": 94, "con_lai": 46, "ht": 67.0, "du_kien": 94.5},
         ]
 
-    # Bảng chi tiết Ngành hàng Thi đua
+    # Bảng chi tiết Ngành hàng Thi đua (Thêm cột MT - Mục tiêu)
     td_rows = []
     td_rows.append({
         "type": "box",
@@ -1026,12 +1058,13 @@ def build_individual_staff_card(e, rank, now_str, thi_dua_list=None):
         "paddingAll": "xs",
         "contents": [
             {"type": "text", "text": "#", "size": "xxs", "weight": "bold", "flex": 1, "align": "center"},
-            {"type": "text", "text": "NGÀNH HÀNG", "size": "xxs", "weight": "bold", "flex": 4},
-            {"type": "text", "text": "TARGET", "size": "xxs", "weight": "bold", "flex": 2, "align": "center"},
-            {"type": "text", "text": "LŨY KẾ", "size": "xxs", "weight": "bold", "flex": 2, "align": "center"},
-            {"type": "text", "text": "CÒN LẠI", "size": "xxs", "weight": "bold", "flex": 2, "align": "center"},
-            {"type": "text", "text": "% HT", "size": "xxs", "weight": "bold", "flex": 2, "align": "center"},
-            {"type": "text", "text": "DỰ KIẾN", "size": "xxs", "weight": "bold", "flex": 2, "align": "end"}
+            {"type": "text", "text": "NGÀNH", "size": "xxs", "weight": "bold", "flex": 4},
+            {"type": "text", "text": "MT", "size": "xxs", "weight": "bold", "flex": 2, "align": "center"},
+            {"type": "text", "text": "TG", "size": "xxs", "weight": "bold", "flex": 2, "align": "center"},
+            {"type": "text", "text": "LK", "size": "xxs", "weight": "bold", "flex": 2, "align": "center"},
+            {"type": "text", "text": "CÒN", "size": "xxs", "weight": "bold", "flex": 2, "align": "center"},
+            {"type": "text", "text": "%HT", "size": "xxs", "weight": "bold", "flex": 2, "align": "center"},
+            {"type": "text", "text": "DK", "size": "xxs", "weight": "bold", "flex": 2, "align": "end"}
         ]
     })
     td_rows.append({"type": "separator", "color": "#cbd5e1", "margin": "xs"})
@@ -1048,6 +1081,7 @@ def build_individual_staff_card(e, rank, now_str, thi_dua_list=None):
             "contents": [
                 {"type": "text", "text": str(i), "size": "xxs", "flex": 1, "align": "center", "weight": "bold"},
                 {"type": "text", "text": td["name"], "size": "xxs", "flex": 4, "wrap": True, "weight": "bold", "color": "#0f172a"},
+                {"type": "text", "text": str(td.get("m_tieu", "🏆")), "size": "xxs", "flex": 2, "align": "center", "color": "#16a34a" if td.get("m_tieu") == "🏆" else "#475569"},
                 {"type": "text", "text": str(td["target"]), "size": "xxs", "flex": 2, "align": "center"},
                 {"type": "text", "text": str(td["actual"]), "size": "xxs", "flex": 2, "align": "center", "weight": "bold", "color": "#0284c7"},
                 {"type": "text", "text": str(td["con_lai"]), "size": "xxs", "flex": 2, "align": "center", "color": "#dc2626" if td["con_lai"] != "🏆" else "#16a34a"},
@@ -1072,7 +1106,7 @@ def build_individual_staff_card(e, rank, now_str, thi_dua_list=None):
                     "contents": [
                         {
                             "type": "text",
-                            "text": f"#{rank}  {user_id} - {name}",
+                            "text": f"#{rank}  {name_code}",
                             "weight": "bold",
                             "size": "sm",
                             "color": "#ffffff",
@@ -1161,7 +1195,7 @@ def build_individual_staff_card(e, rank, now_str, thi_dua_list=None):
                             "layout": "horizontal",
                             "margin": "sm",
                             "contents": [
-                                {"type": "text", "text": "Tiến độ Thi đua (Click xem chi tiết)", "size": "xxs", "weight": "bold", "color": "#475569", "flex": 4},
+                                {"type": "text", "text": "Tiến độ Thi đua", "size": "xxs", "weight": "bold", "color": "#475569", "flex": 4},
                                 {"type": "text", "text": f"{td_passed} / {td_total} Nhóm", "size": "xxs", "color": "#0f172a", "flex": 3, "align": "center"},
                                 {"type": "text", "text": f"{td_pct:.1f}%", "size": "xxs", "weight": "bold", "color": "#f43f5e", "flex": 2, "align": "end"}
                             ]
@@ -1185,7 +1219,7 @@ def build_individual_staff_card(e, rank, now_str, thi_dua_list=None):
                         }
                     ]
                 },
-                # 5 Pill Cards
+                # 5 Pill Cards tô màu đậm (Solid Backgrounds)
                 {
                     "type": "box",
                     "layout": "horizontal",
@@ -1193,38 +1227,38 @@ def build_individual_staff_card(e, rank, now_str, thi_dua_list=None):
                     "spacing": "xs",
                     "contents": [
                         {
-                            "type": "box", "layout": "vertical", "flex": 1, "backgroundColor": "#f0f9ff", "borderColor": "#0284c7", "borderWidth": "1px", "cornerRadius": "md", "paddingAll": "xs", "align": "center",
+                            "type": "box", "layout": "vertical", "flex": 1, "backgroundColor": "#0284c7", "cornerRadius": "xs", "paddingAll": "xs", "align": "center",
                             "contents": [
-                                {"type": "text", "text": "TARGET DT", "size": "xxs", "color": "#0369a1", "weight": "bold"},
-                                {"type": "text", "text": fmt_num(target_val), "size": "xs", "color": "#0369a1", "weight": "bold", "margin": "xs"}
+                                {"type": "text", "text": "TG", "size": "xxs", "color": "#ffffff", "weight": "bold"},
+                                {"type": "text", "text": fmt_num(target_val), "size": "xs", "color": "#ffffff", "weight": "bold", "margin": "xs"}
                             ]
                         },
                         {
-                            "type": "box", "layout": "vertical", "flex": 1, "backgroundColor": "#fff7ed", "borderColor": "#ea580c", "borderWidth": "1px", "cornerRadius": "md", "paddingAll": "xs", "align": "center",
+                            "type": "box", "layout": "vertical", "flex": 1, "backgroundColor": "#ea580c", "cornerRadius": "xs", "paddingAll": "xs", "align": "center",
                             "contents": [
-                                {"type": "text", "text": "LŨY KẾ DT", "size": "xxs", "color": "#c2410c", "weight": "bold"},
-                                {"type": "text", "text": fmt_num(actual_val), "size": "xs", "color": "#c2410c", "weight": "bold", "margin": "xs"}
+                                {"type": "text", "text": "LK", "size": "xxs", "color": "#ffffff", "weight": "bold"},
+                                {"type": "text", "text": fmt_num(actual_val), "size": "xs", "color": "#ffffff", "weight": "bold", "margin": "xs"}
                             ]
                         },
                         {
-                            "type": "box", "layout": "vertical", "flex": 1, "backgroundColor": "#fef2f2", "borderColor": "#dc2626", "borderWidth": "1px", "cornerRadius": "md", "paddingAll": "xs", "align": "center",
+                            "type": "box", "layout": "vertical", "flex": 1, "backgroundColor": "#dc2626", "cornerRadius": "xs", "paddingAll": "xs", "align": "center",
                             "contents": [
-                                {"type": "text", "text": "CÒN LẠI", "size": "xxs", "color": "#b91c1c", "weight": "bold"},
-                                {"type": "text", "text": fmt_num(con_lai_val), "size": "xs", "color": "#b91c1c", "weight": "bold", "margin": "xs"}
+                                {"type": "text", "text": "CÒN", "size": "xxs", "color": "#ffffff", "weight": "bold"},
+                                {"type": "text", "text": fmt_num(con_lai_val), "size": "xs", "color": "#ffffff", "weight": "bold", "margin": "xs"}
                             ]
                         },
                         {
-                            "type": "box", "layout": "vertical", "flex": 1, "backgroundColor": "#f0fdf4", "borderColor": "#16a34a", "borderWidth": "1px", "cornerRadius": "md", "paddingAll": "xs", "align": "center",
+                            "type": "box", "layout": "vertical", "flex": 1, "backgroundColor": "#16a34a", "cornerRadius": "xs", "paddingAll": "xs", "align": "center",
                             "contents": [
-                                {"type": "text", "text": "DỰ KIẾN %", "size": "xxs", "color": "#15803d", "weight": "bold"},
-                                {"type": "text", "text": f"{du_kien_pct:.1f}%", "size": "xs", "color": "#15803d", "weight": "bold", "margin": "xs"}
+                                {"type": "text", "text": "DK", "size": "xxs", "color": "#ffffff", "weight": "bold"},
+                                {"type": "text", "text": f"{du_kien_pct:.1f}%", "size": "xs", "color": "#ffffff", "weight": "bold", "margin": "xs"}
                             ]
                         },
                         {
-                            "type": "box", "layout": "vertical", "flex": 1, "backgroundColor": "#f8fafc", "borderColor": "#475569", "borderWidth": "1px", "cornerRadius": "md", "paddingAll": "xs", "align": "center",
+                            "type": "box", "layout": "vertical", "flex": 1, "backgroundColor": "#475569", "cornerRadius": "xs", "paddingAll": "xs", "align": "center",
                             "contents": [
-                                {"type": "text", "text": "M.TIÊU NGÀY", "size": "xxs", "color": "#334155", "weight": "bold"},
-                                {"type": "text", "text": str(m_tieu_ngay), "size": "xs", "color": "#334155", "weight": "bold", "margin": "xs"}
+                                {"type": "text", "text": "MT", "size": "xxs", "color": "#ffffff", "weight": "bold"},
+                                {"type": "text", "text": str(m_tieu_ngay), "size": "xs", "color": "#ffffff", "weight": "bold", "margin": "xs"}
                             ]
                         }
                     ]
@@ -1346,8 +1380,9 @@ def build_nhanvien_flex():
     
     # 2. Bubbles 2..N: Thẻ KPI Chi Tiết Từng NV
     all_bubbles = [overview_bubble]
+    total_emp = len(emp_list)
     for idx, e in enumerate(emp_list, start=1):
-        staff_bubble = build_individual_staff_card(e, idx, now_str)
+        staff_bubble = build_individual_staff_card(e, idx, total_emp, now_str)
         all_bubbles.append(staff_bubble)
         
     return all_bubbles
