@@ -55,21 +55,28 @@ def shorten_name(name):
         ("Viễn thông", "V.Thông"),
         ("Nhóm Thi Đua", "T.Đua"),
         ("Nhóm thi đua", "T.Đua"),
-        ("NẠP RÚT TIỀN TẬN NƠI", "Nạp Rút Tiền"),
+        ("NẠP RÚT TIỀN TẬN NƠI", "Nạp & Rút Tiền"),
         ("TRẢ CHẬM HOMECREDIT", "TC HomeCredit"),
         ("TRẢ CHẬM ĐIỆN MÁY", "TC Điện Máy"),
         ("TRẢ CHẬM", "Trả Chậm"),
-        ("MÁY LỌC KHÔNG KHÍ", "Lọc K.Khí"),
+        ("MÁY LỌC KHÔNG KHÍ", "Lọc Khí/Hút Ẩm"),
         ("MÁY LỌC NƯỚC", "Lọc Nước"),
         ("ĐIỆN THOẠI & PHỤ KIỆN", "Đ.Thoại & PK"),
-        ("TỦ LẠNH, TỦ ĐỒ", "Tủ Lạnh/Đông"),
+        ("ĐIỆN THOẠI & ", "Đ.Thoại & PK"),
+        ("ĐIỆN TỬ & ĐIỆN LẠNH", "Đ.Tử & Đ.Lạnh"),
+        ("ĐIỆN TỬ & ĐIỆ", "Đ.Tử & Đ.Lạnh"),
+        ("TỦ LẠNH, TỦ ĐỒ", "Tủ Lạnh / Đông"),
+        ("TỦ LẠNH, TỦ Đ", "Tủ Lạnh / Đông"),
+        ("Đồng hồ - P.K", "Đồng Hồ & PK"),
         ("DOANH THU ĐỒNG HỒ", "Đồng Hồ"),
+        ("FECREDIT, SHI", "FE Credit / Shinhan"),
+        ("TC Điện Máy V", "TC Điện Máy"),
     ]
     for old, new in replacements:
         s = s.replace(old, new)
         
-    if len(s) > 14:
-        s = s[:13] + "…"
+    if len(s) > 25:
+        s = s[:24] + "…"
     return s
 
 def shorten_staff_name(name):
@@ -490,51 +497,20 @@ def build_luyke_flex():
         }
     ]
     
-    # Category Revenue & Growth Table Card Container
+    # BẢNG 1: CHI TIẾT DOANH THU LŨY KẾ (Bảng chính phẳng, sạch mắt)
     table_card_contents = [
-        {"type": "text", "text": "📊 CHI TIẾT DOANH THU & TĂNG TRƯỜNG CÙNG KỲ", "size": "xxs", "color": "#0284c7", "weight": "bold", "margin": "xs"}
+        {"type": "text", "text": "📊 CHI TIẾT DOANH THU LŨY KẾ", "size": "xxs", "color": "#0284c7", "weight": "bold", "margin": "xs"}
     ]
-    headers = ["STT", "Ngành hàng", "SL", "DTQĐ", "Target", "%HT"]
-    weights = [1, 3, 1, 2, 2, 2]
-    aligns = ["start", "start", "center", "center", "center", "end"]
-    table_card_contents.append(make_table_header(headers, weights, aligns, bg_color="#0284c7"))
+    headers1 = ["STT", "Ngành hàng", "SL", "DTQĐ", "Target", "%HT"]
+    weights1 = [1, 3, 1, 2, 2, 2]
+    aligns1 = ["start", "start", "center", "center", "center", "end"]
+    table_card_contents.append(make_table_header(headers1, weights1, aligns1, bg_color="#0284c7"))
     table_card_contents.append({"type": "separator", "color": "#cbd5e1", "margin": "xs"})
     
     for idx, b in enumerate(parsed_bi[:6]):
-        ty_trong = (b["dt"] / tDT * 100) if tDT > 0 else 0.0
-        dt_ck_val = b.get("dt_ck", 0.0)
-        
-        if dt_ck_val > 0:
-            diff_ck = b["dt"] - dt_ck_val
-            pct_ck = (diff_ck / dt_ck_val * 100)
-            if diff_ck >= 0:
-                growth_text = f" 📈 CK: ▲ +{fmt_num(diff_ck)}T (+{pct_ck:.0f}%)"
-                growth_color = "#16a34a"
-            else:
-                growth_text = f" 📉 CK: ▼ -{fmt_num(abs(diff_ck))}T ({pct_ck:.0f}%)"
-                growth_color = "#dc2626"
-        else:
-            diff_tg = b["dt"] - b["tg"]
-            if diff_tg >= 0:
-                growth_text = f" 🎯 vs Target: ▲ +{fmt_num(diff_tg)}T"
-                growth_color = "#16a34a"
-            else:
-                growth_text = f" 🎯 vs Target: ▼ -{fmt_num(abs(diff_tg))}T"
-                growth_color = "#dc2626"
-
-        vals = [idx+1, f"{b['name']} ({ty_trong:.0f}%)", fmt_num(b["sl"]), fmt_num(b["dt"]), fmt_num(b["tg"]), f"{b['ht']*100:.0f}%"]
+        vals = [idx+1, b['name'], fmt_num(b["sl"]), fmt_num(b["dt"]), fmt_num(b["tg"]), f"{b['ht']*100:.0f}%"]
         colors = ["#64748b", "#0f172a", "#0f172a", "#0284c7", "#475569", get_color_class(b["ht"])]
-        table_card_contents.append(make_table_row(vals, weights, aligns, colors))
-        
-        # Subline: Tăng trưởng cùng kỳ indicator text
-        table_card_contents.append({
-            "type": "box",
-            "layout": "horizontal",
-            "margin": "xs",
-            "contents": [
-                {"type": "text", "text": growth_text, "size": "xxs", "color": growth_color, "weight": "bold", "flex": 1, "align": "start"}
-            ]
-        })
+        table_card_contents.append(make_table_row(vals, weights1, aligns1, colors))
         
         # Mini 3px progress bar
         table_card_contents.append({
@@ -561,7 +537,7 @@ def build_luyke_flex():
     tot_sl = sum(x["sl"] for x in parsed_bi)
     tot_vals = ["⭐", "TỔNG CỘNG", fmt_num(tot_sl), fmt_num(tDT), fmt_num(tTG), f"{totalHT*100:.0f}%"]
     tot_colors = ["#ffffff", "#ffffff", "#ffffff", "#ffffff", "#ffffff", "#ffffff"]
-    table_card_contents.append(make_table_row(tot_vals, weights, aligns, tot_colors, bold=True, bg_color="#f59e0b"))
+    table_card_contents.append(make_table_row(tot_vals, weights1, aligns1, tot_colors, bold=True, bg_color="#f59e0b"))
 
     body_contents.append({
         "type": "box",
@@ -573,6 +549,59 @@ def build_luyke_flex():
         "paddingAll": "sm",
         "margin": "md",
         "contents": table_card_contents
+    })
+
+    # BẢNG 2: BẢNG TỶ TRỌNG & TĂNG TRƯỜNG SO VỚI CÙNG KỲ (Card riêng biệt)
+    growth_card_contents = [
+        {"type": "text", "text": "📈 TỶ TRỌNG & TĂNG TRƯỜNG CÙNG KỲ", "size": "xxs", "color": "#0f766e", "weight": "bold", "margin": "xs"}
+    ]
+    headers2 = ["STT", "Ngành hàng", "Tỷ trọng", "vs Cùng kỳ"]
+    weights2 = [1, 4, 2, 4]
+    aligns2 = ["start", "start", "center", "end"]
+    growth_card_contents.append(make_table_header(headers2, weights2, aligns2, bg_color="#0f766e"))
+    growth_card_contents.append({"type": "separator", "color": "#cbd5e1", "margin": "xs"})
+
+    for idx, b in enumerate(parsed_bi[:6]):
+        ty_trong = (b["dt"] / tDT * 100) if tDT > 0 else 0.0
+        dt_ck_val = b.get("dt_ck", 0.0)
+        
+        if dt_ck_val > 0:
+            diff_ck = b["dt"] - dt_ck_val
+            pct_ck = (diff_ck / dt_ck_val * 100)
+            if diff_ck >= 0:
+                growth_text = f"▲ +{fmt_num(diff_ck)}T (+{pct_ck:.0f}%)"
+                growth_color = "#16a34a"
+            else:
+                growth_text = f"▼ -{fmt_num(abs(diff_ck))}T ({pct_ck:.0f}%)"
+                growth_color = "#dc2626"
+        else:
+            diff_tg = b["dt"] - b["tg"]
+            if diff_tg >= 0:
+                growth_text = f"▲ +{fmt_num(diff_tg)}T"
+                growth_color = "#16a34a"
+            else:
+                growth_text = f"▼ -{fmt_num(abs(diff_tg))}T"
+                growth_color = "#dc2626"
+
+        row2_vals = [idx+1, b['name'], f"{ty_trong:.0f}%", growth_text]
+        row2_colors = ["#64748b", "#0f172a", "#0284c7", growth_color]
+        growth_card_contents.append(make_table_row(row2_vals, weights2, aligns2, row2_colors))
+        growth_card_contents.append({"type": "separator", "color": "#f1f5f9", "margin": "xs"})
+
+    tot2_vals = ["⭐", "TỔNG CỘNG", "100%", f"Dự kiến {totalHTDK*100:.0f}%"]
+    tot2_colors = ["#ffffff", "#ffffff", "#ffffff", "#ffffff"]
+    growth_card_contents.append(make_table_row(tot2_vals, weights2, aligns2, tot2_colors, bold=True, bg_color="#0d9488"))
+
+    body_contents.append({
+        "type": "box",
+        "layout": "vertical",
+        "backgroundColor": "#f0fdfa",
+        "borderColor": "#99f6e4",
+        "borderWidth": "1px",
+        "cornerRadius": "md",
+        "paddingAll": "sm",
+        "margin": "md",
+        "contents": growth_card_contents
     })
 
     # Smart Insight Card
