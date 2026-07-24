@@ -1051,6 +1051,8 @@ def build_individual_staff_card(e, rank, total_emp=11, now_str="", thi_dua_list=
 
     if not thi_dua_list:
         thi_dua_list = []
+    else:
+        thi_dua_list = sorted(thi_dua_list, key=lambda x: x.get("du_kien", 0.0), reverse=True)
 
     td_passed = sum(1 for td in thi_dua_list if td.get("ht", 0.0) >= 100 or str(td.get("con_lai")) == "🏆")
     td_total = len(thi_dua_list)
@@ -1195,10 +1197,18 @@ def build_individual_staff_card(e, rank, total_emp=11, now_str="", thi_dua_list=
         
         vals = [str(i), name_s, mt, tg_lk, cl, ht_str, dk_str]
         colors = ["#475569", name_color, "#16a34a" if mt == "🏆" else "#475569", "#0f172a", "#16a34a" if cl == "🏆" else "#dc2626", ht_color, dk_color]
-        
+
+        def make_staff_cell(v, w, a, c):
+            cell = {"type": "text", "text": str(v), "flex": w, "size": "xxs"}
+            if a and a != "start":
+                cell["align"] = a
+            if c and c != "#0f172a":
+                cell["color"] = c
+            return cell
+
         td_rows.append({
             "type": "box", "layout": "horizontal", "margin": "xs",
-            "contents": [{"type": "text", "text": v, "size": "xxs", "color": c, "align": a, "flex": w} for v, c, a, w in zip(vals, colors, aligns, weights)]
+            "contents": [make_staff_cell(v, w, a, c) for v, c, a, w in zip(vals, colors, aligns, weights)]
         })
 
     bubble = {

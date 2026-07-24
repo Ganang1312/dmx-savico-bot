@@ -1023,17 +1023,9 @@ def handle_message(event):
                                 contents={"type": "carousel", "contents": chunk}
                             ))
 
+                # Gửi tối đa 5 tin nhắn bằng reply_message duy nhất (1 Overview + 4 Carousel x 2 Thẻ/Carousel = 8 Thẻ NV Top) 100% MIỄN PHÍ
                 reply_msgs = [overview_msg] + carousel_msgs[:4]
                 line_bot_api.reply_message(event.reply_token, reply_msgs)
-
-                remaining_msgs = carousel_msgs[4:]
-                if remaining_msgs and target_id:
-                    for i in range(0, len(remaining_msgs), 5):
-                        push_chunk = remaining_msgs[i:i+5]
-                        try:
-                            line_bot_api.push_message(target_id, push_chunk)
-                        except Exception as pe:
-                            print(f"Lỗi push tin nhắn thẻ NV tiếp theo: {pe}")
 
         except Exception as e:
             print(f"Lỗi gửi Flex NV1: {e}")
