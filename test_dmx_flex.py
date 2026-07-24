@@ -122,7 +122,7 @@ class TestDmxFlexMessages(unittest.TestCase):
         staff_card_str = str(flex[1])
         self.assertIn("Tiến độ Doanh thu", staff_card_str)
         self.assertIn("Tiến độ Thi đua", staff_card_str)
-        self.assertIn("TG / LK", staff_card_str)
+        self.assertIn("LK / TG", staff_card_str)
 
 if __name__ == '__main__':
     unittest.main()
