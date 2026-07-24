@@ -387,6 +387,7 @@ def update_vesinh_status(group_id, session_type, staff_name, clicker_name, targe
 def generate_vesinh_flex(group_id, session_type=None):
     """
     Tạo Flex Message giao diện Phân Công & Theo Dõi Vệ Sinh.
+    Thiết kế mới: Gom nhóm theo Khu (Zone Header ở trên, danh sách nhân viên & nút hoàn tất bên phải ở dưới).
     """
     if not session_type:
         session_type = get_current_vesinh_session()
@@ -405,81 +406,6 @@ def generate_vesinh_flex(group_id, session_type=None):
 
     body_contents = []
 
-    def create_row(index, item):
-        is_done = (item.get('status') == 'done')
-        time_val = item.get('time_clicked', '')
-        name = item.get('name', '')
-        zone_desc = item.get('zone', '')
-        is_gh2 = "GH2" in zone_desc.upper()
-
-        status_text = f"✅ Xong ({time_val})" if is_done else ("⚪ GH2" if is_gh2 else "⏳ Chờ")
-        text_color = "#16a34a" if is_done else ("#94a3b8" if is_gh2 else "#d97706")
-
-        btn_color = "#0284c7" if not is_done else "#ef4444"
-        btn_label = "Hoàn tất" if not is_done else "Hủy"
-        next_status = "done" if not is_done else "waiting"
-
-        row_box = {
-            "type": "box",
-            "layout": "vertical",
-            "margin": "md",
-            "paddingAll": "sm",
-            "backgroundColor": "#f8fafc" if not is_done else "#f0fdf4",
-            "cornerRadius": "md",
-            "borderColor": "#cbd5e1" if not is_done else "#bbf7d0",
-            "borderWidth": "1px",
-            "contents": [
-                {
-                    "type": "box",
-                    "layout": "horizontal",
-                    "contents": [
-                        {
-                            "type": "text",
-                            "text": f"{index}. {name}",
-                            "weight": "bold",
-                            "size": "xs",
-                            "color": "#0f172a",
-                            "flex": 4
-                        },
-                        {
-                            "type": "text",
-                            "text": status_text,
-                            "weight": "bold",
-                            "size": "xxs",
-                            "color": text_color,
-                            "align": "end",
-                            "flex": 3
-                        }
-                    ]
-                },
-                {
-                    "type": "text",
-                    "text": zone_desc,
-                    "size": "xxs",
-                    "color": "#475569",
-                    "wrap": True,
-                    "margin": "xs"
-                }
-            ]
-        }
-
-        if not is_gh2:
-            row_box["contents"].append({
-                "type": "button",
-                "action": {
-                    "type": "postback",
-                    "label": btn_label,
-                    "data": f"action=complete_vesinh&session={session_type}&name={name}&target_status={next_status}"
-                },
-                "style": "primary",
-                "color": btn_color,
-                "size": "xs",
-                "height": "sm",
-                "margin": "xs"
-            })
-
-        return row_box
-
     # --- NHÂN VIÊN SECTION ---
     if nv_data:
         body_contents.append({
@@ -490,8 +416,110 @@ def generate_vesinh_flex(group_id, session_type=None):
             "color": "#0f766e",
             "margin": "xs"
         })
-        for i, item in enumerate(nv_data, 1):
-            body_contents.append(create_row(i, item))
+
+        # Gom nhóm NV theo Khu (zone)
+        zone_groups = {}
+        for item in nv_data:
+            z_desc = item.get('zone', 'Khu vực khác')
+            if z_desc not in zone_groups:
+                zone_groups[z_desc] = []
+            zone_groups[z_desc].append(item)
+
+        global_nv_idx = 1
+        for z_desc, staff_list in zone_groups.items():
+            is_gh2_zone = "GH2" in z_desc.upper()
+            zone_header_title = f"📍 {z_desc}" if not is_gh2_zone else f"⚪ {z_desc}"
+            
+            zone_box_contents = [
+                {
+                    "type": "text",
+                    "text": zone_header_title,
+                    "weight": "bold",
+                    "size": "xs",
+                    "color": "#0f766e" if not is_gh2_zone else "#64748b",
+                    "wrap": True
+                },
+                {"type": "separator", "color": "#cbd5e1" if not is_gh2_zone else "#e2e8f0", "margin": "xs"}
+            ]
+
+            for idx, item in enumerate(staff_list):
+                is_done = (item.get('status') == 'done')
+                time_val = item.get('time_clicked', '')
+                name = item.get('name', '')
+                is_gh2 = "GH2" in z_desc.upper()
+
+                status_text = f"✅ Xong ({time_val})" if is_done else ("⚪ GH2" if is_gh2 else "⏳ Chờ")
+                text_color = "#16a34a" if is_done else ("#94a3b8" if is_gh2 else "#d97706")
+
+                btn_color = "#0284c7" if not is_done else "#ef4444"
+                btn_label = "Hoàn tất" if not is_done else "Hủy"
+                next_status = "done" if not is_done else "waiting"
+
+                if idx > 0:
+                    zone_box_contents.append({"type": "separator", "color": "#f1f5f9", "margin": "xs"})
+
+                staff_row = {
+                    "type": "box",
+                    "layout": "horizontal",
+                    "margin": "xs",
+                    "alignItems": "center",
+                    "contents": [
+                        {
+                            "type": "box",
+                            "layout": "vertical",
+                            "flex": 6,
+                            "contents": [
+                                {
+                                    "type": "text",
+                                    "text": f"{global_nv_idx}. {name}",
+                                    "weight": "bold",
+                                    "size": "xs",
+                                    "color": "#0f172a",
+                                    "wrap": True
+                                },
+                                {
+                                    "type": "text",
+                                    "text": status_text,
+                                    "weight": "bold",
+                                    "size": "xxs",
+                                    "color": text_color,
+                                    "margin": "xs"
+                                }
+                            ]
+                        }
+                    ]
+                }
+
+                if not is_gh2:
+                    staff_row["contents"].append({
+                        "type": "button",
+                        "action": {
+                            "type": "postback",
+                            "label": btn_label,
+                            "data": f"action=complete_vesinh&session={session_type}&name={name}&target_status={next_status}"
+                        },
+                        "style": "primary",
+                        "color": btn_color,
+                        "size": "xs",
+                        "height": "sm",
+                        "flex": 4
+                    })
+
+                zone_box_contents.append(staff_row)
+                global_nv_idx += 1
+
+            zone_card = {
+                "type": "box",
+                "layout": "vertical",
+                "margin": "md",
+                "paddingAll": "sm",
+                "backgroundColor": "#f8fafc",
+                "cornerRadius": "md",
+                "borderColor": "#cbd5e1",
+                "borderWidth": "1px",
+                "contents": zone_box_contents
+            }
+            body_contents.append(zone_card)
 
     # --- PG SECTION ---
     if pg_data:
@@ -507,8 +535,91 @@ def generate_vesinh_flex(group_id, session_type=None):
             "color": "#b45309",
             "margin": "md"
         })
-        for i, item in enumerate(pg_data, 1):
-            body_contents.append(create_row(i, item))
+
+        pg_box_contents = [
+            {
+                "type": "text",
+                "text": "📍 Vệ sinh gian hàng PG",
+                "weight": "bold",
+                "size": "xs",
+                "color": "#b45309"
+            },
+            {"type": "separator", "color": "#fde68a", "margin": "xs"}
+        ]
+
+        for idx, item in enumerate(pg_data, 1):
+            is_done = (item.get('status') == 'done')
+            time_val = item.get('time_clicked', '')
+            name = item.get('name', '')
+
+            status_text = f"✅ Xong ({time_val})" if is_done else "⏳ Chờ"
+            text_color = "#16a34a" if is_done else "#d97706"
+
+            btn_color = "#0284c7" if not is_done else "#ef4444"
+            btn_label = "Hoàn tất" if not is_done else "Hủy"
+            next_status = "done" if not is_done else "waiting"
+
+            if idx > 1:
+                pg_box_contents.append({"type": "separator", "color": "#fef3c7", "margin": "xs"})
+
+            pg_row = {
+                "type": "box",
+                "layout": "horizontal",
+                "margin": "xs",
+                "alignItems": "center",
+                "contents": [
+                    {
+                        "type": "box",
+                        "layout": "vertical",
+                        "flex": 6,
+                        "contents": [
+                            {
+                                "type": "text",
+                                "text": f"{idx}. {name}",
+                                "weight": "bold",
+                                "size": "xs",
+                                "color": "#0f172a",
+                                "wrap": True
+                            },
+                            {
+                                "type": "text",
+                                "text": status_text,
+                                "weight": "bold",
+                                "size": "xxs",
+                                "color": text_color,
+                                "margin": "xs"
+                            }
+                        ]
+                    },
+                    {
+                        "type": "button",
+                        "action": {
+                            "type": "postback",
+                            "label": btn_label,
+                            "data": f"action=complete_vesinh&session={session_type}&name={name}&target_status={next_status}"
+                        },
+                        "style": "primary",
+                        "color": btn_color,
+                        "size": "xs",
+                        "height": "sm",
+                        "flex": 4
+                    }
+                ]
+            }
+            pg_box_contents.append(pg_row)
+
+        pg_card = {
+            "type": "box",
+            "layout": "vertical",
+            "margin": "md",
+            "paddingAll": "sm",
+            "backgroundColor": "#fffbeb",
+            "cornerRadius": "md",
+            "borderColor": "#fde68a",
+            "borderWidth": "1px",
+            "contents": pg_box_contents
+        }
+        body_contents.append(pg_card)
 
     flex_bubble = {
         "type": "bubble",
