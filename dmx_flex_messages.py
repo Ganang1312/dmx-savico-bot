@@ -713,8 +713,8 @@ def build_luyke_flex():
     }
 
     # Bảng Thi Đua Lũy Kế P.2 (Chia 2 khu: Dự kiến về đích & Chưa về đích - Chuẩn Ảnh 1 mới)
-    headers_p2 = ["#", "📦 NH", "🎯 MT", "📈 Đạt", "📊 %HT", "🔮 %DK"]
-    weights_p2 = [1, 5, 2, 3, 2, 2]
+    headers_p2 = ["#", "NH", "MT", "Đạt", "%HT", "%DK"]
+    weights_p2 = [1, 4, 2, 3, 2, 2]
     aligns_p2 = ["center", "start", "center", "center", "center", "center"]
 
     body_contents_p2 = []
@@ -1892,8 +1892,8 @@ def build_realtime_flex():
     }
 
     # Bảng Thi Đua Realtime P.2 (Chia 2 khu: Về đích ngày & Chưa về đích ngày - Chuẩn Ảnh 2 mới)
-    headers_rt2 = ["#", "📦 NH", "🚀 Đạt", "⏳ Còn", "🎯 MT", "📊 %HT"]
-    weights_rt2 = [1, 5, 2, 2, 2, 2]
+    headers_rt2 = ["#", "NH", "Đạt", "Còn", "MT", "%HT"]
+    weights_rt2 = [1, 4, 2, 2, 2, 2]
     aligns_rt2 = ["center", "start", "center", "center", "center", "center"]
 
     body_contents_rt2 = []

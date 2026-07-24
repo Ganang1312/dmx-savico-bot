@@ -1013,23 +1013,27 @@ def handle_message(event):
             else:
                 # Gõ "NV1": Gửi Bảng Xếp Hạng Overview + Dãy Carousel Thẻ NV (FULL 23 Ngành Hàng & 7 Chỉ Số) 100% MIỄN PHÍ bằng reply_message (39.2KB < 50KB limit!)
                 overview_msg = FlexSendMessage(alt_text="🏆 Bảng Xếp Hạng Doanh Thu NV", contents=overview_bubble)
-                reply_msgs = [overview_msg]
+                carousel_msgs = []
                 if staff_bubbles:
-                    c1_bubbles = staff_bubbles[:6]
-                    c2_bubbles = staff_bubbles[6:12]
-                    
-                    if c1_bubbles:
-                        reply_msgs.append(FlexSendMessage(
-                            alt_text="🎴 Thẻ KPI Nhân Viên (Nhóm 1)",
-                            contents={"type": "carousel", "contents": c1_bubbles}
-                        ))
-                    if c2_bubbles:
-                        reply_msgs.append(FlexSendMessage(
-                            alt_text="🎴 Thẻ KPI Nhân Viên (Nhóm 2)",
-                            contents={"type": "carousel", "contents": c2_bubbles}
-                        ))
-                
+                    for i in range(0, len(staff_bubbles), 2):
+                        chunk = staff_bubbles[i:i+2]
+                        if chunk:
+                            carousel_msgs.append(FlexSendMessage(
+                                alt_text=f"🎴 Thẻ KPI Nhân Viên ({i+1}-{i+len(chunk)})",
+                                contents={"type": "carousel", "contents": chunk}
+                            ))
+
+                reply_msgs = [overview_msg] + carousel_msgs[:4]
                 line_bot_api.reply_message(event.reply_token, reply_msgs)
+
+                remaining_msgs = carousel_msgs[4:]
+                if remaining_msgs and target_id:
+                    for i in range(0, len(remaining_msgs), 5):
+                        push_chunk = remaining_msgs[i:i+5]
+                        try:
+                            line_bot_api.push_message(target_id, push_chunk)
+                        except Exception as pe:
+                            print(f"Lỗi push tin nhắn thẻ NV tiếp theo: {pe}")
 
         except Exception as e:
             print(f"Lỗi gửi Flex NV1: {e}")
