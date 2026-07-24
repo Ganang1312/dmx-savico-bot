@@ -395,7 +395,8 @@ def build_luyke_flex():
             "ht": ht_target,
             "ht_dk": ht_du_kien,
             "unit": "TR" if is_dt else "SP",
-            "mt_ngay_str": mt_ngay_str
+            "mt_ngay_str": mt_ngay_str,
+            "phan_loai": config_map.get(nganh_clean, 1.0)
         })
         
     td_done = [x for x in parsed_td if x["ht_dk"] >= 1.0]
@@ -712,48 +713,74 @@ def build_luyke_flex():
         }
     }
 
-    # Bảng Thi Đua Lũy Kế P.2 (Chuẩn Ảnh 1 - Gộp Thực Hiện / Target)
-    headers_p2 = ["#", "NGÀNH HÀNG THI ĐUA", "MT NGÀY", "THỰC HIỆN / TARGET", "% HT", "CÒN LẠI", "% DỰ KIẾN"]
-    weights_p2 = [1, 4, 2, 3, 2, 2, 2]
-    aligns_p2 = ["center", "start", "center", "center", "center", "center", "center"]
+    # Bảng Thi Đua Lũy Kế P.2 (Chia 2 khu: Dự kiến về đích & Chưa về đích - Chuẩn Ảnh 1 mới)
+    headers_p2 = ["#", "NH", "MT", "Đạt", "%HT", "%DK"]
+    weights_p2 = [1, 4, 2, 3, 2, 2]
+    aligns_p2 = ["center", "start", "center", "center", "center", "center"]
 
-    table_contents_p2 = [
-        make_table_header(headers_p2, weights_p2, aligns_p2, bg_color="#0f766e"),
-        {"type": "separator", "color": "#cbd5e1", "margin": "xs"}
-    ]
+    body_contents_p2 = []
 
-    for idx, t in enumerate(parsed_td):
-        unit_tag = "(DT)" if t["unit"] == "TR" else "(SL)"
-        display_name = f"{t['name']} {unit_tag}"
-        mt_str = t.get("mt_ngay_str", "0")
-        act_tg_str = f"{fmt_num(t['actual'])} / {fmt_num(t['target'])}"
-        ht_str = f"{t['ht']*100:.0f}%"
-        cl_str = "🏆" if t['con_lai'] <= 0 else fmt_num(t['con_lai'])
-        dk_str = f"{t['ht_dk']*100:.0f}%"
-
-        vals = [str(idx + 1), display_name, mt_str, act_tg_str, ht_str, cl_str, dk_str]
-        colors = [
-            "#64748b",
-            "#0f172a",
-            "#0284c7",
-            "#0f172a",
-            get_color_class(t["ht"]),
-            "#16a34a" if cl_str == "🏆" else "#dc2626",
-            get_color_class(t["ht_dk"])
+    if td_done:
+        done_table = [
+            {"type": "text", "text": f"🏆 NHÓM DỰ KIẾN VỀ ĐÍCH ({len(td_done)})", "size": "xxs", "color": "#15803d", "weight": "bold", "margin": "xs"},
+            make_table_header(headers_p2, weights_p2, aligns_p2, bg_color="#15803d"),
+            {"type": "separator", "color": "#bbf7d0", "margin": "xs"}
         ]
-        table_contents_p2.append(make_table_row(vals, weights_p2, aligns_p2, colors))
+        for idx, t in enumerate(td_done):
+            unit_tag = "(DT)" if t["unit"] == "TR" else "(SL)"
+            display_name = f"{t['name']} {unit_tag}"
+            mt_str = t.get("mt_ngay_str", "0")
+            act_tg_str = f"{fmt_num(t['actual'])} / {fmt_num(t['target'])}"
+            ht_str = f"{t['ht']*100:.0f}%"
+            dk_str = f"{t['ht_dk']*100:.0f}%"
 
-    body_contents_p2 = [{
-        "type": "box",
-        "layout": "vertical",
-        "backgroundColor": "#ffffff",
-        "borderColor": "#ccfbf1",
-        "borderWidth": "1px",
-        "cornerRadius": "md",
-        "paddingAll": "sm",
-        "margin": "xs",
-        "contents": table_contents_p2
-    }]
+            name_color = "#dc2626" if t.get("phan_loai") == 2.0 else "#0f172a"
+            vals = [str(idx + 1), display_name, mt_str, act_tg_str, ht_str, dk_str]
+            colors = ["#64748b", name_color, "#0284c7", "#0f172a", get_color_class(t["ht"]), get_color_class(t["ht_dk"])]
+            done_table.append(make_table_row(vals, weights_p2, aligns_p2, colors))
+
+        body_contents_p2.append({
+            "type": "box",
+            "layout": "vertical",
+            "backgroundColor": "#f0fdf4",
+            "borderColor": "#bbf7d0",
+            "borderWidth": "1px",
+            "cornerRadius": "md",
+            "paddingAll": "sm",
+            "margin": "xs",
+            "contents": done_table
+        })
+
+    if td_pending:
+        pending_table = [
+            {"type": "text", "text": f"🎯 NHÓM CHƯA VỀ ĐÍCH ({len(td_pending)})", "size": "xxs", "color": "#b91c1c", "weight": "bold", "margin": "xs"},
+            make_table_header(headers_p2, weights_p2, aligns_p2, bg_color="#0f766e"),
+            {"type": "separator", "color": "#cbd5e1", "margin": "xs"}
+        ]
+        for idx, t in enumerate(td_pending):
+            unit_tag = "(DT)" if t["unit"] == "TR" else "(SL)"
+            display_name = f"{t['name']} {unit_tag}"
+            mt_str = t.get("mt_ngay_str", "0")
+            act_tg_str = f"{fmt_num(t['actual'])} / {fmt_num(t['target'])}"
+            ht_str = f"{t['ht']*100:.0f}%"
+            dk_str = f"{t['ht_dk']*100:.0f}%"
+
+            name_color = "#dc2626" if t.get("phan_loai") == 2.0 else "#0f172a"
+            vals = [str(idx + 1), display_name, mt_str, act_tg_str, ht_str, dk_str]
+            colors = ["#64748b", name_color, "#0284c7", "#0f172a", get_color_class(t["ht"]), get_color_class(t["ht_dk"])]
+            pending_table.append(make_table_row(vals, weights_p2, aligns_p2, colors))
+
+        body_contents_p2.append({
+            "type": "box",
+            "layout": "vertical",
+            "backgroundColor": "#ffffff",
+            "borderColor": "#ccfbf1",
+            "borderWidth": "1px",
+            "cornerRadius": "md",
+            "paddingAll": "sm",
+            "margin": "xs",
+            "contents": pending_table
+        })
 
     flex_bubble_p2 = {
         "type": "bubble",
@@ -1096,7 +1123,7 @@ def build_individual_staff_card(e, rank, total_emp=11, now_str="", thi_dua_list=
         ]
     }
 
-    # 2. Khối 5 Nút Pill (Chuẩn Ảnh 3)
+    # 2. Khối 5 Nút Pill KPI Đậm Nổi Bật & Bo Góc (Chuẩn Ảnh 3)
     pill_cards = {
         "type": "box",
         "layout": "horizontal",
@@ -1104,47 +1131,47 @@ def build_individual_staff_card(e, rank, total_emp=11, now_str="", thi_dua_list=
         "spacing": "xs",
         "contents": [
             {
-                "type": "box", "layout": "vertical", "flex": 1, "backgroundColor": "#f0f9ff", "borderColor": "#0284c7", "borderWidth": "1px", "paddingAll": "xs", "cornerRadius": "xs",
+                "type": "box", "layout": "vertical", "flex": 1, "backgroundColor": "#0284c7", "paddingAll": "xs", "cornerRadius": "md",
                 "contents": [
-                    {"type": "text", "text": "TARGET DT", "size": "xxs", "color": "#0284c7", "weight": "bold", "align": "center"},
-                    {"type": "text", "text": fmt_num(target_val), "size": "xxs", "color": "#0284c7", "weight": "bold", "align": "center"}
+                    {"type": "text", "text": "🎯 TG DT", "size": "xxs", "color": "#ffffff", "weight": "bold", "align": "center"},
+                    {"type": "text", "text": fmt_num(target_val), "size": "xs", "color": "#ffffff", "weight": "bold", "align": "center"}
                 ]
             },
             {
-                "type": "box", "layout": "vertical", "flex": 1, "backgroundColor": "#fff7ed", "borderColor": "#ea580c", "borderWidth": "1px", "paddingAll": "xs", "cornerRadius": "xs",
+                "type": "box", "layout": "vertical", "flex": 1, "backgroundColor": "#ea580c", "paddingAll": "xs", "cornerRadius": "md",
                 "contents": [
-                    {"type": "text", "text": "LŨY KẾ DT", "size": "xxs", "color": "#c2410c", "weight": "bold", "align": "center"},
-                    {"type": "text", "text": fmt_num(actual_val), "size": "xxs", "color": "#c2410c", "weight": "bold", "align": "center"}
+                    {"type": "text", "text": "💰 LK DT", "size": "xxs", "color": "#ffffff", "weight": "bold", "align": "center"},
+                    {"type": "text", "text": fmt_num(actual_val), "size": "xs", "color": "#ffffff", "weight": "bold", "align": "center"}
                 ]
             },
             {
-                "type": "box", "layout": "vertical", "flex": 1, "backgroundColor": "#fef2f2", "borderColor": "#ef4444", "borderWidth": "1px", "paddingAll": "xs", "cornerRadius": "xs",
+                "type": "box", "layout": "vertical", "flex": 1, "backgroundColor": "#ef4444", "paddingAll": "xs", "cornerRadius": "md",
                 "contents": [
-                    {"type": "text", "text": "DT CÒN LẠI", "size": "xxs", "color": "#b91c1c", "weight": "bold", "align": "center"},
-                    {"type": "text", "text": fmt_num(con_lai_val), "size": "xxs", "color": "#b91c1c", "weight": "bold", "align": "center"}
+                    {"type": "text", "text": "⏳ CÒN DT", "size": "xxs", "color": "#ffffff", "weight": "bold", "align": "center"},
+                    {"type": "text", "text": fmt_num(con_lai_val), "size": "xs", "color": "#ffffff", "weight": "bold", "align": "center"}
                 ]
             },
             {
-                "type": "box", "layout": "vertical", "flex": 1, "backgroundColor": "#f0fdf4", "borderColor": "#16a34a", "borderWidth": "1px", "paddingAll": "xs", "cornerRadius": "xs",
+                "type": "box", "layout": "vertical", "flex": 1, "backgroundColor": "#10b981", "paddingAll": "xs", "cornerRadius": "md",
                 "contents": [
-                    {"type": "text", "text": "DỰ KIẾN %", "size": "xxs", "color": "#15803d", "weight": "bold", "align": "center"},
-                    {"type": "text", "text": f"{du_kien_pct:.1f}%", "size": "xxs", "color": "#15803d", "weight": "bold", "align": "center"}
+                    {"type": "text", "text": "🔮 DK %", "size": "xxs", "color": "#ffffff", "weight": "bold", "align": "center"},
+                    {"type": "text", "text": f"{du_kien_pct:.0f}%", "size": "xs", "color": "#ffffff", "weight": "bold", "align": "center"}
                 ]
             },
             {
-                "type": "box", "layout": "vertical", "flex": 1, "backgroundColor": "#f8fafc", "borderColor": "#64748b", "borderWidth": "1px", "paddingAll": "xs", "cornerRadius": "xs",
+                "type": "box", "layout": "vertical", "flex": 1, "backgroundColor": "#64748b", "paddingAll": "xs", "cornerRadius": "md",
                 "contents": [
-                    {"type": "text", "text": "M.TIÊU NGÀY", "size": "xxs", "color": "#475569", "weight": "bold", "align": "center"},
-                    {"type": "text", "text": fmt_num(m_tieu_ngay), "size": "xxs", "color": "#475569", "weight": "bold", "align": "center"}
+                    {"type": "text", "text": "📅 MT/NGÀY", "size": "xxs", "color": "#ffffff", "weight": "bold", "align": "center"},
+                    {"type": "text", "text": fmt_num(m_tieu_ngay), "size": "xs", "color": "#ffffff", "weight": "bold", "align": "center"}
                 ]
             }
         ]
     }
 
-    # 3. Bảng Nhóm Hàng Thi Đua Nhân Viên (Chuẩn Ảnh 3)
-    headers = ["#", "NGÀNH HÀNG", "M.TIÊU", "TARGET", "LŨY KẾ", "CÒN LẠI", "% HT", "DỰ KIẾN"]
-    weights = [1, 4, 2, 2, 2, 2, 2, 2]
-    aligns = ["center", "start", "center", "center", "center", "center", "center", "center"]
+    # 3. Bảng Nhóm Hàng Thi Đua Nhân Viên (7 Cột: Gộp TG & LK, bôi đỏ Ưu tiên 2)
+    headers = ["#", "NH", "MT", "TG / LK", "Còn", "%HT", "%DK"]
+    weights = [1, 4, 2, 3, 2, 2, 2]
+    aligns = ["center", "start", "center", "center", "center", "center", "center"]
     
     td_rows = [{
         "type": "box", "layout": "horizontal", "backgroundColor": "#0284c7", "paddingAll": "xs",
@@ -1159,14 +1186,16 @@ def build_individual_staff_card(e, rank, total_emp=11, now_str="", thi_dua_list=
         dk_color = get_color_class(dk_val / 100.0)
         dk_str = f"{dk_val:.1f}%" if dk_val < 100 else f"{dk_val:.0f}%"
         
-        name_s = shorten_name(td["name"])
+        unit_tag = "(DT)" if td.get("unit") == "TR" or "doanh thu" in str(td.get("name", "")).lower() else "(SL)"
+        name_s = f"{shorten_name(td['name'])} {unit_tag}"
+        name_color = "#dc2626" if td.get("phan_loai") == 2.0 else "#0f172a"
+
         mt = str(td.get("m_tieu", "🏆"))
-        tg = str(td["target"])
-        lk = str(td["actual"])
-        cl = str(td["con_lai"])
+        tg_lk = f"{td.get('target', 0)} / {td.get('actual', 0)}"
+        cl = str(td.get("con_lai", 0))
         
-        vals = [str(i), name_s, mt, tg, lk, cl, ht_str, dk_str]
-        colors = ["#475569", "#0f172a", "#16a34a" if mt == "🏆" else "#475569", "#475569", "#0284c7", "#16a34a" if cl == "🏆" else "#dc2626", ht_color, dk_color]
+        vals = [str(i), name_s, mt, tg_lk, cl, ht_str, dk_str]
+        colors = ["#475569", name_color, "#16a34a" if mt == "🏆" else "#475569", "#0f172a", "#16a34a" if cl == "🏆" else "#dc2626", ht_color, dk_color]
         
         td_rows.append({
             "type": "box", "layout": "horizontal", "margin": "xs",
@@ -1373,7 +1402,8 @@ def build_nhanvien_flex():
                     "actual": int(staff_cat_act),
                     "con_lai": "🏆" if staff_cat_act >= staff_cat_tg else int(con_lai),
                     "ht": ht_val,
-                    "du_kien": dk_val
+                    "du_kien": dk_val,
+                    "phan_loai": config_map.get(cat_clean, 1.0)
                 })
         
         emp_list.append({
@@ -1570,7 +1600,8 @@ def build_realtime_flex():
             "con_lai": con_lai,
             "target": lk_info["mt_ngay"],
             "ht": ht_target,
-            "unit": "TR" if lk_info["is_dt"] else "SP"
+            "unit": "TR" if lk_info["is_dt"] else "SP",
+            "phan_loai": config_map.get(nganh_clean, 1.0)
         })
         
     td_done = [x for x in parsed_td if x["ht"] >= 1.0 and x["actual"] > 0]
@@ -1861,46 +1892,74 @@ def build_realtime_flex():
         }
     }
 
-    # Bảng Thi Đua Realtime P.2 (Chuẩn Ảnh 2)
-    headers_rt2 = ["#", "NGÀNH HÀNG THI ĐUA", "THỰC HIỆN", "CÒN LẠI", "TARGET NGÀY", "% HT TARGET"]
-    weights_rt2 = [1, 5, 2, 2, 2, 2]
+    # Bảng Thi Đua Realtime P.2 (Chia 2 khu: Về đích ngày & Chưa về đích ngày - Chuẩn Ảnh 2 mới)
+    headers_rt2 = ["#", "NH", "Đạt", "Còn", "MT", "%HT"]
+    weights_rt2 = [1, 4, 2, 2, 2, 2]
     aligns_rt2 = ["center", "start", "center", "center", "center", "center"]
 
-    table_contents_rt2 = [
-        make_table_header(headers_rt2, weights_rt2, aligns_rt2, bg_color="#0f766e"),
-        {"type": "separator", "color": "#cbd5e1", "margin": "xs"}
-    ]
+    body_contents_rt2 = []
 
-    for idx, t in enumerate(parsed_td):
-        unit_tag = "(DT)" if t["unit"] == "TR" else "(SL)"
-        display_name = f"{t['name']} {unit_tag}"
-        act_str = fmt_num(t['actual'])
-        cl_str = "🏆" if t['con_lai'] <= 0 else fmt_num(t['con_lai'])
-        tg_str = fmt_num(t['target'])
-        ht_str = f"{t['ht']*100:.0f}%"
-
-        vals = [str(idx + 1), display_name, act_str, cl_str, tg_str, ht_str]
-        colors = [
-            "#64748b",
-            "#0f172a",
-            "#0284c7",
-            "#16a34a" if cl_str == "🏆" else "#dc2626",
-            "#475569",
-            get_color_class(t["ht"])
+    if td_done:
+        done_table_rt = [
+            {"type": "text", "text": f"🏆 NHÓM VỀ ĐÍCH NGÀY ({len(td_done)})", "size": "xxs", "color": "#15803d", "weight": "bold", "margin": "xs"},
+            make_table_header(headers_rt2, weights_rt2, aligns_rt2, bg_color="#15803d"),
+            {"type": "separator", "color": "#bbf7d0", "margin": "xs"}
         ]
-        table_contents_rt2.append(make_table_row(vals, weights_rt2, aligns_rt2, colors))
+        for idx, t in enumerate(td_done):
+            unit_tag = "(DT)" if t["unit"] == "TR" else "(SL)"
+            display_name = f"{t['name']} {unit_tag}"
+            act_str = fmt_num(t['actual'])
+            cl_str = "🏆" if t['con_lai'] <= 0 else fmt_num(t['con_lai'])
+            tg_str = fmt_num(t['target'])
+            ht_str = f"{t['ht']*100:.0f}%"
 
-    body_contents_rt2 = [{
-        "type": "box",
-        "layout": "vertical",
-        "backgroundColor": "#ffffff",
-        "borderColor": "#ccfbf1",
-        "borderWidth": "1px",
-        "cornerRadius": "md",
-        "paddingAll": "sm",
-        "margin": "xs",
-        "contents": table_contents_rt2
-    }]
+            name_color = "#dc2626" if t.get("phan_loai") == 2.0 else "#0f172a"
+            vals = [str(idx + 1), display_name, act_str, cl_str, tg_str, ht_str]
+            colors = ["#64748b", name_color, "#0284c7", "#16a34a" if cl_str == "🏆" else "#dc2626", "#475569", get_color_class(t["ht"])]
+            done_table_rt.append(make_table_row(vals, weights_rt2, aligns_rt2, colors))
+
+        body_contents_rt2.append({
+            "type": "box",
+            "layout": "vertical",
+            "backgroundColor": "#f0fdf4",
+            "borderColor": "#bbf7d0",
+            "borderWidth": "1px",
+            "cornerRadius": "md",
+            "paddingAll": "sm",
+            "margin": "xs",
+            "contents": done_table_rt
+        })
+
+    if td_pending:
+        pending_table_rt = [
+            {"type": "text", "text": f"🎯 NHÓM CHƯA VỀ ĐÍCH NGÀY ({len(td_pending)})", "size": "xxs", "color": "#b91c1c", "weight": "bold", "margin": "xs"},
+            make_table_header(headers_rt2, weights_rt2, aligns_rt2, bg_color="#0f766e"),
+            {"type": "separator", "color": "#cbd5e1", "margin": "xs"}
+        ]
+        for idx, t in enumerate(td_pending):
+            unit_tag = "(DT)" if t["unit"] == "TR" else "(SL)"
+            display_name = f"{t['name']} {unit_tag}"
+            act_str = fmt_num(t['actual'])
+            cl_str = "🏆" if t['con_lai'] <= 0 else fmt_num(t['con_lai'])
+            tg_str = fmt_num(t['target'])
+            ht_str = f"{t['ht']*100:.0f}%"
+
+            name_color = "#dc2626" if t.get("phan_loai") == 2.0 else "#0f172a"
+            vals = [str(idx + 1), display_name, act_str, cl_str, tg_str, ht_str]
+            colors = ["#64748b", name_color, "#0284c7", "#16a34a" if cl_str == "🏆" else "#dc2626", "#475569", get_color_class(t["ht"])]
+            pending_table_rt.append(make_table_row(vals, weights_rt2, aligns_rt2, colors))
+
+        body_contents_rt2.append({
+            "type": "box",
+            "layout": "vertical",
+            "backgroundColor": "#ffffff",
+            "borderColor": "#ccfbf1",
+            "borderWidth": "1px",
+            "cornerRadius": "md",
+            "paddingAll": "sm",
+            "margin": "xs",
+            "contents": pending_table_rt
+        })
 
     flex_bubble_rt2 = {
         "type": "bubble",

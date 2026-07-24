@@ -1016,7 +1016,7 @@ def handle_message(event):
                 if staff_bubbles:
                     carousel_msg = FlexSendMessage(
                         alt_text="🎴 Thẻ KPI Nhân Viên (Full 23 Ngành Hàng)",
-                        contents={"type": "carousel", "contents": staff_bubbles[:1]}
+                        contents={"type": "carousel", "contents": staff_bubbles[:10]}
                     )
                     line_bot_api.reply_message(event.reply_token, [overview_msg, carousel_msg])
                 else:

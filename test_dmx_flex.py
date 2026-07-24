@@ -74,8 +74,7 @@ class TestDmxFlexMessages(unittest.TestCase):
         self.assertIn("Tr", flex_str)
         self.assertNotIn("P.1:", flex_str)
         self.assertNotIn("P.2:", flex_str)
-        self.assertIn("TARGET NGÀY", flex_str)
-        self.assertIn("% HT TARGET", flex_str)
+        self.assertIn("%HT", flex_str)
         self.assertTrue("🔴 Chậm nhịp độ" in flex_str or "🟢 Vượt nhịp độ" in flex_str)
         self.assertTrue("💡" in flex_str or "🎉" in flex_str)
 
@@ -101,7 +100,7 @@ class TestDmxFlexMessages(unittest.TestCase):
         self.assertIn("Tr", flex_str)
         self.assertNotIn("P.1:", flex_str)
         self.assertNotIn("P.2:", flex_str)
-        self.assertIn("THỰC HIỆN / TARGET", flex_str)
+        self.assertIn("%DK", flex_str)
         self.assertIn("🔮 Dự Kiến Tháng", flex_str)
         self.assertIn("🎯 Mục tiêu hôm nay:", flex_str)
         self.assertIn("💡 Cần trung bình", flex_str)
@@ -123,9 +122,7 @@ class TestDmxFlexMessages(unittest.TestCase):
         staff_card_str = str(flex[1])
         self.assertIn("Tiến độ Doanh thu", staff_card_str)
         self.assertIn("Tiến độ Thi đua", staff_card_str)
-        self.assertIn("TARGET DT", staff_card_str)
-        self.assertIn("LŨY KẾ DT", staff_card_str)
-        self.assertIn("DT CÒN LẠI", staff_card_str)
+        self.assertIn("TG / LK", staff_card_str)
 
 if __name__ == '__main__':
     unittest.main()
