@@ -76,15 +76,31 @@ def allocate_cleaning_zones(nv_list):
                 })
             erp_assigned = True
         
-        # 2. Nam -> 1 Nam Khu 2, 1 Nam Khu 4
+        # 2. Nam & GH1 -> Nếu có GH1: gộp GH1 + 1 Nam cùng làm Khu 2 & Khu 4
         assigned_males = []
-        if len(male_staff) >= 2:
-            assignments.append({'name': male_staff[0], 'zones': [2], 'zone_desc': f"Khu 2: {ZONES[2]}"})
-            assignments.append({'name': male_staff[1], 'zones': [4], 'zone_desc': f"Khu 4: {ZONES[4]}"})
-            assigned_males = male_staff[:2]
-        elif len(male_staff) == 1:
-            assignments.append({'name': male_staff[0], 'zones': [2, 4], 'zone_desc': f"Khu 2: {ZONES[2]} & Khu 4: {ZONES[4]}"})
-            assigned_males = male_staff[:1]
+        gh1_in_list = [p for p in male_staff if "GH1" in p.upper()]
+        non_gh1_males = [p for p in male_staff if "GH1" not in p.upper()]
+
+        if gh1_in_list:
+            gh1_p = gh1_in_list[0]
+            if non_gh1_males:
+                partner_male = non_gh1_males[0]
+                desc = f"Khu 2: {ZONES[2]} & Khu 4: {ZONES[4]} (Gộp GH1 + 1 Nam)"
+                assignments.append({'name': gh1_p, 'zones': [2, 4], 'zone_desc': desc})
+                assignments.append({'name': partner_male, 'zones': [2, 4], 'zone_desc': desc})
+                assigned_males = [gh1_p, partner_male]
+            else:
+                desc = f"Khu 2: {ZONES[2]} & Khu 4: {ZONES[4]}"
+                assignments.append({'name': gh1_p, 'zones': [2, 4], 'zone_desc': desc})
+                assigned_males = [gh1_p]
+        else:
+            if len(male_staff) >= 2:
+                assignments.append({'name': male_staff[0], 'zones': [2], 'zone_desc': f"Khu 2: {ZONES[2]}"})
+                assignments.append({'name': male_staff[1], 'zones': [4], 'zone_desc': f"Khu 4: {ZONES[4]}"})
+                assigned_males = male_staff[:2]
+            elif len(male_staff) == 1:
+                assignments.append({'name': male_staff[0], 'zones': [2, 4], 'zone_desc': f"Khu 2: {ZONES[2]} & Khu 4: {ZONES[4]}"})
+                assigned_males = male_staff[:1]
         
         # 3. Còn lại -> Khu 3 (và khu 1, 5 nếu chưa có ERP)
         remaining = [p for p in cleaning_nv if p not in erp_staff and p not in assigned_males]
@@ -109,16 +125,38 @@ def allocate_cleaning_zones(nv_list):
                 assignments.append({'name': p, 'zones': [1], 'zone_desc': f"Khu 1: {ZONES[1]}"})
                 used_staff.add(p)
 
-        # 2. 2 Nam -> Khu 2
+        # 2. Nam & GH1 -> Nếu có GH1: gộp GH1 + 2 Nam cùng làm Khu 2
         assigned_males = [p for p in male_staff if p not in used_staff]
-        if len(assigned_males) >= 2:
-            assignments.append({'name': assigned_males[0], 'zones': [2], 'zone_desc': f"Khu 2: {ZONES[2]}"})
-            assignments.append({'name': assigned_males[1], 'zones': [2], 'zone_desc': f"Khu 2: {ZONES[2]}"})
-            used_staff.add(assigned_males[0])
-            used_staff.add(assigned_males[1])
-        elif len(assigned_males) == 1:
-            assignments.append({'name': assigned_males[0], 'zones': [2], 'zone_desc': f"Khu 2: {ZONES[2]}"})
-            used_staff.add(assigned_males[0])
+        gh1_in_list = [p for p in assigned_males if "GH1" in p.upper()]
+        non_gh1_males = [p for p in assigned_males if "GH1" not in p.upper()]
+
+        if gh1_in_list:
+            gh1_p = gh1_in_list[0]
+            if len(non_gh1_males) >= 2:
+                m1, m2 = non_gh1_males[0], non_gh1_males[1]
+                desc = f"Khu 2: {ZONES[2]} (Gộp GH1 + 2 Nam)"
+                assignments.append({'name': gh1_p, 'zones': [2], 'zone_desc': desc})
+                assignments.append({'name': m1, 'zones': [2], 'zone_desc': desc})
+                assignments.append({'name': m2, 'zones': [2], 'zone_desc': desc})
+                used_staff.update([gh1_p, m1, m2])
+            elif len(non_gh1_males) == 1:
+                m1 = non_gh1_males[0]
+                desc = f"Khu 2: {ZONES[2]} (Gộp GH1 + 1 Nam)"
+                assignments.append({'name': gh1_p, 'zones': [2], 'zone_desc': desc})
+                assignments.append({'name': m1, 'zones': [2], 'zone_desc': desc})
+                used_staff.update([gh1_p, m1])
+            else:
+                assignments.append({'name': gh1_p, 'zones': [2], 'zone_desc': f"Khu 2: {ZONES[2]}"})
+                used_staff.add(gh1_p)
+        else:
+            if len(assigned_males) >= 2:
+                assignments.append({'name': assigned_males[0], 'zones': [2], 'zone_desc': f"Khu 2: {ZONES[2]}"})
+                assignments.append({'name': assigned_males[1], 'zones': [2], 'zone_desc': f"Khu 2: {ZONES[2]}"})
+                used_staff.add(assigned_males[0])
+                used_staff.add(assigned_males[1])
+            elif len(assigned_males) == 1:
+                assignments.append({'name': assigned_males[0], 'zones': [2], 'zone_desc': f"Khu 2: {ZONES[2]}"})
+                used_staff.add(assigned_males[0])
 
         # 3. Nhân viên còn lại -> Chia đều Khu 3, Khu 4, Khu 5
         pool = [p for p in cleaning_nv if p not in used_staff]

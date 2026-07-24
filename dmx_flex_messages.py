@@ -1994,16 +1994,25 @@ def build_realtime_flex():
 
 def build_help_commands_flex():
     """
-    Tạo Flex Message Hướng Dẫn Danh Sách Tất Cả Câu Lệnh (#lenh)
+    Tạo Flex Message Hướng Dẫn TOÀN BỘ Danh Sách Câu Lệnh Hỗ Trợ (#lenh)
     """
     commands_data = [
+        # --- BÁO CÁO DOANH THU & THI ĐUA ---
         {"cmd": "LK1", "desc": "Báo cáo Lũy kế Doanh thu & Ngành hàng thi đua tháng (Flex P.1 & P.2)", "color": "#1e40af"},
         {"cmd": "RT1", "desc": "Báo cáo Realtime Doanh thu & Ngành hàng thi đua ngày (Flex P.1 & P.2)", "color": "#0284c7"},
         {"cmd": "NV0", "desc": "Bảng Xếp Hạng Doanh Thu NV Pro + Carousel Top 8 NV (#1 - #8)", "color": "#0f766e"},
         {"cmd": "NV1", "desc": "Hiển thị tiếp danh sách Thẻ KPI các Nhân viên còn lại (#9 trở đi)", "color": "#0f766e"},
         {"cmd": "NV <mã>", "desc": "Xem riêng 1 Thẻ KPI Nhân viên (VD: nv 61169 hoặc nv Dương)", "color": "#d97706"},
-        {"cmd": "NV <mã1>,<mã2>...", "desc": "Xem nhiều Thẻ KPI NV (VD: nv 61169,98372,132697)", "color": "#b45309"},
-        {"cmd": "#lenh", "desc": "Hiển thị Bảng Hướng Dẫn Danh Sách Tất Cả Cú Pháp Lệnh Hỗ Trợ", "color": "#64748b"}
+        {"cmd": "NV <mã1>,<mã2>...", "desc": "Xem nhiều Thẻ KPI NV cùng lúc (VD: nv 61169,98372,132697)", "color": "#b45309"},
+        # --- CHECKLIST & VẬN HÀNH ---
+        {"cmd": "sang / chieu", "desc": "Checklist danh sách công việc đầu ca Sáng hoặc ca Chiều", "color": "#475569"},
+        {"cmd": "vs", "desc": "Checklist kiểm tra hình ảnh trước 10h sáng", "color": "#475569"},
+        {"cmd": "vesinh", "desc": "Bảng phân công khu vực vệ sinh (vesinh sang / vesinh chieu)", "color": "#16a34a"},
+        {"cmd": "ăn / ansang", "desc": "Điểm danh ăn uống nhân sự theo ca (ansang / anchieu)", "color": "#ea580c"},
+        # --- GIAO VIỆC & HỆ THỐNG ---
+        {"cmd": "việc @tên: <mô tả>", "desc": "Giao việc phát sinh cá nhân hoặc nhóm (VD: việc @Long: dọn kho)", "color": "#8b5cf6"},
+        {"cmd": "id", "desc": "Tra cứu Mã User ID cá nhân & Group ID nhóm chat", "color": "#64748b"},
+        {"cmd": "#lenh", "desc": "Hiển thị Bảng Hướng Dẫn Danh Sách Tất Cả Cú Pháp Lệnh Hỗ Trợ", "color": "#0f172a"}
     ]
 
     cmd_contents = []
@@ -2026,7 +2035,7 @@ def build_help_commands_flex():
                             "backgroundColor": item["color"],
                             "paddingAll": "xs",
                             "cornerRadius": "xs",
-                            "flex": 4,
+                            "flex": 5,
                             "contents": [
                                 {"type": "text", "text": item["cmd"], "size": "xxs", "weight": "bold", "color": "#ffffff", "align": "center"}
                             ]
@@ -2048,8 +2057,8 @@ def build_help_commands_flex():
             "backgroundColor": "#1e293b",
             "paddingAll": "md",
             "contents": [
-                {"type": "text", "text": "📖 DANH SÁCH CÂU LỆNH HỖ TRỢ", "weight": "bold", "size": "sm", "color": "#ffffff", "align": "center"},
-                {"type": "text", "text": "Gõ đúng cú pháp để tra cứu báo cáo tương ứng", "size": "xxs", "color": "#94a3b8", "align": "center", "margin": "xs"}
+                {"type": "text", "text": "📖 TOÀN BỘ DANH SÁCH CÂU LỆNH HỖ TRỢ", "weight": "bold", "size": "sm", "color": "#ffffff", "align": "center"},
+                {"type": "text", "text": "Gõ đúng cú pháp để tra cứu báo cáo & vận hành tương ứng", "size": "xxs", "color": "#94a3b8", "align": "center", "margin": "xs"}
             ]
         },
         "body": {

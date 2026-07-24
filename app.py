@@ -998,11 +998,11 @@ def handle_message(event):
             # 1. Trường hợp tra cứu riêng 1 hoặc nhiều nhân viên (VD: "NV 61169", "NV 61169,98372,132697", "NV Dương", "NV1 61169")
             query_param = ""
             if user_msg_upper.startswith('NV '):
-                query_param = user_msg[3:].strip()
+                query_param = user_message[3:].strip()
             elif user_msg_upper.startswith('NV:') or user_msg_upper.startswith('NV1 '):
-                query_param = user_msg[4:].strip()
+                query_param = user_message[4:].strip()
             elif user_msg_upper.startswith('NV0 '):
-                query_param = user_msg[4:].strip()
+                query_param = user_message[4:].strip()
 
             if query_param:
                 raw_queries = [q.strip() for q in query_param.split(',') if q.strip()]
