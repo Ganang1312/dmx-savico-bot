@@ -728,7 +728,7 @@ def build_luyke_flex():
         for idx, t in enumerate(td_done):
             unit_tag = "(DT)" if t["unit"] == "TR" else "(SL)"
             display_name = f"{t['name']} {unit_tag}"
-            mt_str = "🏆" if (t.get("con_lai", 1) <= 0 or t.get("ht_dk", 0) >= 1.0 or t["actual"] >= t["target"]) else t.get("mt_ngay_str", "0")
+            mt_str = "🏆" if (t["actual"] >= t["target"] or t.get("ht", 0) >= 1.0) else t.get("mt_ngay_str", "0")
             act_tg_str = f"{fmt_num(t['actual'])} / {fmt_num(t['target'])}"
             ht_str = f"{t['ht']*100:.0f}%"
             dk_str = f"{t['ht_dk']*100:.0f}%"
@@ -761,7 +761,7 @@ def build_luyke_flex():
         for idx, t in enumerate(td_pending):
             unit_tag = "(DT)" if t["unit"] == "TR" else "(SL)"
             display_name = f"{t['name']} {unit_tag}"
-            mt_str = "🏆" if (t.get("con_lai", 1) <= 0 or t.get("ht_dk", 0) >= 1.0 or t["actual"] >= t["target"]) else t.get("mt_ngay_str", "0")
+            mt_str = "🏆" if (t["actual"] >= t["target"] or t.get("ht", 0) >= 1.0) else t.get("mt_ngay_str", "0")
             act_tg_str = f"{fmt_num(t['actual'])} / {fmt_num(t['target'])}"
             ht_str = f"{t['ht']*100:.0f}%"
             dk_str = f"{t['ht_dk']*100:.0f}%"
