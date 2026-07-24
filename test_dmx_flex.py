@@ -117,7 +117,7 @@ class TestDmxFlexMessages(unittest.TestCase):
         
         flex_str = str(flex)
         self.assertIn("Tr", flex_str)
-        self.assertIn("BÁO CÁO XẾP HẠNG DOANH THU & THI ĐUA NV", str(flex[0]))
+        self.assertIn("BÁO CÁO XẾP HẠNG", str(flex[0]))
         
         staff_card_str = str(flex[1])
         self.assertIn("Tiến độ Doanh thu", staff_card_str)

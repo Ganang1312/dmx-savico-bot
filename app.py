@@ -34,7 +34,7 @@ from checklist_scheduler import send_initial_checklist, get_checklist_message
 from meal_handler import generate_meal_flex, update_meal_status
 from vesinh_handler import generate_vesinh_flex, update_vesinh_status, get_current_vesinh_session
 from dmx_data_provider import trigger_adhoc_scrape, check_scrape_status
-from dmx_flex_messages import build_luyke_flex, build_nhanvien_flex, build_realtime_flex
+from dmx_flex_messages import build_luyke_flex, build_nhanvien_flex, build_realtime_flex, build_help_commands_flex
 
 # --- CẤU HÌNH ---
 CHANNEL_ACCESS_TOKEN = os.environ.get('CHANNEL_ACCESS_TOKEN')
@@ -962,7 +962,22 @@ def handle_message(event):
                 print(f"Lỗi gửi tin nhắn đẩy dự phòng: {pe}")
         return
 
-    if user_msg_upper == 'NV1' or user_msg_upper.startswith('NV1 '):
+    if user_msg_upper in ['#LENH', '#LỆNH', 'HELP', '#HELP', 'MENU', '#CUPHAP', 'CÚ PHÁP', 'CUPHAP']:
+        try:
+            help_bubble = build_help_commands_flex()
+            line_bot_api.reply_message(
+                event.reply_token,
+                FlexSendMessage(alt_text="📖 Danh Sách Câu Lệnh Hỗ Trợ", contents=help_bubble)
+            )
+        except Exception as e:
+            print(f"Lỗi gửi bảng lệnh trợ giúp: {e}")
+            try:
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"Lỗi gửi trợ giúp: {str(e)}"))
+            except Exception as pe:
+                print(f"Lỗi gửi reply dự phòng: {pe}")
+        return
+
+    if user_msg_upper in ['NV', 'NV0', 'NV1'] or user_msg_upper.startswith('NV ') or user_msg_upper.startswith('NV0 ') or user_msg_upper.startswith('NV1 ') or user_msg_upper.startswith('NV:'):
         group_id = getattr(event.source, 'group_id', None)
         target_id = group_id or getattr(event.source, 'user_id', None)
         
@@ -980,55 +995,94 @@ def handle_message(event):
             overview_bubble = flex_bubbles[0]
             staff_bubbles = flex_bubbles[1:]
 
-            # Kiểm tra xem người dùng có gõ kèm tên/mã user/thứ hạng không (VD: "NV1 Dương", "NV1 61169", "NV1 1")
+            # 1. Trường hợp tra cứu riêng 1 hoặc nhiều nhân viên (VD: "NV 61169", "NV 61169,98372,132697", "NV Dương", "NV1 61169")
             query_param = ""
-            if user_msg_upper.startswith('NV1 '):
+            if user_msg_upper.startswith('NV '):
+                query_param = user_msg[3:].strip()
+            elif user_msg_upper.startswith('NV:') or user_msg_upper.startswith('NV1 '):
+                query_param = user_msg[4:].strip()
+            elif user_msg_upper.startswith('NV0 '):
                 query_param = user_msg[4:].strip()
 
             if query_param:
-                query_u = query_param.upper()
-                matched_bubble = None
-                for s_b in staff_bubbles:
-                    header_txt = str(s_b.get("header", {}).get("contents", [{}])[0].get("text", "")).upper()
-                    body_txt = str(s_b.get("body", {})).upper()
-                    if query_u in header_txt or query_u in body_txt:
-                        matched_bubble = s_b
-                        break
+                raw_queries = [q.strip() for q in query_param.split(',') if q.strip()]
+                matched_bubbles = []
 
-                if not matched_bubble and query_u.isdigit():
-                    rank_idx = int(query_u)
-                    if 1 <= rank_idx <= len(staff_bubbles):
-                        matched_bubble = staff_bubbles[rank_idx - 1]
+                for q in raw_queries:
+                    qu = q.upper()
+                    m_b = None
+                    for s_b in staff_bubbles:
+                        if qu in json.dumps(s_b).upper():
+                            m_b = s_b
+                            break
 
-                if matched_bubble:
-                    line_bot_api.reply_message(
-                        event.reply_token,
-                        FlexSendMessage(alt_text=f"🎴 Thẻ KPI Nhân Viên: {query_param}", contents=matched_bubble)
-                    )
+                    if not m_b and qu.isdigit():
+                        rank_idx = int(qu)
+                        if 1 <= rank_idx <= len(staff_bubbles):
+                            m_b = staff_bubbles[rank_idx - 1]
+
+                    if m_b and m_b not in matched_bubbles:
+                        matched_bubbles.append(m_b)
+
+                if matched_bubbles:
+                    if len(matched_bubbles) == 1:
+                        line_bot_api.reply_message(
+                            event.reply_token,
+                            FlexSendMessage(alt_text=f"🎴 Thẻ KPI Nhân Viên: {query_param}", contents=matched_bubbles[0])
+                        )
+                    else:
+                        matched_carousels = []
+                        for i in range(0, len(matched_bubbles), 2):
+                            chunk = matched_bubbles[i:i+2]
+                            matched_carousels.append(FlexSendMessage(
+                                alt_text=f"🎴 Thẻ KPI Nhân Viên ({i+1}-{i+len(chunk)})",
+                                contents={"type": "carousel", "contents": chunk}
+                            ))
+                        line_bot_api.reply_message(event.reply_token, matched_carousels[:5])
                 else:
                     line_bot_api.reply_message(
                         event.reply_token,
-                        TextSendMessage(text=f"🔍 Không tìm thấy nhân viên '{query_param}'. Vui lòng thử lại với tên hoặc mã user (VD: NV1 Dương, NV1 61169 hoặc NV1 1).")
+                        TextSendMessage(text=f"🔍 Không tìm thấy nhân viên với mã/tên: '{query_param}'. Vui lòng thử lại với Mã User (VD: nv 61169 hoặc nv 61169,98372,132697).")
                     )
-            else:
-                # Gõ "NV1": Gửi Bảng Xếp Hạng Overview + Dãy Carousel Thẻ NV (FULL 23 Ngành Hàng & 7 Chỉ Số) 100% MIỄN PHÍ bằng reply_message (39.2KB < 50KB limit!)
+
+            # 2. Trường hợp gõ lệnh "NV0": Gửi Bảng Xếp Hạng + 4 Carousel Top 8 Nhân Viên (#1 - #8) (Mỗi thẻ ĐỦ 23 nhóm)
+            elif user_msg_upper in ['NV0', 'NV']:
                 overview_msg = FlexSendMessage(alt_text="🏆 Bảng Xếp Hạng Doanh Thu NV", contents=overview_bubble)
                 carousel_msgs = []
-                if staff_bubbles:
-                    for i in range(0, len(staff_bubbles), 2):
-                        chunk = staff_bubbles[i:i+2]
+                top_staff = staff_bubbles[:8]
+                if top_staff:
+                    for i in range(0, len(top_staff), 2):
+                        chunk = top_staff[i:i+2]
                         if chunk:
                             carousel_msgs.append(FlexSendMessage(
                                 alt_text=f"🎴 Thẻ KPI Nhân Viên ({i+1}-{i+len(chunk)})",
                                 contents={"type": "carousel", "contents": chunk}
                             ))
 
-                # Gửi tối đa 5 tin nhắn bằng reply_message duy nhất (1 Overview + 4 Carousel x 2 Thẻ/Carousel = 8 Thẻ NV Top) 100% MIỄN PHÍ
                 reply_msgs = [overview_msg] + carousel_msgs[:4]
                 line_bot_api.reply_message(event.reply_token, reply_msgs)
 
+            # 3. Trường hợp gõ lệnh "NV1": Gửi tiếp các nhân viên còn lại từ #9 đến hết (Mỗi thẻ ĐỦ 23 nhóm)
+            elif user_msg_upper == 'NV1':
+                rem_staff = staff_bubbles[8:]
+                if not rem_staff:
+                    line_bot_api.reply_message(
+                        event.reply_token,
+                        TextSendMessage(text="✅ Tất cả nhân viên đã được hiển thị trọn vẹn trong bảng xếp hạng NV0.")
+                    )
+                else:
+                    carousel_msgs = []
+                    for i in range(0, len(rem_staff), 2):
+                        chunk = rem_staff[i:i+2]
+                        if chunk:
+                            carousel_msgs.append(FlexSendMessage(
+                                alt_text=f"🎴 Thẻ KPI Nhân Viên (#{i+9}-#{i+8+len(chunk)})",
+                                contents={"type": "carousel", "contents": chunk}
+                            ))
+                    line_bot_api.reply_message(event.reply_token, carousel_msgs[:5])
+
         except Exception as e:
-            print(f"Lỗi gửi Flex NV1: {e}")
+            print(f"Lỗi gửi Flex NV: {e}")
             try:
                 line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"Lỗi gửi Flex xếp hạng nhân viên: {str(e)}"))
             except Exception as pe:
