@@ -81,8 +81,6 @@ def shorten_name(name):
     for old, new in replacements:
         s = s.replace(old, new)
         
-    if len(s) > 14:
-        s = s[:13] + "…"
     return s
 
 def shorten_staff_name(name):
@@ -151,7 +149,8 @@ def make_table_row(vals, weights, aligns=None, colors=None, bold=False, bg_color
             "color": c,
             "flex": w,
             "align": a,
-            "weight": "bold" if bold else "regular"
+            "weight": "bold" if bold else "regular",
+            "wrap": True
         })
     box_dict = {
         "type": "box",
@@ -383,9 +382,9 @@ def build_luyke_flex():
         con_lai = max(0.0, tg - actual)
         mt_ngay_val = (con_lai / days_remaining) if days_remaining > 0 else 0.0
         if is_dt:
-            mt_ngay_str = f"{mt_ngay_val:.1f} Tr/N" if mt_ngay_val > 0 else "0 Tr/N"
+            mt_ngay_str = f"{mt_ngay_val:.1f} Tr" if mt_ngay_val > 0 else "0 Tr"
         else:
-            mt_ngay_str = f"{int(round(mt_ngay_val))} SP/N" if mt_ngay_val >= 1 else (f"{mt_ngay_val:.1f} SP/N" if mt_ngay_val > 0 else "0 SP/N")
+            mt_ngay_str = f"{int(round(mt_ngay_val))} SP" if mt_ngay_val >= 1 else (f"{mt_ngay_val:.1f} SP" if mt_ngay_val > 0 else "0 SP")
 
         parsed_td.append({
             "name": shorten_name(nganh),
@@ -714,8 +713,8 @@ def build_luyke_flex():
     }
 
     # Bảng Thi Đua Lũy Kế P.2 (Chia 2 khu: Dự kiến về đích & Chưa về đích - Chuẩn Ảnh 1 mới)
-    headers_p2 = ["#", "NH", "MT", "Đạt", "%HT", "%DK"]
-    weights_p2 = [1, 4, 2, 3, 2, 2]
+    headers_p2 = ["#", "📦 NH", "🎯 MT", "📈 Đạt", "📊 %HT", "🔮 %DK"]
+    weights_p2 = [1, 5, 2, 3, 2, 2]
     aligns_p2 = ["center", "start", "center", "center", "center", "center"]
 
     body_contents_p2 = []
@@ -729,14 +728,14 @@ def build_luyke_flex():
         for idx, t in enumerate(td_done):
             unit_tag = "(DT)" if t["unit"] == "TR" else "(SL)"
             display_name = f"{t['name']} {unit_tag}"
-            mt_str = t.get("mt_ngay_str", "0")
+            mt_str = "🏆" if (t.get("con_lai", 1) <= 0 or t.get("ht_dk", 0) >= 1.0 or t["actual"] >= t["target"]) else t.get("mt_ngay_str", "0")
             act_tg_str = f"{fmt_num(t['actual'])} / {fmt_num(t['target'])}"
             ht_str = f"{t['ht']*100:.0f}%"
             dk_str = f"{t['ht_dk']*100:.0f}%"
 
             name_color = "#dc2626" if t.get("phan_loai") == 2.0 else "#0f172a"
             vals = [str(idx + 1), display_name, mt_str, act_tg_str, ht_str, dk_str]
-            colors = ["#64748b", name_color, "#0284c7", "#0f172a", get_color_class(t["ht"]), get_color_class(t["ht_dk"])]
+            colors = ["#64748b", name_color, "#16a34a" if mt_str == "🏆" else "#0284c7", "#0f172a", get_color_class(t["ht"]), get_color_class(t["ht_dk"])]
             done_table.append(make_table_row(vals, weights_p2, aligns_p2, colors))
 
         body_contents_p2.append({
@@ -760,14 +759,14 @@ def build_luyke_flex():
         for idx, t in enumerate(td_pending):
             unit_tag = "(DT)" if t["unit"] == "TR" else "(SL)"
             display_name = f"{t['name']} {unit_tag}"
-            mt_str = t.get("mt_ngay_str", "0")
+            mt_str = "🏆" if (t.get("con_lai", 1) <= 0 or t.get("ht_dk", 0) >= 1.0 or t["actual"] >= t["target"]) else t.get("mt_ngay_str", "0")
             act_tg_str = f"{fmt_num(t['actual'])} / {fmt_num(t['target'])}"
             ht_str = f"{t['ht']*100:.0f}%"
             dk_str = f"{t['ht_dk']*100:.0f}%"
 
             name_color = "#dc2626" if t.get("phan_loai") == 2.0 else "#0f172a"
             vals = [str(idx + 1), display_name, mt_str, act_tg_str, ht_str, dk_str]
-            colors = ["#64748b", name_color, "#0284c7", "#0f172a", get_color_class(t["ht"]), get_color_class(t["ht_dk"])]
+            colors = ["#64748b", name_color, "#16a34a" if mt_str == "🏆" else "#0284c7", "#0f172a", get_color_class(t["ht"]), get_color_class(t["ht_dk"])]
             pending_table.append(make_table_row(vals, weights_p2, aligns_p2, colors))
 
         body_contents_p2.append({
@@ -1604,8 +1603,8 @@ def build_realtime_flex():
             "phan_loai": config_map.get(nganh_clean, 1.0)
         })
         
-    td_done = [x for x in parsed_td if x["ht"] >= 1.0 and x["actual"] > 0]
-    td_pending = [x for x in parsed_td if x["ht"] < 1.0 and x["actual"] > 0]
+    td_done = [x for x in parsed_td if x["ht"] >= 1.0]
+    td_pending = [x for x in parsed_td if x["ht"] < 1.0]
     td_done.sort(key=lambda x: x["ht"], reverse=True)
     td_pending.sort(key=lambda x: x["ht"], reverse=True)
     
@@ -1893,8 +1892,8 @@ def build_realtime_flex():
     }
 
     # Bảng Thi Đua Realtime P.2 (Chia 2 khu: Về đích ngày & Chưa về đích ngày - Chuẩn Ảnh 2 mới)
-    headers_rt2 = ["#", "NH", "Đạt", "Còn", "MT", "%HT"]
-    weights_rt2 = [1, 4, 2, 2, 2, 2]
+    headers_rt2 = ["#", "📦 NH", "🚀 Đạt", "⏳ Còn", "🎯 MT", "📊 %HT"]
+    weights_rt2 = [1, 5, 2, 2, 2, 2]
     aligns_rt2 = ["center", "start", "center", "center", "center", "center"]
 
     body_contents_rt2 = []

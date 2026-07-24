@@ -1013,14 +1013,23 @@ def handle_message(event):
             else:
                 # Gõ "NV1": Gửi Bảng Xếp Hạng Overview + Dãy Carousel Thẻ NV (FULL 23 Ngành Hàng & 7 Chỉ Số) 100% MIỄN PHÍ bằng reply_message (39.2KB < 50KB limit!)
                 overview_msg = FlexSendMessage(alt_text="🏆 Bảng Xếp Hạng Doanh Thu NV", contents=overview_bubble)
+                reply_msgs = [overview_msg]
                 if staff_bubbles:
-                    carousel_msg = FlexSendMessage(
-                        alt_text="🎴 Thẻ KPI Nhân Viên (Full 23 Ngành Hàng)",
-                        contents={"type": "carousel", "contents": staff_bubbles[:10]}
-                    )
-                    line_bot_api.reply_message(event.reply_token, [overview_msg, carousel_msg])
-                else:
-                    line_bot_api.reply_message(event.reply_token, overview_msg)
+                    c1_bubbles = staff_bubbles[:6]
+                    c2_bubbles = staff_bubbles[6:12]
+                    
+                    if c1_bubbles:
+                        reply_msgs.append(FlexSendMessage(
+                            alt_text="🎴 Thẻ KPI Nhân Viên (Nhóm 1)",
+                            contents={"type": "carousel", "contents": c1_bubbles}
+                        ))
+                    if c2_bubbles:
+                        reply_msgs.append(FlexSendMessage(
+                            alt_text="🎴 Thẻ KPI Nhân Viên (Nhóm 2)",
+                            contents={"type": "carousel", "contents": c2_bubbles}
+                        ))
+                
+                line_bot_api.reply_message(event.reply_token, reply_msgs)
 
         except Exception as e:
             print(f"Lỗi gửi Flex NV1: {e}")
