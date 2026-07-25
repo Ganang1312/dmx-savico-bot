@@ -891,16 +891,16 @@ def handle_message(event):
         return
 
     # === 5.5 XỬ LÝ LỆNH VỆ SINH (VESINH) ===
-    if cmd_normalized.startswith('vesinh') or cmd_normalized in ['ve sinh', 'vệ sinh']:
+    if cmd_normalized.startswith('vesinh') or cmd_normalized.startswith('vệsinh') or cmd_normalized in ['ve sinh', 'vệ sinh']:
         group_id = getattr(event.source, 'group_id', None)
         if not group_id:
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text="⚠️ Lệnh này chỉ hoạt động trong nhóm chat."))
             return
 
         session_type = None
-        if 'sang' in cmd_normalized:
+        if 'sang' in cmd_normalized or 'sáng' in cmd_normalized:
             session_type = 'vesinh_sang'
-        elif 'chieu' in cmd_normalized:
+        elif 'chieu' in cmd_normalized or 'chiều' in cmd_normalized:
             session_type = 'vesinh_chieu'
         else:
             session_type = get_current_vesinh_session()
