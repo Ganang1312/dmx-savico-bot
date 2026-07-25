@@ -1420,12 +1420,18 @@ def build_realtime_flex():
         target_bu_tru = 0.0
         
     holiday_target = 0.0
+    user_map = {}
     if config_rows:
         for r in config_rows:
             day_val = parse_number(get_key_val(r, "ngày", "Ngày", default=0.0))
             if int(day_val) == current_day:
                 holiday_target = parse_number(get_key_val(r, "Mục tiêu", "mục tiêu ngày", "mục tiêu", default=0.0))
-                break
+            
+            user_id = get_key_val(r, "user")
+            if user_id and str(user_id).strip():
+                percent = parse_number(get_key_val(r, "tỷ lệ %", "% chia", default=0.0))
+                ratio = percent if percent <= 1 else percent / 100.0
+                user_map[str(user_id).strip()] = ratio
         
     target_today = 0.0
     if holiday_target > 0:
@@ -1761,9 +1767,17 @@ def build_realtime_flex():
             t_nv = get_key_val(row, "tên nv", "ten_nv", "employeeName", default="") or ""
             dt_nv = parse_number(get_key_val(row, "doanh thu", "revenue", default=0))
             if dt_nv != 0:
+                ratio = 0.0
+                if 'user_map' in locals() and m_nv in user_map:
+                    ratio = user_map[m_nv]
+                target_nv = (target_today * 1000000) * ratio
+                
                 last_name = t_nv.strip().split()[-1] if t_nv else ""
-                disp_name = f"{last_name} - {m_nv}" if m_nv else t_nv
-                parsed_nv_rt.append({"name": disp_name, "dt": dt_nv})
+                disp_name = f"{last_name} - {m_nv}" if m_nv else str(t_nv)
+                
+                ht_nv = (dt_nv / target_nv) if target_nv > 0 else (1.0 if dt_nv > 0 else 0.0)
+                
+                parsed_nv_rt.append({"name": disp_name, "dt": dt_nv, "target": target_nv, "ht": ht_nv})
         
         parsed_nv_rt.sort(key=lambda x: x["dt"], reverse=True)
 
@@ -1771,26 +1785,37 @@ def build_realtime_flex():
             nv_card_contents = [
                 {"type": "text", "text": "🏆 THỨ HẠNG DOANH THU NHÂN VIÊN", "size": "xxs", "color": "#0284c7", "weight": "bold", "margin": "xs"}
             ]
-            nv_headers = ["#", "Nhân viên", "Doanh thu"]
-            nv_weights = [1, 5, 3]
-            nv_aligns = ["center", "start", "end"]
+            nv_headers = ["#", "Nhân viên", "DT / Target", "%HT"]
+            nv_weights = [1, 4, 3, 2]
+            nv_aligns = ["center", "start", "center", "end"]
             nv_card_contents.append(make_table_header(nv_headers, nv_weights, nv_aligns, bg_color="#0284c7"))
             nv_card_contents.append({"type": "separator", "color": "#cbd5e1", "margin": "xs"})
 
             rank_icons = ["🥇", "🥈", "🥉"]
-            for idx, item in enumerate(parsed_nv_rt[:8]):
+            for idx, item in enumerate(parsed_nv_rt):
                 rank_str = rank_icons[idx] if idx < 3 else f"{idx+1}."
+                
                 if abs(item['dt']) >= 1000000:
-                    dt_tr_str = f"{item['dt']/1000000:.1f} Tr"
+                    dt_tr_str = f"{item['dt']/1000000:.1f}"
                 elif abs(item['dt']) >= 1000:
-                    dt_tr_str = f"{item['dt']/1000:.0f} K"
+                    dt_tr_str = f"{item['dt']/1000:.0f}K"
                 else:
                     dt_tr_str = f"{item['dt']:.0f}"
+                    
+                if abs(item['target']) >= 1000000:
+                    tg_tr_str = f"{item['target']/1000000:.1f}"
+                elif abs(item['target']) >= 1000:
+                    tg_tr_str = f"{item['target']/1000:.0f}K"
+                else:
+                    tg_tr_str = f"{item['target']:.0f}"
 
-                row_vals = [rank_str, item["name"], dt_tr_str]
-                row_colors = ["#d97706" if idx < 3 else "#64748b", "#0f172a", "#059669"]
+                dt_tg_str = f"{dt_tr_str}/{tg_tr_str}"
+                ht_str = f"{item['ht']*100:.0f}%"
+
+                row_vals = [rank_str, item["name"], dt_tg_str, ht_str]
+                row_colors = ["#d97706" if idx < 3 else "#64748b", "#0f172a", "#475569", get_color_class(item["ht"])]
                 nv_card_contents.append(make_table_row(row_vals, nv_weights, nv_aligns, row_colors, bold=(idx < 3)))
-                if idx < len(parsed_nv_rt[:8]) - 1:
+                if idx < len(parsed_nv_rt) - 1:
                     nv_card_contents.append({"type": "separator", "color": "#f1f5f9", "margin": "xs"})
 
             body_contents_rt1.append({
