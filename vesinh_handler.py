@@ -231,6 +231,21 @@ def get_working_staff_vesinh(session_type):
         except Exception as err:
             print(f"Lỗi parse fallback lịch vệ sinh: {err}")
 
+    # Xử lý vệ sinh kho (chỉ lấy cho ca sáng)
+    pg_kho_list = []
+    if session_type == 'vesinh_sang':
+        try:
+            from meal_handler import get_vietnamese_day_of_week
+            day_str = get_vietnamese_day_of_week()
+            sheet = get_spreadsheet().worksheet(WORKSHEET_SCHEDULES_NAME)
+            records = sheet.get_all_records()
+            today_sched = next((row for row in records if row.get('day_of_week') == day_str), None)
+            if today_sched:
+                pg_raw = today_sched.get('pg_schedule', '')
+                pg_kho_list = parse_staff_from_raw(pg_raw, "Vệ Sinh Kho")
+        except Exception as err:
+            print(f"Lỗi đọc vệ sinh kho: {err}")
+
     # Áp dụng quy tắc vệ sinh ca chiều
     if session_type == 'vesinh_chieu':
         try:
@@ -257,7 +272,7 @@ def get_working_staff_vesinh(session_type):
         except Exception as e:
             print(f"Lỗi lọc nhân viên vệ sinh: {e}")
 
-    return {'NV': nv_list, 'PG': pg_list}
+    return {'NV': nv_list, 'PG': pg_list, 'PG_KHO': pg_kho_list}
 
 def sync_vesinh_sheet(group_id, session_type):
     """
@@ -310,6 +325,7 @@ def sync_vesinh_sheet(group_id, session_type):
     staff_lists = get_working_staff_vesinh(session_type)
     nv_list = staff_lists.get('NV', [])
     pg_list = staff_lists.get('PG', [])
+    pg_kho_list = staff_lists.get('PG_KHO', [])
 
     nv_assignments = allocate_cleaning_zones(nv_list)
 
@@ -348,6 +364,21 @@ def sync_vesinh_sheet(group_id, session_type):
                 'time_clicked': '', 'clicked_by': ''
             }
             new_rows.append([group_id, today_str, session_type, 'PG', name, zone_desc, 'waiting', '', ''])
+            final_data.append(entry)
+
+    # 3. PG Kho
+    for name in pg_kho_list:
+        norm_name = normalize_text(name)
+        zone_desc = "Vệ sinh kho"
+        if norm_name in existing_entries:
+            final_data.append(existing_entries[norm_name])
+        else:
+            entry = {
+                'group_id': group_id, 'date': today_str, 'session': session_type,
+                'type': 'PG_KHO', 'name': name, 'zone': zone_desc, 'status': 'waiting',
+                'time_clicked': '', 'clicked_by': ''
+            }
+            new_rows.append([group_id, today_str, session_type, 'PG_KHO', name, zone_desc, 'waiting', '', ''])
             final_data.append(entry)
 
     if new_rows and sheet:
@@ -429,6 +460,7 @@ def generate_vesinh_flex(group_id, session_type=None):
 
     nv_data = [d for d in data if d.get('type') == 'NV']
     pg_data = [d for d in data if d.get('type') == 'PG']
+    pg_kho_data = [d for d in data if d.get('type') == 'PG_KHO']
 
     body_contents = []
 
@@ -548,91 +580,170 @@ def generate_vesinh_flex(group_id, session_type=None):
             body_contents.append(zone_card)
 
     # --- PG SECTION ---
-    if pg_data:
+    if pg_data or pg_kho_data:
         body_contents.append({
             "type": "separator",
             "margin": "md"
         })
+        
+        total_pg_count = len(pg_data) + len(pg_kho_data)
         body_contents.append({
             "type": "text",
-            "text": f"👩‍💼 HOÀN TẤT VỆ SINH PG ({len(pg_data)} người)",
+            "text": f"👗 PHÂN CÔNG VỆ SINH PG ({total_pg_count} người)",
             "weight": "bold",
             "size": "xs",
-            "color": "#b45309",
+            "color": "#0369a1",
             "margin": "md"
         })
 
-        pg_box_contents = [
-            {
+        pg_box_contents = []
+
+        # Render PG KHO trước
+        if pg_kho_data:
+            pg_box_contents.append({
+                "type": "text",
+                "text": "📦 Vệ sinh kho",
+                "weight": "bold",
+                "size": "xs",
+                "color": "#333333",
+                "margin": "sm"
+            })
+            pg_box_contents.append({"type": "separator", "color": "#fde68a", "margin": "xs"})
+            
+            for idx, item in enumerate(pg_kho_data, 1):
+                is_done = (item.get('status') == 'done')
+                time_val = item.get('time_clicked', '')
+                name = item.get('name', '')
+
+                status_text = f"✅ Xong ({time_val})" if is_done else "⏳ Chờ"
+                text_color = "#16a34a" if is_done else "#d97706"
+
+                btn_color = "#0284c7" if not is_done else "#ef4444"
+                btn_label = "Hoàn tất" if not is_done else "Hủy"
+                next_status = "done" if not is_done else "waiting"
+
+                if idx > 1:
+                    pg_box_contents.append({"type": "separator", "color": "#fef3c7", "margin": "xs"})
+
+                pg_box_contents.append({
+                    "type": "box",
+                    "layout": "horizontal",
+                    "margin": "xs",
+                    "alignItems": "center",
+                    "contents": [
+                        {
+                            "type": "box",
+                            "layout": "vertical",
+                            "flex": 6,
+                            "contents": [
+                                {
+                                    "type": "text",
+                                    "text": f"{idx}. {name}",
+                                    "weight": "bold",
+                                    "size": "xs",
+                                    "color": "#0f172a",
+                                    "wrap": True
+                                },
+                                {
+                                    "type": "text",
+                                    "text": status_text,
+                                    "weight": "bold",
+                                    "size": "xxs",
+                                    "color": text_color,
+                                    "margin": "xs"
+                                }
+                            ]
+                        },
+                        {
+                            "type": "button",
+                            "action": {
+                                "type": "postback",
+                                "label": btn_label,
+                                "data": f"action=complete_vesinh&session={session_type}&name={name}&target_status={next_status}"
+                            },
+                            "style": "primary",
+                            "color": btn_color,
+                            "size": "xs",
+                            "height": "sm",
+                            "flex": 4
+                        }
+                    ]
+                })
+
+        # Render PG gian hàng
+        if pg_data:
+            if pg_kho_data:
+                pg_box_contents.append({"type": "separator", "margin": "md"})
+            
+            pg_box_contents.append({
                 "type": "text",
                 "text": "📍 Vệ sinh gian hàng PG",
                 "weight": "bold",
                 "size": "xs",
-                "color": "#b45309"
-            },
-            {"type": "separator", "color": "#fde68a", "margin": "xs"}
-        ]
+                "color": "#333333",
+                "margin": "sm"
+            })
+            pg_box_contents.append({"type": "separator", "color": "#fde68a", "margin": "xs"})
+            
+            for idx, item in enumerate(pg_data, 1):
+                is_done = (item.get('status') == 'done')
+                time_val = item.get('time_clicked', '')
+                name = item.get('name', '')
 
-        for idx, item in enumerate(pg_data, 1):
-            is_done = (item.get('status') == 'done')
-            time_val = item.get('time_clicked', '')
-            name = item.get('name', '')
+                status_text = f"✅ Xong ({time_val})" if is_done else "⏳ Chờ"
+                text_color = "#16a34a" if is_done else "#d97706"
 
-            status_text = f"✅ Xong ({time_val})" if is_done else "⏳ Chờ"
-            text_color = "#16a34a" if is_done else "#d97706"
+                btn_color = "#0284c7" if not is_done else "#ef4444"
+                btn_label = "Hoàn tất" if not is_done else "Hủy"
+                next_status = "done" if not is_done else "waiting"
 
-            btn_color = "#0284c7" if not is_done else "#ef4444"
-            btn_label = "Hoàn tất" if not is_done else "Hủy"
-            next_status = "done" if not is_done else "waiting"
+                if idx > 1:
+                    pg_box_contents.append({"type": "separator", "color": "#fef3c7", "margin": "xs"})
 
-            if idx > 1:
-                pg_box_contents.append({"type": "separator", "color": "#fef3c7", "margin": "xs"})
-
-            pg_row = {
-                "type": "box",
-                "layout": "horizontal",
-                "margin": "xs",
-                "alignItems": "center",
-                "contents": [
-                    {
-                        "type": "box",
-                        "layout": "vertical",
-                        "flex": 6,
-                        "contents": [
-                            {
-                                "type": "text",
-                                "text": f"{idx}. {name}",
-                                "weight": "bold",
-                                "size": "xs",
-                                "color": "#0f172a",
-                                "wrap": True
-                            },
-                            {
-                                "type": "text",
-                                "text": status_text,
-                                "weight": "bold",
-                                "size": "xxs",
-                                "color": text_color,
-                                "margin": "xs"
-                            }
-                        ]
-                    },
-                    {
-                        "type": "button",
-                        "action": {
-                            "type": "postback",
-                            "label": btn_label,
-                            "data": f"action=complete_vesinh&session={session_type}&name={name}&target_status={next_status}"
+                pg_box_contents.append({
+                    "type": "box",
+                    "layout": "horizontal",
+                    "margin": "xs",
+                    "alignItems": "center",
+                    "contents": [
+                        {
+                            "type": "box",
+                            "layout": "vertical",
+                            "flex": 6,
+                            "contents": [
+                                {
+                                    "type": "text",
+                                    "text": f"{idx}. {name}",
+                                    "weight": "bold",
+                                    "size": "xs",
+                                    "color": "#0f172a",
+                                    "wrap": True
+                                },
+                                {
+                                    "type": "text",
+                                    "text": status_text,
+                                    "weight": "bold",
+                                    "size": "xxs",
+                                    "color": text_color,
+                                    "margin": "xs"
+                                }
+                            ]
                         },
-                        "style": "primary",
-                        "color": btn_color,
-                        "size": "xs",
-                        "height": "sm",
-                        "flex": 4
-                    }
-                ]
-            }
-            pg_box_contents.append(pg_row)
+                        {
+                            "type": "button",
+                            "action": {
+                                "type": "postback",
+                                "label": btn_label,
+                                "data": f"action=complete_vesinh&session={session_type}&name={name}&target_status={next_status}"
+                            },
+                            "style": "primary",
+                            "color": btn_color,
+                            "size": "xs",
+                            "height": "sm",
+                            "flex": 4
+                        }
+                    ]
+                })
 
         pg_card = {
             "type": "box",
@@ -662,7 +773,8 @@ def generate_vesinh_flex(group_id, session_type=None):
                     "weight": "bold",
                     "size": "sm",
                     "color": "#ffffff",
-                    "align": "center"
+                    "align": "center",
+                    "wrap": True
                 }
             ]
         },
