@@ -977,7 +977,7 @@ def handle_message(event):
                 print(f"Lỗi gửi reply dự phòng: {pe}")
         return
 
-    if user_msg_upper in ['NV', 'NV0', 'NV1'] or user_msg_upper.startswith('NV ') or user_msg_upper.startswith('NV0 ') or user_msg_upper.startswith('NV1 ') or user_msg_upper.startswith('NV:'):
+    if user_msg_upper in ['NV0', 'NV1'] or user_msg_upper.startswith('NV ') or user_msg_upper.startswith('NV0 ') or user_msg_upper.startswith('NV1 ') or user_msg_upper.startswith('NV:'):
         group_id = getattr(event.source, 'group_id', None)
         target_id = group_id or getattr(event.source, 'user_id', None)
         
@@ -1046,7 +1046,7 @@ def handle_message(event):
                     )
 
             # 2. Trường hợp gõ lệnh "NV0": Gửi Bảng Xếp Hạng + 4 Carousel Top 8 Nhân Viên (#1 - #8) (Mỗi thẻ ĐỦ 23 nhóm)
-            elif user_msg_upper in ['NV0', 'NV']:
+            elif user_msg_upper == 'NV0':
                 overview_msg = FlexSendMessage(alt_text="🏆 Bảng Xếp Hạng Doanh Thu NV", contents=overview_bubble)
                 carousel_msgs = []
                 top_staff = staff_bubbles[:8]

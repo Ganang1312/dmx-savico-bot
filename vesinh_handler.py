@@ -231,6 +231,32 @@ def get_working_staff_vesinh(session_type):
         except Exception as err:
             print(f"Lỗi parse fallback lịch vệ sinh: {err}")
 
+    # Áp dụng quy tắc vệ sinh ca chiều
+    if session_type == 'vesinh_chieu':
+        try:
+            from meal_handler import get_vietnamese_day_of_week, normalize_text
+            day_str = get_vietnamese_day_of_week()
+            
+            if day_str in ["Thứ Bảy", "Chủ Nhật"]:
+                # Thứ 7, Chủ Nhật: Chiều chỉ PG vệ sinh, NV đã vệ sinh sáng
+                nv_list = []
+            else:
+                # Thứ 2 - Thứ 6: Loại bỏ NV đã làm Ca Sáng (làm cả ngày)
+                morning_staff = get_working_staff('ansang')
+                morning_nvs = morning_staff.get('NV', []) if isinstance(morning_staff, dict) else []
+                if not morning_nvs:
+                    sheet = get_spreadsheet().worksheet(WORKSHEET_SCHEDULES_NAME)
+                    records = sheet.get_all_records()
+                    today_sched = next((row for row in records if row.get('day_of_week') == day_str), None)
+                    if today_sched:
+                        nv_raw = today_sched.get('employee_schedule', '')
+                        morning_nvs = parse_staff_from_raw(nv_raw, "Ca Sáng")
+                
+                morning_nvs_norm = [normalize_text(name) for name in morning_nvs]
+                nv_list = [nv for nv in nv_list if normalize_text(nv) not in morning_nvs_norm]
+        except Exception as e:
+            print(f"Lỗi lọc nhân viên vệ sinh: {e}")
+
     return {'NV': nv_list, 'PG': pg_list}
 
 def sync_vesinh_sheet(group_id, session_type):
