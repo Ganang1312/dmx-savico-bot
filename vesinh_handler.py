@@ -23,8 +23,8 @@ ZONES = {
 def get_current_vesinh_session(override_session=None):
     """
     Xác định ca vệ sinh:
-    - Nếu trước hoặc đúng 14h -> Ca Sáng (vesinh_sang)
-    - Nếu sau 14h -> Ca Chiều (vesinh_chieu)
+    - Nếu trước 14h -> Ca Sáng (vesinh_sang)
+    - Nếu từ 14h trở đi -> Ca Chiều (vesinh_chieu)
     """
     if override_session in ['vesinh_sang', 'vesinh_chieu', 'sang', 'chieu']:
         if override_session in ['vesinh_sang', 'sang']:
@@ -33,7 +33,7 @@ def get_current_vesinh_session(override_session=None):
         
     tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
     current_hour = datetime.now(tz_vietnam).hour
-    if current_hour <= 14:
+    if current_hour < 14:
         return 'vesinh_sang'
     else:
         return 'vesinh_chieu'
