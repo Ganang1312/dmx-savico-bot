@@ -1392,7 +1392,7 @@ def build_nhanvien_flex():
     return all_bubbles
 
 def build_realtime_flex():
-    data = get_dashboard_data("Data_BI,Data_ThiDua,Config_ThiDua,Data_Realtime_BI,Data_Realtime_ThiDua")
+    data = get_dashboard_data("Data_BI,Data_ThiDua,Config_ThiDua,Data_Realtime_BI,Data_Realtime_ThiDua,Data_Realtime_NV")
     config_rows = data.get("Config_ThiDua", [])
     bi_rows = data.get("Data_BI", [])
     rt_rows = data.get("Data_Realtime_BI", [])
@@ -1752,6 +1752,59 @@ def build_realtime_flex():
         }
     ]
     
+    # Employee Revenue Table Container Card (Bảng Thứ Hạng Doanh Thu Nhân Viên - chèn TRƯỚC bảng chi tiết doanh thu hôm nay)
+    data_rt_nv = data.get("Data_Realtime_NV", [])
+    if data_rt_nv and isinstance(data_rt_nv, list) and len(data_rt_nv) > 0:
+        parsed_nv_rt = []
+        for row in data_rt_nv:
+            m_nv = str(get_key_val(row, "mã nv", "ma_nv", "user", default="")).strip()
+            t_nv = get_key_val(row, "tên nv", "ten_nv", "employeeName", default="") or ""
+            dt_nv = parse_number(get_key_val(row, "doanh thu", "revenue", default=0))
+            if dt_nv != 0:
+                last_name = t_nv.strip().split()[-1] if t_nv else ""
+                disp_name = f"{last_name} - {m_nv}" if m_nv else t_nv
+                parsed_nv_rt.append({"name": disp_name, "dt": dt_nv})
+        
+        parsed_nv_rt.sort(key=lambda x: x["dt"], reverse=True)
+
+        if parsed_nv_rt:
+            nv_card_contents = [
+                {"type": "text", "text": "🏆 THỨ HẠNG DOANH THU NHÂN VIÊN", "size": "xxs", "color": "#0284c7", "weight": "bold", "margin": "xs"}
+            ]
+            nv_headers = ["#", "Nhân viên", "Doanh thu"]
+            nv_weights = [1, 5, 3]
+            nv_aligns = ["center", "start", "end"]
+            nv_card_contents.append(make_table_header(nv_headers, nv_weights, nv_aligns, bg_color="#0284c7"))
+            nv_card_contents.append({"type": "separator", "color": "#cbd5e1", "margin": "xs"})
+
+            rank_icons = ["🥇", "🥈", "🥉"]
+            for idx, item in enumerate(parsed_nv_rt[:8]):
+                rank_str = rank_icons[idx] if idx < 3 else f"{idx+1}."
+                if abs(item['dt']) >= 1000000:
+                    dt_tr_str = f"{item['dt']/1000000:.1f} Tr"
+                elif abs(item['dt']) >= 1000:
+                    dt_tr_str = f"{item['dt']/1000:.0f} K"
+                else:
+                    dt_tr_str = f"{item['dt']:.0f}"
+
+                row_vals = [rank_str, item["name"], dt_tr_str]
+                row_colors = ["#d97706" if idx < 3 else "#64748b", "#0f172a", "#059669"]
+                nv_card_contents.append(make_table_row(row_vals, nv_weights, nv_aligns, row_colors, bold=(idx < 3)))
+                if idx < len(parsed_nv_rt[:8]) - 1:
+                    nv_card_contents.append({"type": "separator", "color": "#f1f5f9", "margin": "xs"})
+
+            body_contents_rt1.append({
+                "type": "box",
+                "layout": "vertical",
+                "backgroundColor": "#ffffff",
+                "borderColor": "#e2e8f0",
+                "borderWidth": "1px",
+                "cornerRadius": "md",
+                "paddingAll": "sm",
+                "margin": "md",
+                "contents": nv_card_contents
+            })
+
     # Revenue Table Container Card
     table_card_contents = [
         {"type": "text", "text": "⚡ CHI TIẾT DOANH THU HÔM NAY", "size": "xxs", "color": "#0284c7", "weight": "bold", "margin": "xs"}
