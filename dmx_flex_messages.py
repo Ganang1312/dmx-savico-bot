@@ -1766,7 +1766,8 @@ def build_realtime_flex():
             m_nv = str(get_key_val(row, "mã nv", "ma_nv", "user", default="")).strip()
             t_nv = get_key_val(row, "tên nv", "ten_nv", "employeeName", default="") or ""
             dt_nv = parse_number(get_key_val(row, "doanh thu", "revenue", default=0))
-            if dt_nv != 0:
+            sl_nv = parse_number(get_key_val(row, "số lượng", "soluong", "quantity", "quantity_RT", default=0))
+            if dt_nv != 0 or sl_nv != 0:
                 ratio = 0.0
                 if 'user_map' in locals() and m_nv in user_map:
                     ratio = user_map[m_nv]
@@ -1777,7 +1778,7 @@ def build_realtime_flex():
                 
                 ht_nv = (dt_nv / target_nv) if target_nv > 0 else (1.0 if dt_nv > 0 else 0.0)
                 
-                parsed_nv_rt.append({"name": disp_name, "dt": dt_nv, "target": target_nv, "ht": ht_nv})
+                parsed_nv_rt.append({"name": disp_name, "sl": sl_nv, "dt": dt_nv, "target": target_nv, "ht": ht_nv})
         
         parsed_nv_rt.sort(key=lambda x: x["dt"], reverse=True)
 
@@ -1785,9 +1786,9 @@ def build_realtime_flex():
             nv_card_contents = [
                 {"type": "text", "text": "🏆 THỨ HẠNG DOANH THU NHÂN VIÊN", "size": "xxs", "color": "#0284c7", "weight": "bold", "margin": "xs"}
             ]
-            nv_headers = ["#", "👤 NV", "🎯 DT", "📋 TG", "⏳ Còn", "🔥 %HT"]
-            nv_weights = [1, 4, 2, 2, 2, 2]
-            nv_aligns = ["center", "start", "end", "end", "end", "end"]
+            nv_headers = ["#", "NV", "SL", "DT", "TG", "Còn", "%HT"]
+            nv_weights = [1, 4, 1, 2, 2, 2, 2]
+            nv_aligns = ["center", "start", "center", "end", "end", "end", "end"]
             nv_card_contents.append(make_table_header(nv_headers, nv_weights, nv_aligns, bg_color="#0284c7"))
             nv_card_contents.append({"type": "separator", "color": "#cbd5e1", "margin": "xs"})
 
@@ -1795,9 +1796,11 @@ def build_realtime_flex():
             for idx, item in enumerate(parsed_nv_rt):
                 rank_str = rank_icons[idx] if idx < 3 else f"{idx+1}."
                 
+                sl_str = fmt_num(item["sl"])
+
                 # DT
                 if abs(item['dt']) >= 1000000:
-                    dt_tr_str = f"{item['dt']/1000000:.1f}"
+                    dt_tr_str = f"{item['dt']/1000000:.0f}"
                 elif abs(item['dt']) >= 1000:
                     dt_tr_str = f"{item['dt']/1000:.0f}K"
                 else:
@@ -1805,7 +1808,7 @@ def build_realtime_flex():
                     
                 # Target
                 if abs(item['target']) >= 1000000:
-                    tg_tr_str = f"{item['target']/1000000:.1f}"
+                    tg_tr_str = f"{item['target']/1000000:.0f}"
                 elif abs(item['target']) >= 1000:
                     tg_tr_str = f"{item['target']/1000:.0f}K"
                 else:
@@ -1819,7 +1822,7 @@ def build_realtime_flex():
                 else:
                     con_val = max(0, con_lai)
                     if abs(con_val) >= 1000000:
-                        con_lai_str = f"{con_val/1000000:.1f}"
+                        con_lai_str = f"{con_val/1000000:.0f}"
                     elif abs(con_val) >= 1000:
                         con_lai_str = f"{con_val/1000:.0f}K"
                     else:
@@ -1828,10 +1831,11 @@ def build_realtime_flex():
 
                 ht_str = f"{item['ht']*100:.0f}%"
 
-                row_vals = [rank_str, item["name"], dt_tr_str, tg_tr_str, con_lai_str, ht_str]
+                row_vals = [rank_str, item["name"], sl_str, dt_tr_str, tg_tr_str, con_lai_str, ht_str]
                 row_colors = [
                     "#d97706" if idx < 3 else "#64748b", 
                     "#0f172a", 
+                    "#475569", 
                     "#059669", 
                     "#475569", 
                     con_color, 
