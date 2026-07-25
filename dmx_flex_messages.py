@@ -1785,9 +1785,9 @@ def build_realtime_flex():
             nv_card_contents = [
                 {"type": "text", "text": "🏆 THỨ HẠNG DOANH THU NHÂN VIÊN", "size": "xxs", "color": "#0284c7", "weight": "bold", "margin": "xs"}
             ]
-            nv_headers = ["#", "Nhân viên", "DT / Target", "%HT"]
-            nv_weights = [1, 4, 3, 2]
-            nv_aligns = ["center", "start", "center", "end"]
+            nv_headers = ["#", "👤 NV", "🎯 DT", "📋 TG", "⏳ Còn", "🔥 %HT"]
+            nv_weights = [1, 4, 2, 2, 2, 2]
+            nv_aligns = ["center", "start", "end", "end", "end", "end"]
             nv_card_contents.append(make_table_header(nv_headers, nv_weights, nv_aligns, bg_color="#0284c7"))
             nv_card_contents.append({"type": "separator", "color": "#cbd5e1", "margin": "xs"})
 
@@ -1795,6 +1795,7 @@ def build_realtime_flex():
             for idx, item in enumerate(parsed_nv_rt):
                 rank_str = rank_icons[idx] if idx < 3 else f"{idx+1}."
                 
+                # DT
                 if abs(item['dt']) >= 1000000:
                     dt_tr_str = f"{item['dt']/1000000:.1f}"
                 elif abs(item['dt']) >= 1000:
@@ -1802,6 +1803,7 @@ def build_realtime_flex():
                 else:
                     dt_tr_str = f"{item['dt']:.0f}"
                     
+                # Target
                 if abs(item['target']) >= 1000000:
                     tg_tr_str = f"{item['target']/1000000:.1f}"
                 elif abs(item['target']) >= 1000:
@@ -1809,11 +1811,32 @@ def build_realtime_flex():
                 else:
                     tg_tr_str = f"{item['target']:.0f}"
 
-                dt_tg_str = f"{dt_tr_str}/{tg_tr_str}"
+                # Còn lại
+                con_lai = item['target'] - item['dt']
+                if con_lai <= 0 and item['target'] > 0:
+                    con_lai_str = "Đạt"
+                    con_color = "#059669"
+                else:
+                    con_val = max(0, con_lai)
+                    if abs(con_val) >= 1000000:
+                        con_lai_str = f"{con_val/1000000:.1f}"
+                    elif abs(con_val) >= 1000:
+                        con_lai_str = f"{con_val/1000:.0f}K"
+                    else:
+                        con_lai_str = f"{con_val:.0f}"
+                    con_color = "#ef4444"
+
                 ht_str = f"{item['ht']*100:.0f}%"
 
-                row_vals = [rank_str, item["name"], dt_tg_str, ht_str]
-                row_colors = ["#d97706" if idx < 3 else "#64748b", "#0f172a", "#475569", get_color_class(item["ht"])]
+                row_vals = [rank_str, item["name"], dt_tr_str, tg_tr_str, con_lai_str, ht_str]
+                row_colors = [
+                    "#d97706" if idx < 3 else "#64748b", 
+                    "#0f172a", 
+                    "#059669", 
+                    "#475569", 
+                    con_color, 
+                    get_color_class(item["ht"])
+                ]
                 nv_card_contents.append(make_table_row(row_vals, nv_weights, nv_aligns, row_colors, bold=(idx < 3)))
                 if idx < len(parsed_nv_rt) - 1:
                     nv_card_contents.append({"type": "separator", "color": "#f1f5f9", "margin": "xs"})
