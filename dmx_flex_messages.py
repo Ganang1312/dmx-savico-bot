@@ -1211,9 +1211,9 @@ def build_nhanvien_flex():
     data = get_dashboard_data("Config_ThiDua,Data_NV_BI,Data_BI,Data_Realtime_NV,Data_NV_ThiDua,Data_ThiDua")
     config_rows = data.get("Config_ThiDua", [])
     bi_rows = data.get("Data_BI", [])
-    nv_rows = data.get("Data_Realtime_NV", [])
+    nv_rows = data.get("Data_NV_BI", [])
     if not nv_rows:
-        nv_rows = data.get("Data_NV_BI", [])
+        nv_rows = data.get("Data_Realtime_NV", [])
     
     td_store_rows = data.get("Data_ThiDua", [])
     nv_td_rows = data.get("Data_NV_ThiDua", [])
