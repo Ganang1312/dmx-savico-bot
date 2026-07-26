@@ -201,7 +201,16 @@ def parse_staff_from_raw(raw_text, target_shift):
                 if cn and not cn.isdigit() and len(cn) > 1:
                     names.append(cn)
         i += 2
-    return names
+
+    # Khử trùng lặp danh sách tên
+    seen = set()
+    unique_names = []
+    for n in names:
+        norm = normalize_text(n)
+        if norm not in seen:
+            seen.add(norm)
+            unique_names.append(n)
+    return unique_names
 
 def get_working_staff_vesinh(session_type):
     meal_session = 'ansang' if session_type == 'vesinh_sang' else 'anchieu'
@@ -320,23 +329,48 @@ def sync_vesinh_sheet(group_id, session_type):
         if (str(row.get('group_id')) == str(group_id) and 
             row.get('date') == today_str and 
             row.get('session') == session_type):
-            existing_entries[key_name] = row
+            # Nếu đã có dòng và dòng hiện tại đã 'done', ưu tiên giữ dòng 'done'
+            if key_name not in existing_entries or row.get('status') == 'done':
+                existing_entries[key_name] = row
 
     staff_lists = get_working_staff_vesinh(session_type)
-    nv_list = staff_lists.get('NV', [])
-    pg_list = staff_lists.get('PG', [])
-    pg_kho_list = staff_lists.get('PG_KHO', [])
+    raw_nv_list = staff_lists.get('NV', [])
+    raw_pg_list = staff_lists.get('PG', [])
+    raw_pg_kho_list = staff_lists.get('PG_KHO', [])
 
+    # Khử trùng lặp danh sách PG Kho
+    seen_pg_kho = set()
+    pg_kho_list = []
+    for name in raw_pg_kho_list:
+        norm = normalize_text(name)
+        if norm not in seen_pg_kho:
+            seen_pg_kho.add(norm)
+            pg_kho_list.append(name)
+
+    # Khử trùng lặp danh sách PG Gian hàng & loại bỏ ai đã làm Kho
+    seen_pg = set()
+    pg_list = []
+    for name in raw_pg_list:
+        norm = normalize_text(name)
+        if norm not in seen_pg_kho and norm not in seen_pg:
+            seen_pg.add(norm)
+            pg_list.append(name)
+
+    nv_list = raw_nv_list
     nv_assignments = allocate_cleaning_zones(nv_list)
 
     final_data = [] 
     new_rows = []
+    processed_names = set()
 
     # 1. Nhân viên NV
     for assign in nv_assignments:
         name = assign['name']
         zone_desc = assign['zone_desc']
         norm_name = normalize_text(name)
+        if norm_name in processed_names:
+            continue
+        processed_names.add(norm_name)
         
         if norm_name in existing_entries:
             item = existing_entries[norm_name]
@@ -349,26 +383,15 @@ def sync_vesinh_sheet(group_id, session_type):
                 'time_clicked': '', 'clicked_by': ''
             }
             new_rows.append([group_id, today_str, session_type, 'NV', name, zone_desc, 'waiting', '', ''])
+            existing_entries[norm_name] = entry
             final_data.append(entry)
 
-    # 2. PG
-    for name in pg_list:
-        norm_name = normalize_text(name)
-        zone_desc = "Vệ sinh gian hàng PG"
-        if norm_name in existing_entries:
-            final_data.append(existing_entries[norm_name])
-        else:
-            entry = {
-                'group_id': group_id, 'date': today_str, 'session': session_type,
-                'type': 'PG', 'name': name, 'zone': zone_desc, 'status': 'waiting',
-                'time_clicked': '', 'clicked_by': ''
-            }
-            new_rows.append([group_id, today_str, session_type, 'PG', name, zone_desc, 'waiting', '', ''])
-            final_data.append(entry)
-
-    # 3. PG Kho
+    # 2. PG Kho
     for name in pg_kho_list:
         norm_name = normalize_text(name)
+        if norm_name in processed_names:
+            continue
+        processed_names.add(norm_name)
         zone_desc = "Vệ sinh kho"
         if norm_name in existing_entries:
             final_data.append(existing_entries[norm_name])
@@ -379,6 +402,26 @@ def sync_vesinh_sheet(group_id, session_type):
                 'time_clicked': '', 'clicked_by': ''
             }
             new_rows.append([group_id, today_str, session_type, 'PG_KHO', name, zone_desc, 'waiting', '', ''])
+            existing_entries[norm_name] = entry
+            final_data.append(entry)
+
+    # 3. PG Gian hàng
+    for name in pg_list:
+        norm_name = normalize_text(name)
+        if norm_name in processed_names:
+            continue
+        processed_names.add(norm_name)
+        zone_desc = "Vệ sinh gian hàng PG"
+        if norm_name in existing_entries:
+            final_data.append(existing_entries[norm_name])
+        else:
+            entry = {
+                'group_id': group_id, 'date': today_str, 'session': session_type,
+                'type': 'PG', 'name': name, 'zone': zone_desc, 'status': 'waiting',
+                'time_clicked': '', 'clicked_by': ''
+            }
+            new_rows.append([group_id, today_str, session_type, 'PG', name, zone_desc, 'waiting', '', ''])
+            existing_entries[norm_name] = entry
             final_data.append(entry)
 
     if new_rows and sheet:
@@ -404,8 +447,8 @@ def update_vesinh_status(group_id, session_type, staff_name, clicker_name, targe
         target_name_norm = normalize_text(staff_name)
         target_group_id = str(group_id).strip()
 
-        row_index = -1
-        current_status = None
+        matching_rows = []
+        already_done = True
         for i, row in enumerate(all_values[1:], start=2):
             if len(row) < 5: continue
             
@@ -418,21 +461,22 @@ def update_vesinh_status(group_id, session_type, staff_name, clicker_name, targe
                 row_date == today_str and 
                 row_session == session_type and 
                 row_name_norm == target_name_norm):
-                row_index = i
-                if len(row) >= 7:
-                    current_status = row[6].strip()
-                break
+                matching_rows.append((i, row))
+                if len(row) < 7 or row[6].strip() != target_status:
+                    already_done = False
         
-        if row_index != -1:
-            if current_status == target_status:
+        if matching_rows:
+            if already_done:
                 return "already", None
 
             clicked_user = clicker_name if target_status == 'done' else ''
-            cells = [
-                gspread.Cell(row_index, 7, target_status), # Column G: status
-                gspread.Cell(row_index, 8, time_now),      # Column H: time_clicked
-                gspread.Cell(row_index, 9, clicked_user)   # Column I: clicked_by
-            ]
+            cells = []
+            for row_index, _ in matching_rows:
+                cells.extend([
+                    gspread.Cell(row_index, 7, target_status), # Column G: status
+                    gspread.Cell(row_index, 8, time_now),      # Column H: time_clicked
+                    gspread.Cell(row_index, 9, clicked_user)   # Column I: clicked_by
+                ])
             sheet.update_cells(cells)
             return True, time_now
         
