@@ -13,7 +13,7 @@ from meal_handler import get_working_staff, normalize_text
 VESINH_HEADERS = ['group_id', 'date', 'session', 'type', 'name', 'zone', 'status', 'time_clicked', 'clicked_by']
 
 ZONES = {
-    1: "Bàn thu ngân + dãy lọc nước phía sau",
+    1: "Bàn thu ngân + dãy lọc nước phía sau + Sạc ĐT và POS",
     2: "Chạy và vệ sinh tủ điện thoại",
     3: "Vệ sinh khu laptop + tủ đồng hồ",
     4: "Vệ sinh khu bàn trải nghiệm điện thoại + loa + camera",
