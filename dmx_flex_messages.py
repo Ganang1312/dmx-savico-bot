@@ -962,7 +962,7 @@ def build_leaderboard_overview_bubble(emp_list, now_str):
 
 def build_individual_staff_card(e, rank, total_emp=11, now_str="", thi_dua_list=None):
     """
-    Tin nhắn 2..N: Thẻ KPI Chi Tiết Từng Nhân Viên (Giao Diện LINE Flex Message Cao Cấp)
+    Tin nhắn 2..N: Thẻ KPI Chi Tiết Từng Nhân Viên (Chuẩn Tính Toán 100% Theo baocao_nhanvien.html)
     """
     name = e.get("name", "Nhân Viên")
     user_id = e.get("user_id", "90509")
@@ -975,9 +975,8 @@ def build_individual_staff_card(e, rank, total_emp=11, now_str="", thi_dua_list=
     con_lai_val = max(0.0, target_val - actual_val)
     pct_val = (actual_val / target_val * 100.0) if target_val > 0 else 0.0
     
-    score_val = e.get("diem", max(60.0, 96.4 - (rank - 1) * 2.5))
-    
-    du_kien_pct = pct_val * 1.35 if pct_val > 0 else 100.0
+    score_val = e.get("diem", max(60.0, 100.0 - (rank - 1) * 2.5))
+    du_kien_pct = e.get("du_kien_pct", pct_val)
     m_tieu_ngay = max(1, int(round(con_lai_val / 10.0))) if con_lai_val > 0 else 0
 
     # Phân định màu header & tagline dựa trên Rank thực tế
@@ -1014,7 +1013,9 @@ def build_individual_staff_card(e, rank, total_emp=11, now_str="", thi_dua_list=
         # Sắp xếp nhóm thi đua theo du_kien giảm dần và GIỮ NGUYÊN 100% 23 nhóm!
         thi_dua_list = sorted(thi_dua_list, key=lambda x: x.get("du_kien", 0.0), reverse=True)
 
-    td_passed = sum(1 for td in thi_dua_list if td.get("ht", 0.0) >= 100 or str(td.get("con_lai")) == "🏆")
+    td_passed = e.get("count_nh_du_kien")
+    if td_passed is None:
+        td_passed = sum(1 for td in thi_dua_list if td.get("du_kien", 0.0) >= 100.0 or td.get("ht", 0.0) >= 100 or str(td.get("con_lai")) == "🏆")
     td_total = len(thi_dua_list)
     td_pct = (td_passed / td_total * 100.0) if td_total > 0 else 0.0
 
@@ -1094,7 +1095,7 @@ def build_individual_staff_card(e, rank, total_emp=11, now_str="", thi_dua_list=
                 "contents": [
                     {"type": "text", "text": "Tiến độ Doanh thu", "size": "xxs", "color": "#64748b", "weight": "bold", "flex": 5},
                     {"type": "text", "text": f"{fmt_num(actual_val)} / {fmt_num(target_val)}", "size": "xxs", "color": "#0f172a", "weight": "bold", "align": "center", "flex": 5},
-                    {"type": "text", "text": f"{round(pct_val)}%", "size": "xxs", "color": get_color_class(pct_val / 100.0), "weight": "bold", "align": "end", "flex": 3}
+                    {"type": "text", "text": f"{round(pct_val, 1)}%", "size": "xxs", "color": get_color_class(pct_val / 100.0), "weight": "bold", "align": "end", "flex": 3}
                 ]
             },
             {
@@ -1123,7 +1124,7 @@ def build_individual_staff_card(e, rank, total_emp=11, now_str="", thi_dua_list=
                 "contents": [
                     {"type": "text", "text": "Tiến độ Thi đua", "size": "xxs", "color": "#64748b", "weight": "bold", "flex": 6},
                     {"type": "text", "text": f"{td_passed} / {td_total} Nhóm", "size": "xxs", "color": "#0f172a", "weight": "bold", "align": "center", "flex": 4},
-                    {"type": "text", "text": f"{round(td_pct)}%", "size": "xxs", "color": get_color_class(td_pct / 100.0), "weight": "bold", "align": "end", "flex": 3}
+                    {"type": "text", "text": f"{round(td_pct, 1)}%", "size": "xxs", "color": get_color_class(td_pct / 100.0), "weight": "bold", "align": "end", "flex": 3}
                 ]
             },
             {
@@ -1180,7 +1181,7 @@ def build_individual_staff_card(e, rank, total_emp=11, now_str="", thi_dua_list=
                 "type": "box", "layout": "vertical", "flex": 1, "backgroundColor": "#f0fdf4", "borderColor": "#bbf7d0", "borderWidth": "light", "paddingAll": "xs", "cornerRadius": "md",
                 "contents": [
                     {"type": "text", "text": "🔮 DK %", "size": "xxs", "color": "#15803d", "weight": "bold", "align": "center"},
-                    {"type": "text", "text": f"{round(du_kien_pct)}%", "size": "xs", "color": "#10b981", "weight": "bold", "align": "center"}
+                    {"type": "text", "text": f"{round(du_kien_pct, 1)}%", "size": "xs", "color": "#10b981", "weight": "bold", "align": "center"}
                 ]
             },
             {
@@ -1206,10 +1207,10 @@ def build_individual_staff_card(e, rank, total_emp=11, now_str="", thi_dua_list=
     for i, td in enumerate(thi_dua_list, 1):
         ht_val = td.get("ht", 0.0)
         ht_color = get_color_class(ht_val / 100.0)
-        ht_str = f"{round(ht_val)}%"
+        ht_str = f"{round(ht_val, 1)}%"
         dk_val = td.get("du_kien", 0.0)
         dk_color = get_color_class(dk_val / 100.0)
-        dk_str = f"{round(dk_val)}%"
+        dk_str = f"{round(dk_val, 1)}%"
         
         unit_tag = "(DT)" if td.get("unit") == "TR" or "doanh thu" in str(td.get("name", "")).lower() else "(SL)"
         name_s = f"{shorten_name(td['name'])} {unit_tag}"
@@ -1392,10 +1393,21 @@ def build_nhanvien_flex():
                 actual += val
                 
         target = emp_targets.get(clean_name, 0.0)
-        pct_ht = (actual / target) if target > 0 else 0.0
+        pct_ht = (actual / target * 100.0) if target > 0 else 0.0
         
-        # Build 23 thi dua items for this employee
+        # Tính DỰ KIẾN % Doanh thu chuẩn theo baocao_nhanvien.html
+        du_kien_pct = (((actual / days_passed) * days_in_month) / target * 100.0) if target > 0 else 0.0
+
+        # Tính điểm Doanh thu (revScore chuẩn 60%)
+        rev_score = du_kien_pct
+        rev_score = min(rev_score, 150.0) * 0.6
+        
+        # Build 23 nhóm thi đua cho từng NV & tính điểm Thi đua + số nhóm dự kiến đạt
         staff_td_items = []
+        total_weighted_earned = 0.0
+        total_weights = 0.0
+        count_nh_du_kien = 0
+
         if store_cat_targets:
             for cat_clean, cat_info in store_cat_targets.items():
                 cat_name = cat_info["name"]
@@ -1408,8 +1420,14 @@ def build_nhanvien_flex():
                     
                 con_lai = max(0.0, staff_cat_tg - staff_cat_act)
                 ht_val = (staff_cat_act / staff_cat_tg * 100.0) if staff_cat_tg > 0 else 0.0
-                dk_val = ((staff_cat_act / days_passed) * days_in_month / staff_cat_tg * 100.0) if staff_cat_tg > 0 else 0.0
+                dk_val = (((staff_cat_act / days_passed) * days_in_month) / staff_cat_tg * 100.0) if staff_cat_tg > 0 else 0.0
                 
+                phan_loai = config_map.get(cat_clean, 1.0)
+                if dk_val >= 100.0 or staff_cat_act >= staff_cat_tg:
+                    count_nh_du_kien += 1
+                    total_weighted_earned += phan_loai
+                total_weights += phan_loai
+
                 staff_td_items.append({
                     "name": cat_name,
                     "m_tieu": "🏆" if staff_cat_act >= staff_cat_tg else f"{int(staff_cat_tg)}",
@@ -1418,8 +1436,12 @@ def build_nhanvien_flex():
                     "con_lai": "🏆" if staff_cat_act >= staff_cat_tg else int(con_lai),
                     "ht": ht_val,
                     "du_kien": dk_val,
-                    "phan_loai": config_map.get(cat_clean, 1.0)
+                    "phan_loai": phan_loai
                 })
+
+        contest_score = (total_weighted_earned / total_weights * 100.0) if total_weights > 0 else 0.0
+        contest_contribution = contest_score * 0.4
+        total_score = rev_score + contest_contribution
         
         emp_list.append({
             "name": clean_name,
@@ -1427,10 +1449,13 @@ def build_nhanvien_flex():
             "actual": actual,
             "target": target,
             "pct": pct_ht,
+            "du_kien_pct": du_kien_pct,
+            "diem": total_score,
+            "count_nh_du_kien": count_nh_du_kien,
             "thi_dua_list": staff_td_items if staff_td_items else None
         })
         
-    emp_list.sort(key=lambda x: x["actual"], reverse=True)
+    emp_list.sort(key=lambda x: x.get("diem", x["actual"]), reverse=True)
     
     # 1. Bubble 1: Bảng Xếp Hạng NV Overview
     overview_bubble = build_leaderboard_overview_bubble(emp_list, now_str)
