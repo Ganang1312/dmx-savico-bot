@@ -880,9 +880,11 @@ def build_leaderboard_overview_bubble(emp_list, now_str):
         actual_val = e.get("actual", 0.0)
         target_val = e.get("target", 0.0)
         con_lai_val = max(0.0, target_val - actual_val)
-        pct_val = e.get("pct", 0.0) * 100.0
+        pct_val = e.get("pct", 0.0)
+        if pct_val <= 2.0 and pct_val > 0:
+            pct_val = pct_val * 100.0
         score_val = e.get("diem", 90.0 - rank * 3.5)
-        td_passed = e.get("td_passed", max(1, 10 - rank))
+        td_passed = e.get("count_nh_du_kien", e.get("td_passed", max(1, 10 - rank)))
         td_total = e.get("td_total", 23)
 
         cl_text = f"⌛ CÒN {fmt_num(con_lai_val)}" if con_lai_val > 0 else "🏆 ĐẠT TARGET"
@@ -979,33 +981,43 @@ def build_individual_staff_card(e, rank, total_emp=11, now_str="", thi_dua_list=
     du_kien_pct = e.get("du_kien_pct", pct_val)
     m_tieu_ngay = max(1, int(round(con_lai_val / 10.0))) if con_lai_val > 0 else 0
 
-    # Phân định màu header & tagline dựa trên Rank thực tế
+    # Phân định màu header & tagline dựa trên Rank thực tế (Đổi màu header theo cảnh báo/thứ hạng)
     bottom_cutoff = int(total_emp * 0.7) if total_emp > 0 else 8
     if rank == 1:
-        rank_badge_bg = "#eab308" # Vàng Gold
+        header_bg = "#ca8a04" # Vàng Gold Hoàng Gia
+        rank_badge_bg = "#ffffff"
+        rank_badge_color = "#854d0e"
         tagline = "🏆 Dẫn đầu cuộc đua, tuyệt vời!"
-        tagline_bg = "#fef9c3"
-        tagline_color = "#a16207"
+        tagline_bg = "rgba(255, 255, 255, 0.2)"
+        tagline_color = "#ffffff"
     elif rank == 2:
-        rank_badge_bg = "#64748b" # Xám Bạc
+        header_bg = "#475569" # Xám Bạc Sắc Sét
+        rank_badge_bg = "#ffffff"
+        rank_badge_color = "#1e293b"
         tagline = "🥈 Á quân xuất sắc!"
-        tagline_bg = "#f1f5f9"
-        tagline_color = "#334155"
+        tagline_bg = "rgba(255, 255, 255, 0.2)"
+        tagline_color = "#ffffff"
     elif rank == 3:
-        rank_badge_bg = "#d97706" # Đồng Amber
+        header_bg = "#c2410c" # Đồng Amber Đậm
+        rank_badge_bg = "#ffffff"
+        rank_badge_color = "#9a3412"
         tagline = "🥉 Top 3 xuất sắc!"
-        tagline_bg = "#ffedd5"
-        tagline_color = "#c2410c"
+        tagline_bg = "rgba(255, 255, 255, 0.2)"
+        tagline_color = "#ffffff"
     elif rank > bottom_cutoff:
-        rank_badge_bg = "#ef4444" # Đỏ Cảnh Báo
+        header_bg = "#dc2626" # Đỏ Cảnh Báo Rực Rỡ
+        rank_badge_bg = "#ffffff"
+        rank_badge_color = "#991b1b"
         tagline = "⚠️ Cảnh báo: Thuộc nhóm cuối, cần bứt phá!"
-        tagline_bg = "#fef2f2"
-        tagline_color = "#dc2626"
+        tagline_bg = "rgba(255, 255, 255, 0.2)"
+        tagline_color = "#ffffff"
     else:
-        rank_badge_bg = "#0ea5e9" # Xanh Teal/Blue nhóm trung bình
+        header_bg = "#0284c7" # Xanh Blue Hiện Đại
+        rank_badge_bg = "#ffffff"
+        rank_badge_color = "#075985"
         tagline = "💪 Đang nỗ lực gia tăng tốc độ!"
-        tagline_bg = "#f0f9ff"
-        tagline_color = "#0369a1"
+        tagline_bg = "rgba(255, 255, 255, 0.2)"
+        tagline_color = "#ffffff"
 
     if not thi_dua_list:
         thi_dua_list = []
@@ -1019,16 +1031,17 @@ def build_individual_staff_card(e, rank, total_emp=11, now_str="", thi_dua_list=
     td_total = len(thi_dua_list)
     td_pct = (td_passed / td_total * 100.0) if td_total > 0 else 0.0
 
-    # 1. Khối Header hiện đại, sang trọng (Màu tối cao cấp #1e293b, badge bo góc)
+    # 1. Khối Header hiện đại (Màu nền đổi theo thứ hạng, Khung bo HẠNG ôm sát chữ)
     header_component = {
         "type": "box",
         "layout": "vertical",
-        "backgroundColor": "#1e293b",
+        "backgroundColor": header_bg,
         "paddingAll": "md",
         "contents": [
             {
                 "type": "box",
                 "layout": "horizontal",
+                "alignItems": "flex-start",
                 "contents": [
                     {
                         "type": "text",
@@ -1043,11 +1056,13 @@ def build_individual_staff_card(e, rank, total_emp=11, now_str="", thi_dua_list=
                         "type": "box",
                         "layout": "vertical",
                         "backgroundColor": rank_badge_bg,
-                        "cornerRadius": "sm",
-                        "paddingStart": "xs",
-                        "paddingEnd": "xs",
+                        "cornerRadius": "md",
+                        "paddingStart": "sm",
+                        "paddingEnd": "sm",
+                        "paddingTop": "xs",
+                        "paddingBottom": "xs",
                         "contents": [
-                            {"type": "text", "text": f"HẠNG {rank}", "weight": "bold", "size": "xxs", "color": "#ffffff", "align": "center"}
+                            {"type": "text", "text": f"HẠNG {rank}", "weight": "bold", "size": "xxs", "color": rank_badge_color, "align": "center"}
                         ]
                     }
                 ]
@@ -1056,6 +1071,7 @@ def build_individual_staff_card(e, rank, total_emp=11, now_str="", thi_dua_list=
                 "type": "box",
                 "layout": "horizontal",
                 "margin": "sm",
+                "alignItems": "center",
                 "contents": [
                     {
                         "type": "box",
@@ -1064,6 +1080,8 @@ def build_individual_staff_card(e, rank, total_emp=11, now_str="", thi_dua_list=
                         "cornerRadius": "md",
                         "paddingStart": "xs",
                         "paddingEnd": "xs",
+                        "paddingTop": "xs",
+                        "paddingBottom": "xs",
                         "flex": 4,
                         "contents": [
                             {"type": "text", "text": tagline, "size": "xxs", "color": tagline_color, "weight": "bold", "wrap": True}
@@ -1074,7 +1092,7 @@ def build_individual_staff_card(e, rank, total_emp=11, now_str="", thi_dua_list=
                         "text": f"Điểm: {score_val:.1f}",
                         "weight": "bold",
                         "size": "xs",
-                        "color": "#f8fafc",
+                        "color": "#ffffff",
                         "align": "end",
                         "flex": 2
                     }
@@ -1149,7 +1167,7 @@ def build_individual_staff_card(e, rank, total_emp=11, now_str="", thi_dua_list=
         ]
     }
 
-    # 3. Khối 5 Nút Mini Card KPI Phẳng Sang Trọng (Nền nhạt #f8fafc, chữ màu sắc sắc nét)
+    # 3. Khối 5 Nút Mini Card KPI Tô Màu Đậm Đổi Tên Nhãn Theo Yêu Cầu (TG, LK, CÒN, DK %, MT)
     pill_cards = {
         "type": "box",
         "layout": "horizontal",
@@ -1157,38 +1175,38 @@ def build_individual_staff_card(e, rank, total_emp=11, now_str="", thi_dua_list=
         "spacing": "xs",
         "contents": [
             {
-                "type": "box", "layout": "vertical", "flex": 1, "backgroundColor": "#f0f9ff", "borderColor": "#bae6fd", "borderWidth": "light", "paddingAll": "xs", "cornerRadius": "md",
+                "type": "box", "layout": "vertical", "flex": 1, "backgroundColor": "#0284c7", "paddingAll": "xs", "cornerRadius": "md",
                 "contents": [
-                    {"type": "text", "text": "🎯 TG DT", "size": "xxs", "color": "#0369a1", "weight": "bold", "align": "center"},
-                    {"type": "text", "text": fmt_num(target_val), "size": "xs", "color": "#0284c7", "weight": "bold", "align": "center"}
+                    {"type": "text", "text": "🎯 TG", "size": "xxs", "color": "#ffffff", "weight": "bold", "align": "center"},
+                    {"type": "text", "text": fmt_num(target_val), "size": "xs", "color": "#ffffff", "weight": "bold", "align": "center"}
                 ]
             },
             {
-                "type": "box", "layout": "vertical", "flex": 1, "backgroundColor": "#fff7ed", "borderColor": "#ffedd5", "borderWidth": "light", "paddingAll": "xs", "cornerRadius": "md",
+                "type": "box", "layout": "vertical", "flex": 1, "backgroundColor": "#ea580c", "paddingAll": "xs", "cornerRadius": "md",
                 "contents": [
-                    {"type": "text", "text": "💰 LK DT", "size": "xxs", "color": "#c2410c", "weight": "bold", "align": "center"},
-                    {"type": "text", "text": fmt_num(actual_val), "size": "xs", "color": "#ea580c", "weight": "bold", "align": "center"}
+                    {"type": "text", "text": "💰 LK", "size": "xxs", "color": "#ffffff", "weight": "bold", "align": "center"},
+                    {"type": "text", "text": fmt_num(actual_val), "size": "xs", "color": "#ffffff", "weight": "bold", "align": "center"}
                 ]
             },
             {
-                "type": "box", "layout": "vertical", "flex": 1, "backgroundColor": "#fef2f2", "borderColor": "#fecaca", "borderWidth": "light", "paddingAll": "xs", "cornerRadius": "md",
+                "type": "box", "layout": "vertical", "flex": 1, "backgroundColor": "#ef4444" if con_lai_val > 0 else "#10b981", "paddingAll": "xs", "cornerRadius": "md",
                 "contents": [
-                    {"type": "text", "text": "⏳ CÒN", "size": "xxs", "color": "#b91c1c", "weight": "bold", "align": "center"},
-                    {"type": "text", "text": fmt_num(con_lai_val), "size": "xs", "color": "#ef4444", "weight": "bold", "align": "center"}
+                    {"type": "text", "text": "⏳ CÒN", "size": "xxs", "color": "#ffffff", "weight": "bold", "align": "center"},
+                    {"type": "text", "text": fmt_num(con_lai_val) if con_lai_val > 0 else "🏆", "size": "xs", "color": "#ffffff", "weight": "bold", "align": "center"}
                 ]
             },
             {
-                "type": "box", "layout": "vertical", "flex": 1, "backgroundColor": "#f0fdf4", "borderColor": "#bbf7d0", "borderWidth": "light", "paddingAll": "xs", "cornerRadius": "md",
+                "type": "box", "layout": "vertical", "flex": 1, "backgroundColor": "#10b981" if du_kien_pct >= 100 else "#f59e0b", "paddingAll": "xs", "cornerRadius": "md",
                 "contents": [
-                    {"type": "text", "text": "🔮 DK %", "size": "xxs", "color": "#15803d", "weight": "bold", "align": "center"},
-                    {"type": "text", "text": f"{round(du_kien_pct, 1)}%", "size": "xs", "color": "#10b981", "weight": "bold", "align": "center"}
+                    {"type": "text", "text": "🔮 DK %", "size": "xxs", "color": "#ffffff", "weight": "bold", "align": "center"},
+                    {"type": "text", "text": f"{round(du_kien_pct, 1)}%", "size": "xs", "color": "#ffffff", "weight": "bold", "align": "center"}
                 ]
             },
             {
-                "type": "box", "layout": "vertical", "flex": 1, "backgroundColor": "#f8fafc", "borderColor": "#e2e8f0", "borderWidth": "light", "paddingAll": "xs", "cornerRadius": "md",
+                "type": "box", "layout": "vertical", "flex": 1, "backgroundColor": "#64748b", "paddingAll": "xs", "cornerRadius": "md",
                 "contents": [
-                    {"type": "text", "text": "📅 MT/NG", "size": "xxs", "color": "#475569", "weight": "bold", "align": "center"},
-                    {"type": "text", "text": fmt_num(m_tieu_ngay), "size": "xs", "color": "#334155", "weight": "bold", "align": "center"}
+                    {"type": "text", "text": "📅 MT", "size": "xxs", "color": "#ffffff", "weight": "bold", "align": "center"},
+                    {"type": "text", "text": fmt_num(m_tieu_ngay), "size": "xs", "color": "#ffffff", "weight": "bold", "align": "center"}
                 ]
             }
         ]
