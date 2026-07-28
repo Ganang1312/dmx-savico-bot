@@ -736,8 +736,6 @@ def build_luyke_flex():
             name_color = "#dc2626" if t.get("phan_loai") == 2.0 else "#0f172a"
             vals = [str(idx + 1), display_name, mt_str, act_tg_str, ht_str, dk_str]
             colors = ["#64748b", name_color, "#16a34a" if mt_str == "🏆" else "#0284c7", "#0f172a", get_color_class(t["ht"]), get_color_class(t["ht_dk"])]
-            if idx > 0:
-                done_table.append({"type": "separator", "color": "#e2e8f0", "margin": "xs"})
             done_table.append(make_table_row(vals, weights_p2, aligns_p2, colors))
 
         body_contents_p2.append({
@@ -769,8 +767,6 @@ def build_luyke_flex():
             name_color = "#dc2626" if t.get("phan_loai") == 2.0 else "#0f172a"
             vals = [str(idx + 1), display_name, mt_str, act_tg_str, ht_str, dk_str]
             colors = ["#64748b", name_color, "#16a34a" if mt_str == "🏆" else "#0284c7", "#0f172a", get_color_class(t["ht"]), get_color_class(t["ht_dk"])]
-            if idx > 0:
-                pending_table.append({"type": "separator", "color": "#f1f5f9", "margin": "xs"})
             pending_table.append(make_table_row(vals, weights_p2, aligns_p2, colors))
 
         body_contents_p2.append({
@@ -988,35 +984,35 @@ def build_individual_staff_card(e, rank, total_emp=11, now_str="", thi_dua_list=
         rank_badge_bg = "#ffffff"
         rank_badge_color = "#854d0e"
         tagline = "🏆 Dẫn đầu cuộc đua, tuyệt vời!"
-        tagline_bg = "rgba(255, 255, 255, 0.2)"
+        tagline_bg = "#ffffff33"
         tagline_color = "#ffffff"
     elif rank == 2:
         header_bg = "#475569" # Xám Bạc Sắc Sét
         rank_badge_bg = "#ffffff"
         rank_badge_color = "#1e293b"
         tagline = "🥈 Á quân xuất sắc!"
-        tagline_bg = "rgba(255, 255, 255, 0.2)"
+        tagline_bg = "#ffffff33"
         tagline_color = "#ffffff"
     elif rank == 3:
         header_bg = "#c2410c" # Đồng Amber Đậm
         rank_badge_bg = "#ffffff"
         rank_badge_color = "#9a3412"
         tagline = "🥉 Top 3 xuất sắc!"
-        tagline_bg = "rgba(255, 255, 255, 0.2)"
+        tagline_bg = "#ffffff33"
         tagline_color = "#ffffff"
     elif rank > bottom_cutoff:
         header_bg = "#dc2626" # Đỏ Cảnh Báo Rực Rỡ
         rank_badge_bg = "#ffffff"
         rank_badge_color = "#991b1b"
         tagline = "⚠️ Cảnh báo: Thuộc nhóm cuối, cần bứt phá!"
-        tagline_bg = "rgba(255, 255, 255, 0.2)"
+        tagline_bg = "#ffffff33"
         tagline_color = "#ffffff"
     else:
         header_bg = "#0284c7" # Xanh Blue Hiện Đại
         rank_badge_bg = "#ffffff"
         rank_badge_color = "#075985"
         tagline = "💪 Đang nỗ lực gia tăng tốc độ!"
-        tagline_bg = "rgba(255, 255, 255, 0.2)"
+        tagline_bg = "#ffffff33"
         tagline_color = "#ffffff"
 
     if not thi_dua_list:
