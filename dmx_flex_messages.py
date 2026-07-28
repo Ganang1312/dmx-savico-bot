@@ -1212,10 +1212,10 @@ def build_individual_staff_card(e, rank, total_emp=11, now_str="", thi_dua_list=
         ]
     }
 
-    # 4. Bảng Nhóm Hàng Thi Đua Nhân Viên (Design Phẳng, Dễ Đọc)
-    headers = ["#", "NHÓM NGÀNH", "MT", "LK / TG", "CÒN", "%HT", "%DK"]
-    weights = [1, 4, 2, 3, 2, 2, 2]
-    aligns = ["center", "start", "center", "center", "center", "center", "center"]
+    # 4. Bảng Nhóm Hàng Thi Đua Nhân Viên (Tối ưu dung lượng Flex JSON < 17KB)
+    headers = ["#", "NHÓM NGÀNH", "LK / TG", "CÒN", "%HT (DK)"]
+    weights = [1, 5, 3, 2, 3]
+    aligns = ["center", "start", "center", "center", "end"]
     
     td_rows = [{
         "type": "box", "layout": "horizontal", "backgroundColor": "#0f172a", "paddingAll": "xs", "cornerRadius": "xs",
@@ -1224,25 +1224,28 @@ def build_individual_staff_card(e, rank, total_emp=11, now_str="", thi_dua_list=
 
     for i, td in enumerate(thi_dua_list, 1):
         ht_val = td.get("ht", 0.0)
-        ht_color = get_color_class(ht_val / 100.0)
-        ht_str = f"{round(ht_val, 1)}%"
+        ht_str = f"{round(ht_val)}%"
         dk_val = td.get("du_kien", 0.0)
-        dk_color = get_color_class(dk_val / 100.0)
-        dk_str = f"{round(dk_val, 1)}%"
+        dk_str = f"{round(dk_val)}%"
         
         unit_tag = "(DT)" if td.get("unit") == "TR" or "doanh thu" in str(td.get("name", "")).lower() else "(SL)"
         name_s = f"{shorten_name(td['name'])} {unit_tag}"
         name_color = "#dc2626" if td.get("phan_loai") == 2.0 else "#0f172a"
 
         mt = str(td.get("m_tieu", "🏆"))
-        lk_tg = f"{td.get('actual', 0)} / {td.get('target', 0)}"
+        actual_val = td.get('actual', 0)
+        target_val = td.get('target', 0)
+        lk_tg = f"{actual_val}/{target_val}"
         cl = str(td.get("con_lai", 0))
+        ht_dk_combine = f"{ht_str} ({dk_str})"
         
-        vals = [str(i), name_s, mt, lk_tg, cl, ht_str, dk_str]
-        colors = ["#64748b", name_color, "#16a34a" if mt == "🏆" else "#475569", "#0f172a", "#16a34a" if cl == "🏆" else "#dc2626", ht_color, dk_color]
+        vals = [str(i), name_s, lk_tg, cl, ht_dk_combine]
+        colors = ["#64748b", name_color, "#0f172a", "#16a34a" if cl == "🏆" else "#dc2626", get_color_class(ht_val / 100.0)]
 
         def make_staff_cell(v, w, a, c):
-            cell = {"type": "text", "text": str(v), "flex": w, "size": "xxs"}
+            cell = {"type": "text", "text": str(v), "size": "xxs"}
+            if w != 1:
+                cell["flex"] = w
             if a and a != "start":
                 cell["align"] = a
             if c and c != "#0f172a":
@@ -1255,10 +1258,13 @@ def build_individual_staff_card(e, rank, total_emp=11, now_str="", thi_dua_list=
 
         row_contents = [make_staff_cell(v, w, a, c) for v, c, a, w in zip(vals, colors, aligns, weights)]
 
-        td_rows.append({
-            "type": "box", "layout": "horizontal", "backgroundColor": row_bg, "paddingTop": "xs", "paddingBottom": "xs", "paddingStart": "none", "paddingEnd": "none",
-            "contents": row_contents
-        })
+        row_box = {
+            "type": "box", "layout": "horizontal", "contents": row_contents
+        }
+        if row_bg != "#ffffff":
+            row_box["backgroundColor"] = row_bg
+
+        td_rows.append(row_box)
 
     bubble = {
         "type": "bubble",

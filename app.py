@@ -18,7 +18,6 @@ from linebot.exceptions import InvalidSignatureError
 from linebot.models import (
     MessageEvent, TextMessage, TextSendMessage, FlexSendMessage, PostbackEvent
 )
-import pandas as pd
 
 # --- IMPORT ---
 from config import CLIENT, SHEET_NAME, WORKSHEET_NAME_USERS, WORKSHEET_NAME, WORKSHEET_TRACKER_NAME, get_spreadsheet
@@ -977,7 +976,7 @@ def handle_message(event):
                 print(f"Lỗi gửi reply dự phòng: {pe}")
         return
 
-    if user_msg_upper in ['NV0', 'NV1'] or user_msg_upper.startswith('NV ') or user_msg_upper.startswith('NV0 ') or user_msg_upper.startswith('NV1 ') or user_msg_upper.startswith('NV:'):
+    if user_msg_upper in ['NV0', 'NV1', 'NV2'] or user_msg_upper.startswith(('NV ', 'NV0 ', 'NV1 ', 'NV2 ', 'NV:')):
         group_id = getattr(event.source, 'group_id', None)
         target_id = group_id or getattr(event.source, 'user_id', None)
         
@@ -985,7 +984,10 @@ def handle_message(event):
             flex_bubbles = build_nhanvien_flex()
         except Exception as e:
             print(f"Lỗi khởi tạo báo cáo nhân viên: {e}")
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"Lỗi tạo báo cáo nhân viên: {str(e)}"))
+            try:
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"Lỗi tạo báo cáo nhân viên: {str(e)}"))
+            except Exception as pe:
+                print(f"Lỗi gửi reply dự phòng: {pe}")
             return
             
         try:
@@ -999,9 +1001,7 @@ def handle_message(event):
             query_param = ""
             if user_msg_upper.startswith('NV '):
                 query_param = user_message[3:].strip()
-            elif user_msg_upper.startswith('NV:') or user_msg_upper.startswith('NV1 '):
-                query_param = user_message[4:].strip()
-            elif user_msg_upper.startswith('NV0 '):
+            elif user_msg_upper.startswith(('NV:', 'NV1 ', 'NV0 ', 'NV2 ')):
                 query_param = user_message[4:].strip()
 
             if query_param:
@@ -1045,26 +1045,21 @@ def handle_message(event):
                         TextSendMessage(text=f"🔍 Không tìm thấy nhân viên với mã/tên: '{query_param}'. Vui lòng thử lại với Mã User (VD: nv 61169 hoặc nv 61169,98372,132697).")
                     )
 
-            # 2. Trường hợp gõ lệnh "NV0": Gửi Bảng Xếp Hạng + 4 Carousel Top 8 Nhân Viên (#1 - #8) (Mỗi thẻ ĐỦ 23 nhóm)
+            # 2. Lệnh "NV0": Bảng Xếp Hạng Doanh Thu NV + Carousel Top 1 NV xuất sắc nhất (Dung lượng an toàn ~34KB < 45KB)
             elif user_msg_upper == 'NV0':
                 overview_msg = FlexSendMessage(alt_text="🏆 Bảng Xếp Hạng Doanh Thu NV", contents=overview_bubble)
-                carousel_msgs = []
-                top_staff = staff_bubbles[:8]
+                top_staff = staff_bubbles[:1]
+                reply_msgs = [overview_msg]
                 if top_staff:
-                    for i in range(0, len(top_staff), 2):
-                        chunk = top_staff[i:i+2]
-                        if chunk:
-                            carousel_msgs.append(FlexSendMessage(
-                                alt_text=f"🎴 Thẻ KPI Nhân Viên ({i+1}-{i+len(chunk)})",
-                                contents={"type": "carousel", "contents": chunk}
-                            ))
-
-                reply_msgs = [overview_msg] + carousel_msgs[:4]
+                    reply_msgs.append(FlexSendMessage(
+                        alt_text="🎴 Thẻ KPI Nhân Viên Top 1",
+                        contents={"type": "carousel", "contents": top_staff}
+                    ))
                 line_bot_api.reply_message(event.reply_token, reply_msgs)
 
-            # 3. Trường hợp gõ lệnh "NV1": Gửi tiếp các nhân viên còn lại từ #9 đến hết (Mỗi thẻ ĐỦ 23 nhóm)
+            # 3. Lệnh "NV1": Gửi tiếp các thẻ NV từ #2 đến #3 (Dung lượng an toàn ~34KB < 45KB)
             elif user_msg_upper == 'NV1':
-                rem_staff = staff_bubbles[8:]
+                rem_staff = staff_bubbles[1:3]
                 if not rem_staff:
                     line_bot_api.reply_message(
                         event.reply_token,
@@ -1076,7 +1071,26 @@ def handle_message(event):
                         chunk = rem_staff[i:i+2]
                         if chunk:
                             carousel_msgs.append(FlexSendMessage(
-                                alt_text=f"🎴 Thẻ KPI Nhân Viên (#{i+9}-#{i+8+len(chunk)})",
+                                alt_text=f"🎴 Thẻ KPI Nhân Viên (#{i+2}-#{i+1+len(chunk)})",
+                                contents={"type": "carousel", "contents": chunk}
+                            ))
+                    line_bot_api.reply_message(event.reply_token, carousel_msgs[:5])
+
+            # 4. Lệnh "NV2": Gửi tiếp các thẻ NV từ #4 đến #5 (Dung lượng an toàn ~34KB < 45KB)
+            elif user_msg_upper == 'NV2':
+                rem_staff = staff_bubbles[3:5]
+                if not rem_staff:
+                    line_bot_api.reply_message(
+                        event.reply_token,
+                        TextSendMessage(text="✅ Tất cả nhân viên đã được hiển thị trong NV0 và NV1.")
+                    )
+                else:
+                    carousel_msgs = []
+                    for i in range(0, len(rem_staff), 2):
+                        chunk = rem_staff[i:i+2]
+                        if chunk:
+                            carousel_msgs.append(FlexSendMessage(
+                                alt_text=f"🎴 Thẻ KPI Nhân Viên (#{i+4}-#{i+3+len(chunk)})",
                                 contents={"type": "carousel", "contents": chunk}
                             ))
                     line_bot_api.reply_message(event.reply_token, carousel_msgs[:5])
@@ -1084,9 +1098,9 @@ def handle_message(event):
         except Exception as e:
             print(f"Lỗi gửi Flex NV: {e}")
             try:
-                line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"Lỗi gửi Flex xếp hạng nhân viên: {str(e)}"))
+                line_bot_api.push_message(source_id, TextSendMessage(text=f"Lỗi gửi Flex xếp hạng nhân viên: {str(e)}"))
             except Exception as pe:
-                print(f"Lỗi gửi reply dự phòng: {pe}")
+                print(f"Lỗi gửi tin nhắn đẩy dự phòng: {pe}")
         return
 
     if user_msg_upper == 'RT1':
