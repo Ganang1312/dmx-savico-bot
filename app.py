@@ -1010,24 +1010,25 @@ def handle_message(event):
             overview_bubble = flex_bubbles[0]
             staff_bubbles = flex_bubbles[1:]
 
-            # 1. Chuẩn hóa lệnh NV0: Bảng Xếp Hạng Doanh Thu NV + Carousel 6 Thẻ KPI Đầu (Chia cụm max 2 thẻ/Carousel)
+            # 1. Chuẩn hóa lệnh NV0: Bảng Xếp Hạng Doanh Thu NV + Carousel các Thẻ KPI NV (Chia cụm max 5 thẻ/Carousel, hiển thị tới 20 NV trong 1 lệnh)
             if cmd_clean == 'nv0':
                 overview_msg = FlexSendMessage(alt_text="🏆 Bảng Xếp Hạng Doanh Thu NV", contents=overview_bubble)
-                top_staff = staff_bubbles[:6]
                 reply_msgs = [overview_msg]
-                if top_staff:
-                    for i in range(0, len(top_staff), 2):
-                        chunk = top_staff[i:i+2]
+                if staff_bubbles:
+                    for i in range(0, len(staff_bubbles), 5):
+                        chunk = staff_bubbles[i:i+5]
                         reply_msgs.append(FlexSendMessage(
                             alt_text=f"🎴 Thẻ KPI Nhân Viên (#{i+1}-#{i+len(chunk)})",
                             contents={"type": "carousel", "contents": chunk}
                         ))
-                line_bot_api.reply_message(event.reply_token, reply_msgs[:5])
+                        if len(reply_msgs) == 5:
+                            break
+                line_bot_api.reply_message(event.reply_token, reply_msgs)
                 return
 
-            # 2. Chuẩn hóa lệnh NV1: Gửi tiếp các thẻ NV từ #7 đến hết (Chia cụm max 2 thẻ/Carousel)
+            # 2. Chuẩn hóa lệnh NV1: Gửi tiếp các thẻ NV từ #21 trở đi nếu siêu thị có > 20 NV (Chia cụm max 5 thẻ/Carousel)
             elif cmd_clean == 'nv1':
-                rem_staff = staff_bubbles[6:]
+                rem_staff = staff_bubbles[20:]
                 if not rem_staff:
                     line_bot_api.reply_message(
                         event.reply_token,
@@ -1035,11 +1036,11 @@ def handle_message(event):
                     )
                 else:
                     carousel_msgs = []
-                    for i in range(0, len(rem_staff), 2):
-                        chunk = rem_staff[i:i+2]
+                    for i in range(0, len(rem_staff), 5):
+                        chunk = rem_staff[i:i+5]
                         if chunk:
                             carousel_msgs.append(FlexSendMessage(
-                                alt_text=f"🎴 Thẻ KPI Nhân Viên (#{i+7}-#{i+6+len(chunk)})",
+                                alt_text=f"🎴 Thẻ KPI Nhân Viên (#{i+21}-#{i+20+len(chunk)})",
                                 contents={"type": "carousel", "contents": chunk}
                             ))
                     line_bot_api.reply_message(event.reply_token, carousel_msgs[:5])
