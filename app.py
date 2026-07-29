@@ -977,13 +977,19 @@ def handle_message(event):
         return
 
     cmd_clean = user_message.lower().replace(" ", "")
-    is_nv_cmd = (
-        user_msg_upper in ['NV', 'NV0', 'NV1', 'NV2'] or 
-        cmd_clean in ['nv', 'nv0', 'nv1', 'nv2'] or 
-        user_msg_upper.startswith(('NV ', 'NV0 ', 'NV1 ', 'NV2 ', 'NV:'))
+    has_nv_search_query = (
+        user_msg_upper.startswith('NV ') and len(user_message[3:].strip()) > 0
+    ) or (
+        user_msg_upper.startswith(('NV:', 'NV0 ', 'NV1 ')) and len(user_message[4:].strip()) > 0
+    )
+    is_nv_kpi_cmd = (
+        user_msg_upper in ['NV0', 'NV1'] or 
+        cmd_clean in ['nv0', 'nv1'] or 
+        user_msg_upper.startswith(('NV0 ', 'NV1 ', 'NV:')) or
+        has_nv_search_query
     )
 
-    if is_nv_cmd:
+    if is_nv_kpi_cmd:
         group_id = getattr(event.source, 'group_id', None)
         target_id = group_id or getattr(event.source, 'user_id', None)
         
@@ -1004,8 +1010,8 @@ def handle_message(event):
             overview_bubble = flex_bubbles[0]
             staff_bubbles = flex_bubbles[1:]
 
-            # 1. Chuẩn hóa lệnh NV0 / NV: Bảng Xếp Hạng Doanh Thu NV + Carousel 6 Thẻ KPI Đầu (Chia cụm max 2 thẻ/Carousel)
-            if cmd_clean in ['nv0', 'nv']:
+            # 1. Chuẩn hóa lệnh NV0: Bảng Xếp Hạng Doanh Thu NV + Carousel 6 Thẻ KPI Đầu (Chia cụm max 2 thẻ/Carousel)
+            if cmd_clean == 'nv0':
                 overview_msg = FlexSendMessage(alt_text="🏆 Bảng Xếp Hạng Doanh Thu NV", contents=overview_bubble)
                 top_staff = staff_bubbles[:6]
                 reply_msgs = [overview_msg]
