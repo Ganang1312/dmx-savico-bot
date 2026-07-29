@@ -1027,17 +1027,17 @@ def build_individual_staff_card(e, rank, total_emp=11, now_str="", thi_dua_list=
     td_total = len(thi_dua_list)
     td_pct = (td_passed / td_total * 100.0) if td_total > 0 else 0.0
 
-    # 1. Khối Header hiện đại (Màu nền đổi theo thứ hạng, Khung bo HẠNG ôm sát chữ)
+    # 1. Khối Header hiện đại (Màu nền đổi theo thứ hạng, Khung bo HẠNG ôm sát chữ, bỏ tagline nhận xét)
     header_component = {
         "type": "box",
         "layout": "vertical",
         "backgroundColor": header_bg,
-        "paddingAll": "md",
+        "paddingAll": "sm",
         "contents": [
             {
                 "type": "box",
                 "layout": "horizontal",
-                "alignItems": "flex-start",
+                "alignItems": "center",
                 "contents": [
                     {
                         "type": "text",
@@ -1053,34 +1053,12 @@ def build_individual_staff_card(e, rank, total_emp=11, now_str="", thi_dua_list=
                         "layout": "vertical",
                         "backgroundColor": rank_badge_bg,
                         "cornerRadius": "md",
-                        "paddingStart": "sm",
-                        "paddingEnd": "sm",
-                        "paddingTop": "xs",
-                        "paddingBottom": "xs",
-                        "contents": [
-                            {"type": "text", "text": f"HẠNG {rank}", "weight": "bold", "size": "xxs", "color": rank_badge_color, "align": "center"}
-                        ]
-                    }
-                ]
-            },
-            {
-                "type": "box",
-                "layout": "horizontal",
-                "margin": "sm",
-                "alignItems": "center",
-                "contents": [
-                    {
-                        "type": "box",
-                        "layout": "horizontal",
-                        "backgroundColor": tagline_bg,
-                        "cornerRadius": "md",
                         "paddingStart": "xs",
                         "paddingEnd": "xs",
                         "paddingTop": "xs",
                         "paddingBottom": "xs",
-                        "flex": 4,
                         "contents": [
-                            {"type": "text", "text": tagline, "size": "xxs", "color": tagline_color, "weight": "bold", "wrap": True}
+                            {"type": "text", "text": f"HẠNG {rank}", "weight": "bold", "size": "xxs", "color": rank_badge_color, "align": "center"}
                         ]
                     },
                     {
@@ -1208,10 +1186,10 @@ def build_individual_staff_card(e, rank, total_emp=11, now_str="", thi_dua_list=
         ]
     }
 
-    # 4. Bảng Nhóm Hàng Thi Đua Nhân Viên (Tối ưu dung lượng Flex JSON < 17KB)
-    headers = ["#", "NHÓM NGÀNH", "LK / TG", "CÒN", "%HT (DK)"]
-    weights = [1, 5, 3, 2, 3]
-    aligns = ["center", "start", "center", "center", "end"]
+    # 4. Bảng Nhóm Hàng Thi Đua Nhân Viên 7 Cột (# | NH | MT | LK / TG | CÒN | %HT | %DK) (Tối ưu dung lượng Flex JSON < 17KB)
+    headers = ["#", "NH", "MT", "LK / TG", "CÒN", "%HT", "%DK"]
+    weights = [1, 4, 2, 3, 2, 2, 2]
+    aligns = ["center", "start", "center", "center", "center", "center", "end"]
     
     td_rows = [{
         "type": "box", "layout": "horizontal", "backgroundColor": "#0f172a", "paddingAll": "xs", "cornerRadius": "xs",
@@ -1233,14 +1211,17 @@ def build_individual_staff_card(e, rank, total_emp=11, now_str="", thi_dua_list=
         target_val = td.get('target', 0)
         lk_tg = f"{actual_val}/{target_val}"
         cl = str(td.get("con_lai", 0))
-        ht_dk_combine = f"{ht_str} ({dk_str})"
         
-        vals = [str(i), name_s, lk_tg, cl, ht_dk_combine]
-        colors = ["#64748b", name_color, "#0f172a", "#16a34a" if cl == "🏆" else "#dc2626", get_color_class(ht_val / 100.0)]
+        vals = [str(i), name_s, mt, lk_tg, cl, ht_str, dk_str]
+        colors = [
+            "#64748b", name_color, "#16a34a" if mt == "🏆" else "#0284c7",
+            "#0f172a", "#16a34a" if cl == "🏆" else "#dc2626",
+            get_color_class(ht_val / 100.0), get_color_class(dk_val / 100.0)
+        ]
 
         def make_staff_cell(v, w, a, c):
             cell = {"type": "text", "text": str(v), "size": "xxs"}
-            if w != 1:
+            if w > 1:
                 cell["flex"] = w
             if a and a != "start":
                 cell["align"] = a

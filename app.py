@@ -978,8 +978,8 @@ def handle_message(event):
 
     cmd_clean = user_message.lower().replace(" ", "")
     is_nv_cmd = (
-        user_msg_upper in ['NV0', 'NV1', 'NV2'] or 
-        cmd_clean in ['nv0', 'nv1', 'nv2'] or 
+        user_msg_upper in ['NV', 'NV0', 'NV1', 'NV2'] or 
+        cmd_clean in ['nv', 'nv0', 'nv1', 'nv2'] or 
         user_msg_upper.startswith(('NV ', 'NV0 ', 'NV1 ', 'NV2 ', 'NV:'))
     )
 
@@ -1004,22 +1004,24 @@ def handle_message(event):
             overview_bubble = flex_bubbles[0]
             staff_bubbles = flex_bubbles[1:]
 
-            # 1. Chuẩn hóa lệnh NV0: Bảng Xếp Hạng Doanh Thu NV + Carousel Top 1 NV xuất sắc nhất
-            if cmd_clean == 'nv0':
+            # 1. Chuẩn hóa lệnh NV0 / NV: Bảng Xếp Hạng Doanh Thu NV + Carousel 6 Thẻ KPI Đầu (Chia cụm max 2 thẻ/Carousel)
+            if cmd_clean in ['nv0', 'nv']:
                 overview_msg = FlexSendMessage(alt_text="🏆 Bảng Xếp Hạng Doanh Thu NV", contents=overview_bubble)
-                top_staff = staff_bubbles[:1]
+                top_staff = staff_bubbles[:6]
                 reply_msgs = [overview_msg]
                 if top_staff:
-                    reply_msgs.append(FlexSendMessage(
-                        alt_text="🎴 Thẻ KPI Nhân Viên Top 1",
-                        contents={"type": "carousel", "contents": top_staff}
-                    ))
-                line_bot_api.reply_message(event.reply_token, reply_msgs)
+                    for i in range(0, len(top_staff), 2):
+                        chunk = top_staff[i:i+2]
+                        reply_msgs.append(FlexSendMessage(
+                            alt_text=f"🎴 Thẻ KPI Nhân Viên (#{i+1}-#{i+len(chunk)})",
+                            contents={"type": "carousel", "contents": chunk}
+                        ))
+                line_bot_api.reply_message(event.reply_token, reply_msgs[:5])
                 return
 
-            # 2. Chuẩn hóa lệnh NV1: Gửi tiếp các thẻ NV từ #2 đến #3
+            # 2. Chuẩn hóa lệnh NV1: Gửi tiếp các thẻ NV từ #7 đến hết (Chia cụm max 2 thẻ/Carousel)
             elif cmd_clean == 'nv1':
-                rem_staff = staff_bubbles[1:3]
+                rem_staff = staff_bubbles[6:]
                 if not rem_staff:
                     line_bot_api.reply_message(
                         event.reply_token,
@@ -1031,15 +1033,15 @@ def handle_message(event):
                         chunk = rem_staff[i:i+2]
                         if chunk:
                             carousel_msgs.append(FlexSendMessage(
-                                alt_text=f"🎴 Thẻ KPI Nhân Viên (#{i+2}-#{i+1+len(chunk)})",
+                                alt_text=f"🎴 Thẻ KPI Nhân Viên (#{i+7}-#{i+6+len(chunk)})",
                                 contents={"type": "carousel", "contents": chunk}
                             ))
                     line_bot_api.reply_message(event.reply_token, carousel_msgs[:5])
                 return
 
-            # 3. Chuẩn hóa lệnh NV2: Gửi tiếp các thẻ NV từ #4 đến #5
+            # 3. Chuẩn hóa lệnh NV2 (Dự phòng nếu tổng số NV cực lớn): Gửi tiếp từ #17 trở đi
             elif cmd_clean == 'nv2':
-                rem_staff = staff_bubbles[3:5]
+                rem_staff = staff_bubbles[16:]
                 if not rem_staff:
                     line_bot_api.reply_message(
                         event.reply_token,
@@ -1051,7 +1053,7 @@ def handle_message(event):
                         chunk = rem_staff[i:i+2]
                         if chunk:
                             carousel_msgs.append(FlexSendMessage(
-                                alt_text=f"🎴 Thẻ KPI Nhân Viên (#{i+4}-#{i+3+len(chunk)})",
+                                alt_text=f"🎴 Thẻ KPI Nhân Viên (#{i+17}-#{i+16+len(chunk)})",
                                 contents={"type": "carousel", "contents": chunk}
                             ))
                     line_bot_api.reply_message(event.reply_token, carousel_msgs[:5])
