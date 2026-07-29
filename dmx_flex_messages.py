@@ -963,10 +963,16 @@ def build_individual_staff_card(e, rank, total_emp=11, now_str="", thi_dua_list=
     Tin nhắn 2..N: Thẻ KPI Chi Tiết Từng Nhân Viên (Chuẩn Tính Toán 100% Theo baocao_nhanvien.html)
     """
     name = e.get("name", "Nhân Viên")
-    user_id = e.get("user_id", "90509")
+    user_id = str(e.get("user_id", "")).strip()
     full_name = str(name).strip()
-    first_name = full_name.split(" - ")[-1].split()[-1] if full_name else "NV"
-    name_code = f"{user_id} - {full_name}" if user_id and " - " not in full_name else full_name
+    if " - " in full_name:
+        parts = full_name.split(" - ")
+        if not user_id or user_id == "90509" or user_id == "NV":
+            user_id = parts[0].strip()
+        full_name = parts[-1].strip()
+        
+    first_name = full_name.split()[-1] if full_name else "NV"
+    short_name_code = f"{first_name}-{user_id}" if user_id else first_name
     
     actual_val = e.get("actual", 0.0)
     target_val = e.get("target", 0.0)
@@ -1027,50 +1033,31 @@ def build_individual_staff_card(e, rank, total_emp=11, now_str="", thi_dua_list=
     td_total = len(thi_dua_list)
     td_pct = (td_passed / td_total * 100.0) if td_total > 0 else 0.0
 
-    # 1. Khối Header hiện đại (Màu nền đổi theo thứ hạng, Khung bo HẠNG ôm sát chữ, bỏ tagline nhận xét)
+    # 1. Khối Header hiện đại (Màu nền đổi theo thứ hạng, gồm #ThứHạng, Tên nhân viên & Điểm)
     header_component = {
         "type": "box",
-        "layout": "vertical",
+        "layout": "horizontal",
         "backgroundColor": header_bg,
         "paddingAll": "sm",
+        "alignItems": "center",
         "contents": [
             {
-                "type": "box",
-                "layout": "horizontal",
-                "alignItems": "center",
-                "contents": [
-                    {
-                        "type": "text",
-                        "text": f"#{rank}  {name_code}",
-                        "weight": "bold",
-                        "size": "sm",
-                        "color": "#ffffff",
-                        "flex": 4,
-                        "wrap": True
-                    },
-                    {
-                        "type": "box",
-                        "layout": "vertical",
-                        "backgroundColor": rank_badge_bg,
-                        "cornerRadius": "md",
-                        "paddingStart": "xs",
-                        "paddingEnd": "xs",
-                        "paddingTop": "xs",
-                        "paddingBottom": "xs",
-                        "contents": [
-                            {"type": "text", "text": f"HẠNG {rank}", "weight": "bold", "size": "xxs", "color": rank_badge_color, "align": "center"}
-                        ]
-                    },
-                    {
-                        "type": "text",
-                        "text": f"Điểm: {score_val:.1f}",
-                        "weight": "bold",
-                        "size": "xs",
-                        "color": "#ffffff",
-                        "align": "end",
-                        "flex": 2
-                    }
-                ]
+                "type": "text",
+                "text": f"#{rank}  {short_name_code}",
+                "weight": "bold",
+                "size": "sm",
+                "color": "#ffffff",
+                "flex": 4,
+                "wrap": True
+            },
+            {
+                "type": "text",
+                "text": f"Điểm: {score_val:.1f}",
+                "weight": "bold",
+                "size": "xs",
+                "color": "#ffffff",
+                "align": "end",
+                "flex": 2
             }
         ]
     }
