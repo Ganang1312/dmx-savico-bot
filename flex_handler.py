@@ -263,7 +263,109 @@ def generate_checklist_flex(group_id, shift_type, all_records_prefetched=None):
         task_components.append(task_component)
         task_components.append({"type": "separator"})
 
-    if task_components:
+    # Nối thêm các CÔNG VIỆC PHÁT SINH trong ngày vào cùng thẻ checklist ca
+    if group_id and shift_type in ['sang', 'chieu']:
+        adhoc_tasks = get_adhoc_tasks_for_group_today(group_id)
+        if adhoc_tasks:
+            # Nếu đã có separator ở cuối, bỏ bớt
+            if task_components and task_components[-1].get("type") == "separator":
+                task_components.pop()
+                
+            task_components.append({"type": "separator", "margin": "md"})
+            task_components.append({
+                "type": "box",
+                "layout": "vertical",
+                "backgroundColor": "#F3E8FF",
+                "paddingAll": "xs",
+                "paddingStart": "md",
+                "paddingEnd": "md",
+                "margin": "md",
+                "cornerRadius": "sm",
+                "contents": [
+                    {
+                        "type": "text",
+                        "text": "📌 CÔNG VIỆC PHÁT SINH IN-DAY",
+                        "weight": "bold",
+                        "size": "xs",
+                        "color": "#6B21A8"
+                    }
+                ]
+            })
+            task_components.append({"type": "separator", "margin": "xs"})
+
+            for adhoc in adhoc_tasks:
+                task_id = adhoc.get('task_id')
+                task_name = adhoc.get('task_name')
+                assignee = adhoc.get('assignee', '')
+                status = adhoc.get('status', 'incomplete')
+                created_at = adhoc.get('created_at', '')
+                
+                is_complete = (status == 'complete')
+                text_decoration = "line-through" if is_complete else "none"
+                main_text_color = "#AAAAAA" if is_complete else "#111111"
+                button_color = "#CCCCCC" if is_complete else "#7C3AED"
+                button_label = "✓ Xong" if is_complete else "Hoàn tất"
+                target_status_param = "incomplete" if is_complete else "complete"
+
+                sub_text = f"👤 {assignee}"
+                if created_at:
+                    sub_text += f" • 🕒 Giao: {created_at}"
+
+                adhoc_component = {
+                    "type": "box",
+                    "layout": "horizontal",
+                    "spacing": "lg",
+                    "paddingAll": "md",
+                    "alignItems": "center",
+                    "contents": [
+                        {
+                            "type": "text",
+                            "text": "✅" if is_complete else "📋",
+                            "size": "xl",
+                            "flex": 0
+                        },
+                        {
+                            "type": "box",
+                            "layout": "vertical",
+                            "flex": 1,
+                            "spacing": "xs",
+                            "contents": [
+                                {
+                                    "type": "text",
+                                    "text": task_name,
+                                    "wrap": True,
+                                    "weight": "bold",
+                                    "size": "sm",
+                                    "color": main_text_color,
+                                    "decoration": text_decoration
+                                },
+                                {
+                                    "type": "text",
+                                    "text": sub_text,
+                                    "color": "#888888" if is_complete else "#6B21A8",
+                                    "size": "xs",
+                                    "wrap": True
+                                }
+                            ]
+                        },
+                        {
+                            "type": "button",
+                            "action": {
+                                "type": "postback",
+                                "label": button_label,
+                                "data": f"action=complete_adhoc_task&task_id={task_id}&assignee={assignee}&target_status={target_status_param}&shift={shift_type}"
+                            },
+                            "style": "primary",
+                            "color": button_color,
+                            "height": "sm",
+                            "flex": 0
+                        }
+                    ]
+                }
+                task_components.append(adhoc_component)
+                task_components.append({"type": "separator"})
+
+    if task_components and task_components[-1].get("type") == "separator":
         task_components.pop()
 
     flex_content = {
@@ -435,6 +537,29 @@ def get_adhoc_tasks_today(group_id, assignee):
         return filtered_tasks
     except Exception as e:
         print(f"Lỗi khi lấy adhoc tasks hôm nay: {e}")
+        return []
+
+def get_adhoc_tasks_for_group_today(group_id):
+    """
+    Lấy toàn bộ công việc phát sinh trong ngày của nhóm (mọi nhân viên).
+    """
+    sheet = get_or_create_adhoc_worksheet()
+    if not sheet or not group_id:
+        return []
+    
+    try:
+        all_records = sheet.get_all_records()
+        tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
+        today_str = datetime.now(tz_vietnam).strftime('%Y-%m-%d')
+        
+        filtered_tasks = []
+        for record in all_records:
+            if (str(record.get('group_id')) == str(group_id) and 
+                record.get('date') == today_str):
+                filtered_tasks.append(record)
+        return filtered_tasks
+    except Exception as e:
+        print(f"Lỗi khi lấy adhoc tasks của nhóm hôm nay: {e}")
         return []
 
 def update_adhoc_task_status(group_id, task_id, target_status, completed_by):

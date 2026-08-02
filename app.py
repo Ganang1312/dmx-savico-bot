@@ -450,27 +450,29 @@ def handle_postback(event):
         task_id = data.get('task_id')
         assignee = data.get('assignee')
         target_status = data.get('target_status', 'complete')
-        group_id = event.source.group_id
+        shift_type = data.get('shift')
+        group_id = getattr(event.source, 'group_id', None)
         user_id = event.source.user_id
 
         try:
-            profile = line_bot_api.get_group_member_profile(group_id, user_id)
-            user_name = profile.display_name
+            user_name = assignee or "Nhân viên"
+            try:
+                profile = line_bot_api.get_group_member_profile(group_id, user_id)
+                user_name = profile.display_name
+            except Exception:
+                pass
             
             success, resolved_assignee, task_group_hash = update_adhoc_task_status(group_id, task_id, target_status, user_name)
             
             if success:
-                if task_group_hash:
-                    if str(task_id).startswith('multi_'):
-                        updated_flex_content = generate_multi_adhoc_flex(group_id, task_group_hash)
-                        alt_text = "Cập nhật danh sách checklist công việc"
-                    else:
-                        updated_flex_content = generate_all_adhoc_flex(group_id, task_group_hash)
-                        alt_text = "Cập nhật công việc chung @all"
-                else:
-                    updated_flex_content = generate_adhoc_flex(group_id, resolved_assignee or assignee)
-                    alt_text = f"Cập nhật công việc phát sinh của {resolved_assignee or assignee}"
-                    
+                if not shift_type:
+                    tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
+                    current_hour = datetime.now(tz_vietnam).hour
+                    shift_type = 'sang' if current_hour < 15 else 'chieu'
+                
+                updated_flex_content = generate_checklist_flex(group_id, shift_type)
+                alt_text = f"Cập nhật checklist ca {shift_type}"
+                
                 if updated_flex_content:
                     line_bot_api.reply_message(
                         event.reply_token,
