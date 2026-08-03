@@ -24,7 +24,7 @@ from config import CLIENT, SHEET_NAME, WORKSHEET_NAME_USERS, WORKSHEET_NAME, WOR
 # CẬP NHẬT IMPORT MỚI
 from schedule_handler import send_daily_schedule
 from flex_handler import (
-    initialize_daily_tasks, generate_checklist_flex,
+    initialize_daily_tasks, generate_checklist_flex, get_tasks_status_from_sheet,
     add_adhoc_tasks, generate_adhoc_flex, update_adhoc_task_status,
     add_all_adhoc_tasks, generate_all_adhoc_flex, register_group_member,
     add_multi_adhoc_tasks, generate_multi_adhoc_flex
@@ -674,6 +674,9 @@ def handle_message(event):
                 current_hour = datetime.now(tz_vietnam).hour
                 current_shift = 'sang' if current_hour < 15 else 'chieu'
 
+                # Kiểm tra xem nhóm này hôm nay có/đã khởi tạo checklist ca sáng/chiều chưa
+                has_shift_checklist = bool(get_tasks_status_from_sheet(group_id, current_shift))
+
                 # Giao việc @all
                 if assignee.lower() == 'all':
                     members = get_group_members(group_id)
@@ -684,18 +687,24 @@ def handle_message(event):
                         )
                         return
                     
-                    has_added = False
+                    last_hash = None
                     for task_name in tasks:
                         task_group_hash = add_all_adhoc_tasks(group_id, members, task_name)
                         if task_group_hash:
-                            has_added = True
+                            last_hash = task_group_hash
                     
-                    if has_added:
-                        flex_content = generate_checklist_flex(group_id, current_shift)
+                    if last_hash:
+                        if has_shift_checklist:
+                            flex_content = generate_checklist_flex(group_id, current_shift)
+                            alt_text = f"📋 Checklist công việc ca {current_shift} (đã thêm việc chung @all)"
+                        else:
+                            flex_content = generate_all_adhoc_flex(group_id, last_hash)
+                            alt_text = f"📢 Công việc chung @all: {tasks[0] if tasks else ''}"
+
                         if flex_content:
                             line_bot_api.reply_message(
                                 event.reply_token,
-                                FlexSendMessage(alt_text=f"📋 Checklist công việc ca {current_shift} (đã thêm việc chung @all)", contents=flex_content)
+                                FlexSendMessage(alt_text=alt_text, contents=flex_content)
                             )
                         else:
                             line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ Có lỗi xảy ra khi tạo checklist."))
@@ -707,11 +716,17 @@ def handle_message(event):
                 # Giao việc cá nhân
                 else:
                     add_adhoc_tasks(group_id, assignee, tasks)
-                    flex_content = generate_checklist_flex(group_id, current_shift)
+                    if has_shift_checklist:
+                        flex_content = generate_checklist_flex(group_id, current_shift)
+                        alt_text = f"📋 Checklist công việc ca {current_shift} (đã thêm việc phát sinh cho {assignee})"
+                    else:
+                        flex_content = generate_adhoc_flex(group_id, assignee)
+                        alt_text = f"📋 Công việc phát sinh hôm nay của {assignee}"
+
                     if flex_content:
                         line_bot_api.reply_message(
                             event.reply_token,
-                            FlexSendMessage(alt_text=f"📋 Checklist công việc ca {current_shift} (đã thêm việc phát sinh cho {assignee})", contents=flex_content)
+                            FlexSendMessage(alt_text=alt_text, contents=flex_content)
                         )
                     else:
                         line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ Có lỗi xảy ra khi tạo danh sách công việc."))
@@ -754,13 +769,21 @@ def handle_message(event):
                 current_hour = datetime.now(tz_vietnam).hour
                 current_shift = 'sang' if current_hour < 15 else 'chieu'
 
+                has_shift_checklist = bool(get_tasks_status_from_sheet(group_id, current_shift))
+
                 task_group_hash = add_multi_adhoc_tasks(group_id, job_name, task_assignments)
                 if task_group_hash:
-                    flex_content = generate_checklist_flex(group_id, current_shift)
+                    if has_shift_checklist:
+                        flex_content = generate_checklist_flex(group_id, current_shift)
+                        alt_text = f"📋 Checklist công việc ca {current_shift} ({job_name})"
+                    else:
+                        flex_content = generate_multi_adhoc_flex(group_id, task_group_hash)
+                        alt_text = f"📋 Checklist công việc: {job_name}"
+
                     if flex_content:
                         line_bot_api.reply_message(
                             event.reply_token,
-                            FlexSendMessage(alt_text=f"📋 Checklist công việc ca {current_shift} ({job_name})", contents=flex_content)
+                            FlexSendMessage(alt_text=alt_text, contents=flex_content)
                         )
                     else:
                         line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ Có lỗi xảy ra khi tạo danh sách công việc."))
