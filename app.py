@@ -670,6 +670,10 @@ def handle_message(event):
                     
         if assignee and tasks:
             try:
+                tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
+                current_hour = datetime.now(tz_vietnam).hour
+                current_shift = 'sang' if current_hour < 15 else 'chieu'
+
                 # Giao việc @all
                 if assignee.lower() == 'all':
                     members = get_group_members(group_id)
@@ -680,18 +684,21 @@ def handle_message(event):
                         )
                         return
                     
-                    reply_messages = []
+                    has_added = False
                     for task_name in tasks:
                         task_group_hash = add_all_adhoc_tasks(group_id, members, task_name)
                         if task_group_hash:
-                            flex_content = generate_all_adhoc_flex(group_id, task_group_hash)
-                            if flex_content:
-                                reply_messages.append(
-                                    FlexSendMessage(alt_text=f"📢 Công việc chung @all: {task_name}", contents=flex_content)
-                                )
+                            has_added = True
                     
-                    if reply_messages:
-                        line_bot_api.reply_message(event.reply_token, reply_messages[:5])
+                    if has_added:
+                        flex_content = generate_checklist_flex(group_id, current_shift)
+                        if flex_content:
+                            line_bot_api.reply_message(
+                                event.reply_token,
+                                FlexSendMessage(alt_text=f"📋 Checklist công việc ca {current_shift} (đã thêm việc chung @all)", contents=flex_content)
+                            )
+                        else:
+                            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ Có lỗi xảy ra khi tạo checklist."))
                     else:
                         line_bot_api.reply_message(
                             event.reply_token,
@@ -700,11 +707,11 @@ def handle_message(event):
                 # Giao việc cá nhân
                 else:
                     add_adhoc_tasks(group_id, assignee, tasks)
-                    flex_content = generate_adhoc_flex(group_id, assignee)
+                    flex_content = generate_checklist_flex(group_id, current_shift)
                     if flex_content:
                         line_bot_api.reply_message(
                             event.reply_token,
-                            FlexSendMessage(alt_text=f"📋 Công việc phát sinh hôm nay của {assignee}", contents=flex_content)
+                            FlexSendMessage(alt_text=f"📋 Checklist công việc ca {current_shift} (đã thêm việc phát sinh cho {assignee})", contents=flex_content)
                         )
                     else:
                         line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ Có lỗi xảy ra khi tạo danh sách công việc."))
@@ -743,13 +750,17 @@ def handle_message(event):
                         
         if job_name and task_assignments:
             try:
+                tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
+                current_hour = datetime.now(tz_vietnam).hour
+                current_shift = 'sang' if current_hour < 15 else 'chieu'
+
                 task_group_hash = add_multi_adhoc_tasks(group_id, job_name, task_assignments)
                 if task_group_hash:
-                    flex_content = generate_multi_adhoc_flex(group_id, task_group_hash)
+                    flex_content = generate_checklist_flex(group_id, current_shift)
                     if flex_content:
                         line_bot_api.reply_message(
                             event.reply_token,
-                            FlexSendMessage(alt_text=f"📋 Checklist công việc: {job_name}", contents=flex_content)
+                            FlexSendMessage(alt_text=f"📋 Checklist công việc ca {current_shift} ({job_name})", contents=flex_content)
                         )
                     else:
                         line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ Có lỗi xảy ra khi tạo danh sách công việc."))
