@@ -469,10 +469,24 @@ def handle_postback(event):
                     tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
                     current_hour = datetime.now(tz_vietnam).hour
                     shift_type = 'sang' if current_hour < 15 else 'chieu'
-                
-                updated_flex_content = generate_checklist_flex(group_id, shift_type)
-                alt_text = f"Cập nhật checklist ca {shift_type}"
-                
+
+                has_shift_checklist = bool(get_tasks_status_from_sheet(group_id, shift_type))
+
+                if has_shift_checklist:
+                    updated_flex_content = generate_checklist_flex(group_id, shift_type)
+                    alt_text = f"📋 Cập nhật checklist ca {shift_type}"
+                else:
+                    if task_id and str(task_id).startswith('all_') and task_group_hash:
+                        updated_flex_content = generate_all_adhoc_flex(group_id, task_group_hash)
+                        alt_text = "📢 Cập nhật công việc chung @all"
+                    elif task_id and str(task_id).startswith('multi_') and task_group_hash:
+                        updated_flex_content = generate_multi_adhoc_flex(group_id, task_group_hash)
+                        alt_text = "📋 Cập nhật checklist công việc"
+                    else:
+                        target_user = resolved_assignee or assignee or "Nhân viên"
+                        updated_flex_content = generate_adhoc_flex(group_id, target_user)
+                        alt_text = f"📋 Cập nhật công việc phát sinh của {target_user}"
+
                 if updated_flex_content:
                     line_bot_api.reply_message(
                         event.reply_token,
