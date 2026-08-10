@@ -12,6 +12,7 @@ TASKS = {
         {'id': 'sang_4', 'icon': '🧹', 'name': 'Rà soát tốc kệ', 'time': '10:30'},
         {'id': 'sang_5', 'icon': '📑', 'name': 'Check Phiếu CK/NK quá 7 ngày', 'time': '11:30'},
         {'id': 'sang_6', 'icon': '🔧', 'name': 'Đổ tồn hàng T.Thái (lỗi)', 'time': '14:00'},
+        {'id': 'sang_7', 'icon': '📊', 'name': 'Xử lý BCNB sáng', 'time': '15:00'},
     ],
     'chieu': [
         {'id': 'chieu_1', 'icon': '📦', 'name': 'Check lệnh online', 'time': '15:15'},
