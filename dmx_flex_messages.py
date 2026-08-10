@@ -1334,9 +1334,9 @@ def build_nhanvien_flex():
 
     # 3. Tổng hợp doanh thu thực tế của từng NV
     for r in nv_rows:
-        u_id = str(get_key_val(r, "mã nv", "mã nhân viên", "employeeid", "user", "staffuser", "staffUserName", default="")).strip().upper()
+        u_id = str(get_key_val(r, "mã nv", "mã nhân viên", "employeeid", "user", "staffuser", default="") or "").strip().upper()
         if not u_id:
-            name_val = str(get_key_val(r, "staffUserName", "tên nv", "Họ và tên", default="")).strip().upper()
+            name_val = str(get_key_val(r, "staffUserName", "tên nv", "Họ và tên", default="") or "").strip().upper()
             matched_uid = next((uid for uid, uinfo in active_config_staff.items() if uinfo["name"].upper() == name_val or uid == name_val), None)
             if matched_uid:
                 u_id = matched_uid
