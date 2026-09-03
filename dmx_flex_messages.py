@@ -1011,7 +1011,10 @@ def build_individual_staff_card(e, rank, total_emp=11, now_str="", thi_dua_list=
     
     score_val = e.get("diem", max(60.0, 100.0 - (rank - 1) * 2.5))
     du_kien_pct = e.get("du_kien_pct", pct_val)
-    m_tieu_ngay = max(1, int(round(con_lai_val / 10.0))) if con_lai_val > 0 else 0
+    days_passed = e.get("days_passed", 2)
+    days_in_month = e.get("days_in_month", 30)
+    days_left = max(1, days_in_month - days_passed)
+    m_tieu_ngay = max(1, int(round(con_lai_val / days_left))) if con_lai_val > 0 else 0
 
     # Phân định màu header & tagline dựa trên Rank thực tế (Đổi màu header theo cảnh báo/thứ hạng)
     bottom_cutoff = int(total_emp * 0.7) if total_emp > 0 else 8
@@ -1061,7 +1064,9 @@ def build_individual_staff_card(e, rank, total_emp=11, now_str="", thi_dua_list=
     if td_passed is None:
         td_passed = sum(1 for td in thi_dua_list if td.get("du_kien", 0.0) >= 100.0 or td.get("ht", 0.0) >= 100 or str(td.get("con_lai")) == "🏆")
     td_total = len(thi_dua_list)
-    td_pct = (td_passed / td_total * 100.0) if td_total > 0 else 0.0
+    td_pct = e.get("contest_score")
+    if td_pct is None:
+        td_pct = (td_passed / td_total * 100.0) if td_total > 0 else 0.0
 
     # 1. Khối Header hiện đại (Màu nền đổi theo thứ hạng, gồm #ThứHạng, Tên nhân viên & Điểm)
     header_component = {
@@ -1219,7 +1224,7 @@ def build_individual_staff_card(e, rank, total_emp=11, now_str="", thi_dua_list=
         dk_val = td.get("du_kien", 0.0)
         dk_str = f"{round(dk_val)}%"
         
-        unit_tag = "(DT)" if td.get("unit") == "TR" or "doanh thu" in str(td.get("name", "")).lower() else "(SL)"
+        unit_tag = "(SL)" if td.get("is_sl", True) else "(DT)"
         name_s = f"{shorten_name(td['name'])} {unit_tag}"
         name_color = "#dc2626" if td.get("phan_loai") == 2.0 else "#0f172a"
 
@@ -1451,11 +1456,27 @@ def build_nhanvien_flex():
             continue
             
         c_obj = config_map.get(nganh_clean, {"phanLoai": 1.0, "thuTu": 999.0})
+        sl = parse_number(get_key_val(r, "số lượng", "quantity", default=0.0))
+        dt = parse_number(get_key_val(r, "doanh thu", default=0.0))
+        is_sl = True
+        thuc_hien_store = sl
+        if dt > 0:
+            if sl == 0:
+                is_sl = False
+                thuc_hien_store = dt
+            else:
+                ty_le_dt = abs((dt / tg) - 1.0)
+                ty_le_sl = abs((sl / tg) - 1.0)
+                if ty_le_dt < ty_le_sl:
+                    is_sl = False
+                    thuc_hien_store = dt
+
         active_categories.append({
             "nganhHang": nganh_str,
             "storeTarget": tg,
             "phanLoai": c_obj["phanLoai"],
-            "thuTu": c_obj["thuTu"]
+            "thuTu": c_obj["thuTu"],
+            "isSL": is_sl
         })
 
     active_categories.sort(key=lambda x: x["thuTu"])
@@ -1542,21 +1563,40 @@ def build_nhanvien_flex():
             total_weights += phan_loai
 
             display_tg = max(1, round(staff_cat_tg))
-            display_con_lai = max(0, display_tg - int(staff_cat_act))
+            actual_display = round(staff_cat_act)
+            days_left = max(1, days_in_month - days_passed)
+            con_lai_raw = max(0.0, staff_cat_tg - staff_cat_act)
+            display_con_lai = max(0, round(con_lai_raw))
+            m_target_day = (con_lai_raw / days_left) if days_left > 0 else con_lai_raw
+
+            is_sl = cat.get("isSL", True)
+            if con_lai_raw <= 0 or actual_display >= display_tg:
+                m_tieu_display = "🏆"
+            else:
+                if not is_sl and m_target_day < 1.0 and m_target_day > 0:
+                    m_tieu_display = f"{round(m_target_day * 1000)}k"
+                elif is_sl and m_target_day < 1.0 and m_target_day > 0:
+                    m_tieu_display = "1"
+                else:
+                    m_tieu_display = str(max(1, round(m_target_day)))
+
             staff_td_items.append({
                 "name": cat_name,
-                "m_tieu": "🏆" if staff_cat_act >= display_tg else f"{display_tg}",
+                "m_tieu": m_tieu_display,
                 "target": display_tg,
-                "actual": int(staff_cat_act),
-                "con_lai": "🏆" if staff_cat_act >= display_tg else display_con_lai,
+                "actual": actual_display,
+                "con_lai": "🏆" if actual_display >= display_tg else display_con_lai,
                 "ht": ht_val,
                 "du_kien": dk_val,
-                "phan_loai": phan_loai
+                "phan_loai": phan_loai,
+                "is_sl": is_sl
             })
 
         contest_score = (total_weighted_earned / total_weights * 100.0) if total_weights > 0 else 0.0
         contest_contribution = contest_score * 0.4
         total_score = rev_score + contest_contribution
+
+        staff_td_items.sort(key=lambda x: x.get("du_kien", 0.0), reverse=True)
 
         emp_list.append({
             "name": u["name"],
@@ -1566,8 +1606,11 @@ def build_nhanvien_flex():
             "pct": pct_ht,
             "du_kien_pct": du_kien_pct,
             "diem": total_score,
+            "contest_score": contest_score,
             "count_nh_du_kien": count_nh_du_kien,
             "td_total": len(active_categories),
+            "days_passed": days_passed,
+            "days_in_month": days_in_month,
             "thi_dua_list": staff_td_items if staff_td_items else None
         })
 
