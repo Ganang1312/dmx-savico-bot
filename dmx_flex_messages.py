@@ -1,6 +1,6 @@
 import pytz
 from datetime import datetime
-from dmx_data_provider import get_dashboard_data, get_locked_target_config
+from dmx_data_provider import get_dashboard_data, get_locked_target_config, get_staff_history_base
 
 def parse_number(val):
     if val is None or val == '':
@@ -289,7 +289,7 @@ def build_luyke_flex():
         sl = parse_number(get_key_val(b, "số lượng", "quantity", default=0.0))
         tg = parse_number(get_key_val(b, "target", default=0.0))
         dtGoc = parse_number(get_key_val(b, "doanh thu", default=0.0))
-        dtTC = parse_number(get_key_val(b, "revenue_installment", "doanh thu trả chậm", default=0.0))
+        dtTC = parse_number(get_key_val(b, "revenue_installment", "doanh thu trả chậm", "dt trả chậm", "doanh thu trả góp", "dt trả góp", "dt tra cham", default=0.0))
         
         tDT += dt
         tTG += tg
@@ -325,7 +325,19 @@ def build_luyke_flex():
         tTG = base_target
     if tTG <= 0:
         tTG = 1500.0
-    totalTyLeTC = tTC / tDTGoc if tDTGoc > 0 else (tTC / tDT if tDT > 0 else 0.0)
+
+    # Lấy doanh thu trả chậm & tỷ trọng trả chậm từ dòng TỔNG CỘNG nếu có (chuẩn theo baocao_luyke.html)
+    if total_row_bi:
+        tot_tc = parse_number(get_key_val(total_row_bi, "dt trả chậm", "doanh thu trả chậm", "doanh thu trả góp", "dt trả góp", "revenue_installment", default=0.0))
+        if tot_tc > 0:
+            tTC = tot_tc
+        tot_ty_trong_tc = parse_number(get_key_val(total_row_bi, "tỷ trọng tc", "tỷ trọng trả chậm", "tỷ trọng", "ty trong tc", default=0.0))
+        if tot_ty_trong_tc > 0:
+            totalTyLeTC = tot_ty_trong_tc / 100.0 if tot_ty_trong_tc > 1.0 else tot_ty_trong_tc
+        else:
+            totalTyLeTC = tTC / tDTGoc if tDTGoc > 0 else (tTC / tDT if tDT > 0 else 0.0)
+    else:
+        totalTyLeTC = tTC / tDTGoc if tDTGoc > 0 else (tTC / tDT if tDT > 0 else 0.0)
     
     current_day = now.day
     days_in_month = (datetime(now.year, now.month + 1, 1) - datetime(now.year, now.month, 1)).days if now.month < 12 else 31
@@ -504,7 +516,7 @@ def build_luyke_flex():
                     "cornerRadius": "md",
                     "contents": [
                         {"type": "text", "text": "💳 Trả Góp", "size": "xs", "color": "#ffffff", "weight": "bold", "align": "center"},
-                        {"type": "text", "text": f"{fmt_num(tTC)} Tr ({totalTyLeTC*100:.0f}%)", "size": "sm", "color": "#ffffff", "weight": "bold", "align": "center", "margin": "xs"}
+                        {"type": "text", "text": f"{fmt_num(tTC)} Tr ({totalTyLeTC*100:.1f}%)", "size": "sm", "color": "#ffffff", "weight": "bold", "align": "center", "margin": "xs"}
                     ]
                 },
                 {
@@ -896,9 +908,7 @@ def build_leaderboard_overview_bubble(emp_list, now_str):
         actual_val = e.get("actual", 0.0)
         target_val = e.get("target", 0.0)
         con_lai_val = max(0.0, target_val - actual_val)
-        pct_val = e.get("pct", 0.0)
-        if pct_val <= 2.0 and pct_val > 0:
-            pct_val = pct_val * 100.0
+        pct_val = (actual_val / target_val * 100.0) if target_val > 0 else 0.0
         score_val = e.get("diem", 90.0 - rank * 3.5)
         td_passed = e.get("count_nh_du_kien", e.get("td_passed", max(1, 10 - rank)))
         td_total = e.get("td_total", 23)
@@ -1291,28 +1301,81 @@ def build_nhanvien_flex():
     total_row_bi = next((b for b in bi_rows if is_total_row(b)), None)
     base_target_bi = parse_number(get_key_val(total_row_bi, "Target", "target", default=0.0)) if total_row_bi else 0.0
     tTG_Store = sum(parse_number(get_key_val(b, "Target", "target", default=0.0)) for b in bi_rows if not is_total_row(b) and get_key_val(b, "nhóm ngành hàng", default="") != "N/A")
-    if tTG_Store <= 0 and base_target_bi > 0:
+    if base_target_bi > 0:
         tTG_Store = base_target_bi
-    if tTG_Store <= 0:
+    elif tTG_Store <= 0:
         tTG_Store = 1500.0
 
-    # 1. Đọc danh sách nhân viên từ Config_ThiDua
+    # 1. Đọc danh sách nhân viên và cấu hình ngành hàng từ Config_ThiDua
     active_config_staff = {}
+    config_map = {}
     if config_rows:
         for r in config_rows:
             emp_name = get_key_val(r, "user-họ và tên", "Họ và tên", "tên nhân viên", default=None)
             user_id = get_key_val(r, "user", "User", "mã nv", "mã nhân viên", "staffUser", default=None)
-            if not user_id and not emp_name:
-                continue
-            u_id_str = str(user_id or emp_name).strip().upper()
-            emp_name_str = str(emp_name or user_id).strip()
-            pct = parse_number(get_key_val(r, "tỷ lệ %", "% chia", default=0.0))
-            ratio = pct if pct <= 1.0 else pct / 100.0
-            active_config_staff[u_id_str] = {"name": emp_name_str, "ratio": ratio}
+            pct = get_key_val(r, "tỷ lệ %", "% chia", default=None)
+            if (user_id and str(user_id).strip()) or (emp_name and str(emp_name).strip() and pct is not None and str(pct).strip() != ""):
+                u_id_str = str(user_id or emp_name).strip().upper()
+                emp_name_str = str(emp_name or user_id).strip()
+                p_num = parse_number(pct)
+                ratio = p_num if p_num <= 1.0 else p_num / 100.0
+                active_config_staff[u_id_str] = {"name": emp_name_str, "ratio": ratio}
+
+            cat_name = get_key_val(r, "ngành hàng", "Ngành hàng")
+            pl_val = get_key_val(r, "phân loại", "Phân loại")
+            if cat_name and str(cat_name).strip():
+                pl_num = parse_number(pl_val)
+                if pl_num in [1.0, 2.0]:
+                    config_map[str(cat_name).lower().strip()] = {
+                        "phanLoai": pl_num,
+                        "thuTu": parse_number(get_key_val(r, "thứ tự", "Ngày") or 999.0)
+                    }
 
     num_active_staff = len(active_config_staff) or 1
 
-    # 2. Xử lý target khóa (Target_Lock) nếu có, hoặc tính theo targetMode
+    # 2. Lấy dữ liệu lịch sử (HCR) để tính target hybrid chuẩn như baocao_nhanvien.html
+    base_sheets, base_date = get_staff_history_base()
+    b_data_nv_bi = base_sheets.get("Data_NV_BI", [])
+    b_data_thi_dua = base_sheets.get("Data_NV_ThiDua", [])
+    
+    base_user_map = {}
+    for r in b_data_nv_bi:
+        u_id = str(get_key_val(r, "staffuser", "mã nv", "employeeid", "user", "mã nhân viên") or "").strip().upper()
+        if not u_id:
+            continue
+        dt_qd = parse_number(get_key_val(r, "doanh thu quy đổi", "revenue_kfactor", "dt quy đổi", default=0.0))
+        if u_id not in base_user_map:
+            base_user_map[u_id] = {"dt": 0.0, "td": {}}
+        base_user_map[u_id]["dt"] += dt_qd
+        
+    for r in b_data_thi_dua:
+        u_id = str(get_key_val(r, "staffuser", "mã nv", "employeeid", "user", "mã nhân viên") or "").strip().upper()
+        nganh = get_key_val(r, "programname", "nhóm ngành hàng", "nhóm ngành hàng chính", default=None)
+        if not u_id or not nganh:
+            continue
+        nganh_clean = str(nganh).lower().strip()
+        act = parse_number(get_key_val(r, "value_compe", "thực hiện", "đã bán", default=0.0))
+        if u_id not in base_user_map:
+            base_user_map[u_id] = {"dt": 0.0, "td": {}}
+        base_user_map[u_id]["td"][nganh_clean] = base_user_map[u_id]["td"].get(nganh_clean, 0.0) + act
+        
+    total_base_dt = sum(u["dt"] for u in base_user_map.values())
+    base_staff_dt_contrib = {}
+    for u_id, u in base_user_map.items():
+        base_staff_dt_contrib[u_id] = (u["dt"] / total_base_dt) if total_base_dt > 0 else 0.0
+        
+    total_base_cat = {}
+    for u_id, u in base_user_map.items():
+        for cat, val in u["td"].items():
+            total_base_cat[cat] = total_base_cat.get(cat, 0.0) + val
+            
+    base_staff_cat_contrib = {}
+    for u_id, u in base_user_map.items():
+        base_staff_cat_contrib[u_id] = {}
+        for cat, val in u["td"].items():
+            base_staff_cat_contrib[u_id][cat] = (val / total_base_cat[cat]) if total_base_cat.get(cat, 0.0) > 0 else 0.0
+
+    # 3. Xử lý target khóa (Target_Lock) nếu có, hoặc tính theo targetMode Hybrid (60% Sàn + 40% Đóng góp)
     lock_config = get_locked_target_config()
     user_map = {}
     locked_staff_list = lock_config.get("staff", []) if (lock_config and lock_config.get("is_locked")) else []
@@ -1325,7 +1388,8 @@ def build_nhanvien_flex():
             if locked_s and locked_s.get("lockedRatio") is not None:
                 r = parse_number(locked_s.get("lockedRatio"))
             else:
-                r = u_conf["ratio"]
+                hcr = base_staff_dt_contrib.get(u_id, u_conf["ratio"])
+                r = 0.6 / num_active_staff + 0.4 * hcr
             initial_ratios[u_id] = r
             sum_ratios += r
         if sum_ratios <= 0:
@@ -1344,8 +1408,10 @@ def build_nhanvien_flex():
                 "tdTargets": {}
             }
     else:
+        # Default targetMode: HYBRID (60% Sàn + 40% Đóng góp lịch sử) chuẩn 100% theo baocao_nhanvien.html
         for u_id, u_conf in active_config_staff.items():
-            target = u_conf["ratio"] * tTG_Store
+            hcr = base_staff_dt_contrib.get(u_id, u_conf["ratio"])
+            target = tTG_Store * (0.6 / num_active_staff + 0.4 * hcr)
             user_map[u_id] = {
                 "name": u_conf["name"],
                 "user_id": u_id,
@@ -1356,7 +1422,7 @@ def build_nhanvien_flex():
                 "tdTargets": {}
             }
 
-    # 3. Tổng hợp doanh thu thực tế của từng NV
+    # 4. Tổng hợp doanh thu thực tế của từng NV
     for r in nv_rows:
         u_id = str(get_key_val(r, "mã nv", "mã nhân viên", "employeeid", "user", "staffuser", default="") or "").strip().upper()
         if not u_id:
@@ -1369,17 +1435,8 @@ def build_nhanvien_flex():
             dtqd = parse_number(get_key_val(r, "Doanh thu Quy đổi", "doanh thu quy đổi", "revenue_kfactor", "dt quy đổi", "Doanh thu", default=0.0))
             user_map[u_id]["dt"] += dtqd
 
-    # 4. Config thi đua map (phanLoai & thuTu)
-    config_map = {}
-    for c in config_rows:
-        ten = get_key_val(c, "ngành hàng", "nhóm ngành hàng", "programname", default=None)
-        if ten:
-            phan_loai = parse_number(get_key_val(c, "phân loại", "loại", "mức độ", default=1.0))
-            thu_tu = parse_number(get_key_val(c, "thứ tự", "thu tu", default=999.0))
-            config_map[str(ten).lower().strip()] = {"phanLoai": phan_loai, "thuTu": thu_tu if thu_tu > 0 else 999}
-
-    # 5. Store Thi Đua Categories (activeCategories)
-    thi_dua_info = {}
+    # 5. Store Thi Đua Categories (chuẩn 23 nhóm theo baocao_nhanvien.html)
+    active_categories = []
     for r in td_store_rows:
         nganh = get_key_val(r, "maingroupname", "main group name", "nhóm ngành hàng", "nhóm ngành hàng chính", "programname", default=None)
         if not nganh or str(nganh).strip() == "" or str(nganh).strip() == "N/A":
@@ -1390,48 +1447,27 @@ def build_nhanvien_flex():
         
         nganh_str = str(nganh).strip()
         nganh_clean = nganh_str.lower()
-        c_obj = config_map.get(nganh_clean, {})
-        if config_map and (not c_obj.get("phanLoai") or c_obj.get("phanLoai") not in [1.0, 2.0]):
+        if config_map and nganh_clean not in config_map:
             continue
             
-        comp_type = parse_number(get_key_val(r, "competitiontype", "competitionType", "phân loại", default=1.0))
-        phan_loai = c_obj.get("phanLoai") or (2.0 if comp_type == 2 else 1.0)
-        
-        sl = parse_number(get_key_val(r, "số lượng", "quantity", default=0.0))
-        dt = parse_number(get_key_val(r, "doanh thu", default=0.0))
-        is_sl = True
-        thuc_hien_store = sl
-        if dt > 0:
-            if sl == 0:
-                is_sl = False
-                thuc_hien_store = dt
-            else:
-                ty_le_dt = abs((dt / tg) - 1.0)
-                ty_le_sl = abs((sl / tg) - 1.0)
-                if ty_le_dt < ty_le_sl:
-                    is_sl = False
-                    thuc_hien_store = dt
-                    
-        store_ht_dk = ((thuc_hien_store / days_passed) * days_in_month) / tg if tg > 0 else 0.0
-        thi_dua_info[nganh_clean] = {
+        c_obj = config_map.get(nganh_clean, {"phanLoai": 1.0, "thuTu": 999.0})
+        active_categories.append({
             "nganhHang": nganh_str,
             "storeTarget": tg,
-            "isSL": is_sl,
-            "storeHtDuKien": store_ht_dk,
-            "thuTu": c_obj.get("thuTu", 999),
-            "phanLoai": phan_loai
-        }
+            "phanLoai": c_obj["phanLoai"],
+            "thuTu": c_obj["thuTu"]
+        })
 
-    active_categories = list(thi_dua_info.values())
+    active_categories.sort(key=lambda x: x["thuTu"])
 
     # 6. Tính target từng ngành hàng thi đua cho từng nhân viên (userCatTargets)
-    user_cat_targets = {u_id: {} for u_id in user_map}
+    user_cat_targets = {u_id: {} for u_id in active_config_staff}
     for cat in active_categories:
         nganh_clean = cat["nganhHang"].lower().strip()
         if lock_config and lock_config.get("is_locked") and locked_staff_list:
             initial_cat_ratios = {}
             sum_cat_ratios = 0.0
-            for u_id in user_map:
+            for u_id in active_config_staff:
                 u_conf = active_config_staff.get(u_id, {"ratio": 0.0})
                 locked_s = next((s for s in locked_staff_list if str(s.get("userId", "")).strip().upper() == u_id), None)
                 cat_ratio = u_conf["ratio"]
@@ -1441,14 +1477,15 @@ def build_nhanvien_flex():
                 sum_cat_ratios += cat_ratio
             if sum_cat_ratios <= 0:
                 sum_cat_ratios = 1.0
-            for u_id in user_map:
+            for u_id in active_config_staff:
                 user_cat_targets[u_id][nganh_clean] = cat["storeTarget"] * (initial_cat_ratios[u_id] / sum_cat_ratios)
         else:
-            for u_id in user_map:
-                u_conf = active_config_staff.get(u_id, {"ratio": 0.0})
-                user_cat_targets[u_id][nganh_clean] = cat["storeTarget"] * u_conf["ratio"]
+            for u_id in active_config_staff:
+                hcr = base_staff_cat_contrib.get(u_id, {}).get(nganh_clean, active_config_staff[u_id]["ratio"])
+                user_cat_targets[u_id][nganh_clean] = cat["storeTarget"] * (0.6 / num_active_staff + 0.4 * hcr)
 
     # 7. Tổng hợp thi đua thực tế của từng NV từ Data_NV_ThiDua
+    active_cat_set = set(c["nganhHang"].lower().strip() for c in active_categories)
     for r in nv_td_rows:
         u_id = str(get_key_val(r, "staffuser", "user", "mã nv", "employeeid", "staffUser", default="")).strip().upper()
         if not u_id:
@@ -1465,7 +1502,7 @@ def build_nhanvien_flex():
             continue
         nganh_clean = str(nganh).strip().lower()
         actual = parse_number(get_key_val(r, "value_compe", "Value_Compe", "thực hiện", "đã bán", default=0.0))
-        if nganh_clean in thi_dua_info:
+        if nganh_clean in active_cat_set:
             user_map[u_id]["td"][nganh_clean] = user_map[u_id]["td"].get(nganh_clean, 0.0) + actual
 
     # 8. Tính điểm & build danh sách hiển thị
@@ -1530,6 +1567,7 @@ def build_nhanvien_flex():
             "du_kien_pct": du_kien_pct,
             "diem": total_score,
             "count_nh_du_kien": count_nh_du_kien,
+            "td_total": len(active_categories),
             "thi_dua_list": staff_td_items if staff_td_items else None
         })
 

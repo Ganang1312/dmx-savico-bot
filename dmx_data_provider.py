@@ -62,6 +62,47 @@ def get_locked_target_config():
         print(f"Lỗi truy vấn Target_Lock từ Supabase: {e}")
     return None
 
+def get_staff_history_base():
+    """
+    Lấy dữ liệu lịch sử mốc so sánh (base) để tính target hybrid và thi đua chuẩn như baocao_nhanvien.html
+    """
+    headers = {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Cache-Control": "no-cache"
+    }
+    tz = pytz.timezone('Asia/Ho_Chi_Minh')
+    today_ymd = datetime.now(tz).strftime("%Y-%m-%d")
+    
+    try:
+        url_dates = f"{SUPABASE_URL}/rest/v1/history_db?select=date&order=date.desc"
+        res = requests.get(url_dates, headers=headers, timeout=6)
+        if res.status_code != 200:
+            return {}, None
+            
+        all_dates = []
+        for r in res.json():
+            d = r.get("date")
+            if d and d not in all_dates:
+                all_dates.append(d)
+                
+        if not all_dates:
+            return {}, None
+            
+        start_idx = 1 if (len(all_dates) > 1 and all_dates[0] == today_ymd) else 0
+        
+        for candidate_date in all_dates[start_idx:]:
+            url_check = f"{SUPABASE_URL}/rest/v1/history_db?date=eq.{candidate_date}&sheet_name=in.(Data_NV_BI,Data_NV_ThiDua)&select=sheet_name,data"
+            res_c = requests.get(url_check, headers=headers, timeout=6)
+            if res_c.status_code == 200:
+                h_sheets = {item["sheet_name"]: item["data"] for item in res_c.json()}
+                if h_sheets.get("Data_NV_ThiDua") and len(h_sheets["Data_NV_ThiDua"]) > 0:
+                    return h_sheets, candidate_date
+    except Exception as e:
+        print(f"Lỗi lấy dữ liệu lịch sử HCR: {e}")
+    return {}, None
+
+
 def trigger_adhoc_scrape(scrape_type):
     """
     Gửi tín hiệu cào dữ liệu mới lên Supabase để Chrome Extension phát hiện
