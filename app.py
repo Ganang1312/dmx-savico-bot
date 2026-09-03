@@ -1235,7 +1235,13 @@ def handle_message(event):
                                 line_bot_api.push_message(dest_id, FlexSendMessage(alt_text="Báo Cáo Lũy Kế Savico", contents=flex_msg))
                         else:
                             flex_msg = build_realtime_flex()
-                            line_bot_api.push_message(dest_id, FlexSendMessage(alt_text="Báo Cáo Realtime Hôm Nay", contents=flex_msg))
+                            if isinstance(flex_msg, list) and len(flex_msg) > 1:
+                                carousel_content = {"type": "carousel", "contents": flex_msg}
+                                line_bot_api.push_message(dest_id, FlexSendMessage(alt_text="⚡ BÁO CÁO REALTIME (Cuộn Ngang P.1 & P.2)", contents=carousel_content))
+                            elif isinstance(flex_msg, list) and len(flex_msg) == 1:
+                                line_bot_api.push_message(dest_id, FlexSendMessage(alt_text="⚡ Báo Cáo Realtime Hôm Nay", contents=flex_msg[0]))
+                            else:
+                                line_bot_api.push_message(dest_id, FlexSendMessage(alt_text="⚡ Báo Cáo Realtime Hôm Nay", contents=flex_msg))
                     except Exception as fe:
                         print(f"Lỗi gửi Flex báo cáo cào: {fe}")
                         try:

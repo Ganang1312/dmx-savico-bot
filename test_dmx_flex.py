@@ -124,5 +124,35 @@ class TestDmxFlexMessages(unittest.TestCase):
         self.assertIn("Tiến độ Thi đua", staff_card_str)
         self.assertIn("LK / TG", staff_card_str)
 
+    @patch("dmx_flex_messages.get_dashboard_data")
+    def test_skip_total_row_no_doubling(self, mock_get_data):
+        # Giả lập dữ liệu có dòng TỔNG CỘNG (như khi cào Cách 2)
+        total_row = {"nhóm ngành hàng": "TỔNG CỘNG", "doanh thu quy đổi": 1000.0, "số lượng": 10, "target": 5000.0}
+        cat_rows = [
+            {"nhóm ngành hàng": "Đ.Gia Dụng", "doanh thu quy đổi": 600.0, "số lượng": 6, "target": 0.0},
+            {"nhóm ngành hàng": "Đ.Thoại", "doanh thu quy đổi": 400.0, "số lượng": 4, "target": 0.0}
+        ]
+        mock_data_with_total = dict(self.mock_data)
+        mock_data_with_total["Data_BI"] = [total_row] + cat_rows
+        mock_data_with_total["Data_Realtime_BI"] = [
+            {"Nhóm Ngành Hàng": "TỔNG CỘNG", "revenue_RT": 100.0, "quantity_RT": 2, "target_Day": 500.0},
+            {"Nhóm Ngành Hàng": "Đ.Gia Dụng", "revenue_RT": 60.0, "quantity_RT": 1, "target_Day": 300.0},
+            {"Nhóm Ngành Hàng": "Đ.Thoại", "revenue_RT": 40.0, "quantity_RT": 1, "target_Day": 200.0},
+        ]
+        mock_get_data.return_value = mock_data_with_total
+
+        # LK1: Doanh thu phải là 1,000 Tr (600 + 400), KHÔNG PHẢI 2,000 Tr!
+        # Số lượng phải là 10 (6 + 4), KHÔNG PHẢI 20!
+        lk_flex = build_luyke_flex()
+        lk_str = str(lk_flex)
+        self.assertIn("1,000 Tr (20%)", lk_str)
+        self.assertNotIn("2,000 Tr", lk_str)
+
+        # RT1: Doanh thu hôm nay phải là 100 Tr (60 + 40), KHÔNG PHẢI 200 Tr!
+        rt_flex = build_realtime_flex()
+        rt_str = str(rt_flex)
+        self.assertIn("100 TR", rt_str)
+        self.assertNotIn("200 TR", rt_str)
+
 if __name__ == '__main__':
     unittest.main()

@@ -111,6 +111,18 @@ def get_key_val(row, *possible_keys, default=None):
             
     return default
 
+def is_total_row(row_or_name):
+    if not row_or_name:
+        return False
+    if isinstance(row_or_name, dict):
+        ma = str(get_key_val(row_or_name, "mã nnh", "ma nnh", "rowcode", default="")).strip().upper()
+        if ma in ["TOTAL", "TỔNG", "TONG"]:
+            return True
+        nh = str(get_key_val(row_or_name, "nhóm ngành hàng", "ngành hàng", "salegroupmastername", "rowname", default="")).strip().upper()
+    else:
+        nh = str(row_or_name).strip().upper()
+    return nh in ["TỔNG", "TỔNG CỘNG", "TONG CONG", "TOTAL", "GRAND TOTAL"] or nh.startswith("TỔNG ") or nh.startswith("TOTAL ")
+
 def make_table_header(cols, weights, aligns=None, bg_color="#0284c7"):
     if not aligns:
         aligns = ["start"] * len(cols)
@@ -255,6 +267,10 @@ def build_luyke_flex():
     now = datetime.now(tz)
     now_str = now.strftime("%H:%M - %d/%m/%Y")
     
+    # Tìm dòng tổng nếu có sẵn từ nguồn Cách 2 để lấy Target chuẩn toàn siêu thị
+    total_row_bi = next((b for b in bi_rows if is_total_row(b)), None)
+    base_target = parse_number(get_key_val(total_row_bi, "target", "Target", default=0.0)) if total_row_bi else 0.0
+
     tDT = 0.0
     tTG = 0.0
     tTC = 0.0
@@ -263,8 +279,10 @@ def build_luyke_flex():
     parsed_bi = []
     
     for b in bi_rows:
+        if is_total_row(b):
+            continue
         nganh = get_key_val(b, "nhóm ngành hàng", "ngành hàng", "salegroupmastername", default=None)
-        if not nganh or str(nganh).strip().upper() == "N/A":
+        if not nganh or str(nganh).strip().upper() == "N/A" or is_total_row(nganh):
             continue
             
         dt = parse_number(get_key_val(b, "doanh thu quy đổi", "doanh thu", default=0.0))
@@ -278,7 +296,7 @@ def build_luyke_flex():
         tTC += dtTC
         tDTGoc += dtGoc
 
-        raw_ck_val = get_key_val(b, "rev_kft_riserate_lastmonth", "+/- dtck", "+/- so với ck", default=None)
+        raw_ck_val = get_key_val(b, "rev_kft_riserate_lastmonth", "+/- dtck", "+/- so với ck", "+/- dtck tháng (qđ)", "% tt", default=None)
         dt_ck = 0.0
         tang_giam_ck = 0.0
         if raw_ck_val is not None and str(raw_ck_val).strip() != "":
@@ -303,6 +321,8 @@ def build_luyke_flex():
                 "ht": dt / tg if tg > 0 else 0.0
             })
     parsed_bi.sort(key=lambda x: x["dt"], reverse=True)
+    if tTG <= 0 and base_target > 0:
+        tTG = base_target
     if tTG <= 0:
         tTG = 1500.0
     totalTyLeTC = tTC / tDTGoc if tDTGoc > 0 else (tTC / tDT if tDT > 0 else 0.0)
@@ -1268,7 +1288,11 @@ def build_nhanvien_flex():
     days_in_month = (datetime(now.year, now.month + 1, 1) - datetime(now.year, now.month, 1)).days if now.month < 12 else 31
     days_passed = days_in_month if current_day == 1 else current_day - 1
     
-    tTG_Store = sum(parse_number(get_key_val(b, "Target", "target", default=0.0)) for b in bi_rows if get_key_val(b, "nhóm ngành hàng", default="") != "N/A")
+    total_row_bi = next((b for b in bi_rows if is_total_row(b)), None)
+    base_target_bi = parse_number(get_key_val(total_row_bi, "Target", "target", default=0.0)) if total_row_bi else 0.0
+    tTG_Store = sum(parse_number(get_key_val(b, "Target", "target", default=0.0)) for b in bi_rows if not is_total_row(b) and get_key_val(b, "nhóm ngành hàng", default="") != "N/A")
+    if tTG_Store <= 0 and base_target_bi > 0:
+        tTG_Store = base_target_bi
     if tTG_Store <= 0:
         tTG_Store = 1500.0
 
@@ -1535,8 +1559,14 @@ def build_realtime_flex():
     now = datetime.now(tz)
     now_str = now.strftime("%H:%M - %d/%m/%Y")
     
-    lk_tDT = sum(parse_number(get_key_val(b, "Doanh thu Quy đổi", "Doanh thu", default=0.0)) for b in bi_rows)
-    lk_tTG = sum(parse_number(get_key_val(b, "Target", "target", default=0.0)) for b in bi_rows)
+    # Lũy kế target & dt từ Data_BI (bỏ qua dòng tổng cộng)
+    total_row_bi = next((b for b in bi_rows if is_total_row(b)), None)
+    base_target_bi = parse_number(get_key_val(total_row_bi, "Target", "target", default=0.0)) if total_row_bi else 0.0
+
+    lk_tDT = sum(parse_number(get_key_val(b, "Doanh thu Quy đổi", "Doanh thu", default=0.0)) for b in bi_rows if not is_total_row(b))
+    lk_tTG = sum(parse_number(get_key_val(b, "Target", "target", default=0.0)) for b in bi_rows if not is_total_row(b))
+    if lk_tTG <= 0 and base_target_bi > 0:
+        lk_tTG = base_target_bi
     if lk_tTG <= 0:
         lk_tTG = 1500.0
         
@@ -1559,11 +1589,11 @@ def build_realtime_flex():
             if int(day_val) == current_day:
                 holiday_target = parse_number(get_key_val(r, "Mục tiêu", "mục tiêu ngày", "mục tiêu", default=0.0))
             
-            user_id = get_key_val(r, "user")
+            user_id = get_key_val(r, "user", "User", "mã nv", "mã nhân viên", default=None)
             if user_id and str(user_id).strip():
                 percent = parse_number(get_key_val(r, "tỷ lệ %", "% chia", default=0.0))
                 ratio = percent if percent <= 1 else percent / 100.0
-                user_map[str(user_id).strip()] = ratio
+                user_map[str(user_id).strip().upper()] = ratio
         
     target_today = 0.0
     if holiday_target > 0:
@@ -1578,24 +1608,29 @@ def build_realtime_flex():
     parsed_rt_bi = []
     
     for r in rt_rows:
+        if is_total_row(r):
+            continue
         nganh = get_key_val(r, "Nhóm Ngành Hàng", "nhóm ngành hàng", "Ngành hàng", "salegroupmastername", default=None)
-        if not nganh or str(nganh).strip().upper() == "N/A":
+        if not nganh or str(nganh).strip().upper() == "N/A" or is_total_row(nganh):
             continue
         dtqd = max(
             parse_number(get_key_val(r, "revenue_KFactor_RT")),
             parse_number(get_key_val(r, "revenue_RT")),
-            parse_number(get_key_val(r, "Doanh thu", "doanh thu quy đổi"))
+            parse_number(get_key_val(r, "Doanh thu Quy đổi", "doanh thu quy đổi", "Doanh thu", "doanh thu"))
         )
         sl = max(
             parse_number(get_key_val(r, "quantity_RT")),
             parse_number(get_key_val(r, "quantity_KFactor")),
-            parse_number(get_key_val(r, "số lượng"))
+            parse_number(get_key_val(r, "Số lượng", "số lượng"))
         )
         targetDay = max(
             parse_number(get_key_val(r, "revenue_KFactor_AVEDay")),
-            parse_number(get_key_val(r, "target_Day"))
+            parse_number(get_key_val(r, "target_Day", "Target", "target"))
         )
-        dtTC = parse_number(get_key_val(r, "revenue_Installment"))
+        dtTC = max(
+            parse_number(get_key_val(r, "revenue_Installment")),
+            parse_number(get_key_val(r, "Doanh thu trả góp", "DT Trả chậm", "doanh thu trả chậm"))
+        )
         
         rt_total += dtqd
         rt_tTC += dtTC
@@ -1892,25 +1927,46 @@ def build_realtime_flex():
     
     # Employee Revenue Table Container Card (Bảng Thứ Hạng Doanh Thu Nhân Viên - chèn TRƯỚC bảng chi tiết doanh thu hôm nay)
     data_rt_nv = data.get("Data_Realtime_NV", [])
+    if not data_rt_nv:
+        data_rt_nv = data.get("Data_NV_BI", [])
     if data_rt_nv and isinstance(data_rt_nv, list) and len(data_rt_nv) > 0:
         parsed_nv_rt = []
         for row in data_rt_nv:
-            m_nv = str(get_key_val(row, "mã nv", "ma_nv", "user", default="")).strip()
-            t_nv = get_key_val(row, "tên nv", "ten_nv", "employeeName", default="") or ""
-            dt_nv = parse_number(get_key_val(row, "doanh thu", "revenue", default=0))
+            m_nv = str(get_key_val(row, "mã nv", "ma_nv", "user", "rowcode", default="")).strip()
+            if not m_nv or m_nv.lower() == "online" or m_nv == "18001060":
+                continue
+            t_nv = get_key_val(row, "tên nhân viên", "tên nv", "ten_nv", "rowname", "employeeName", default="") or ""
+            
+            raw_dt = parse_number(get_key_val(row, "doanh thu quy đổi", "doanh thu", "revenue_kfactor", "revenue", default=0))
+            if abs(raw_dt) >= 1000000:
+                dt_nv = raw_dt / 1000000.0
+            else:
+                dt_nv = raw_dt
+                
             sl_nv = parse_number(get_key_val(row, "số lượng", "soluong", "quantity", "quantity_RT", default=0))
-            if dt_nv != 0 or sl_nv != 0:
-                ratio = 0.0
-                if 'user_map' in locals() and m_nv in user_map:
+            
+            # Chỉ hiển thị nhân viên được khai báo ở tab config, ẩn nhân viên khác
+            ratio = 0.0
+            if 'user_map' in locals() and user_map:
+                if m_nv in user_map:
                     ratio = user_map[m_nv]
-                target_nv = (target_today * 1000000) * ratio
-                
-                last_name = t_nv.strip().split()[-1] if t_nv else ""
-                disp_name = f"{last_name} - {m_nv}" if m_nv else str(t_nv)
-                
-                ht_nv = (dt_nv / target_nv) if target_nv > 0 else (1.0 if dt_nv > 0 else 0.0)
-                
-                parsed_nv_rt.append({"name": disp_name, "sl": sl_nv, "dt": dt_nv, "target": target_nv, "ht": ht_nv})
+                elif m_nv.upper() in user_map:
+                    ratio = user_map[m_nv.upper()]
+                else:
+                    continue
+            
+            target_nv = target_today * ratio
+            
+            clean_name = t_nv.strip()
+            if " - " in clean_name:
+                clean_name = clean_name.split(" - ", 1)[1].strip()
+            clean_name = clean_name.lstrip("0123456789 -").strip()
+            last_name = clean_name.split()[-1] if clean_name else ""
+            disp_name = f"{last_name} - {m_nv}" if last_name else (f"{clean_name} - {m_nv}" if clean_name else m_nv)
+            
+            ht_nv = (dt_nv / target_nv) if target_nv > 0 else (1.0 if dt_nv > 0 else 0.0)
+            
+            parsed_nv_rt.append({"name": disp_name, "sl": sl_nv, "dt": dt_nv, "target": target_nv, "ht": ht_nv})
         
         parsed_nv_rt.sort(key=lambda x: x["dt"], reverse=True)
 
@@ -1929,22 +1985,8 @@ def build_realtime_flex():
                 rank_str = rank_icons[idx] if idx < 3 else f"{idx+1}."
                 
                 sl_str = fmt_num(item["sl"])
-
-                # DT
-                if abs(item['dt']) >= 1000000:
-                    dt_tr_str = f"{item['dt']/1000000:.0f}"
-                elif abs(item['dt']) >= 1000:
-                    dt_tr_str = f"{item['dt']/1000:.0f}K"
-                else:
-                    dt_tr_str = f"{item['dt']:.0f}"
-                    
-                # Target
-                if abs(item['target']) >= 1000000:
-                    tg_tr_str = f"{item['target']/1000000:.0f}"
-                elif abs(item['target']) >= 1000:
-                    tg_tr_str = f"{item['target']/1000:.0f}K"
-                else:
-                    tg_tr_str = f"{item['target']:.0f}"
+                dt_tr_str = f"{item['dt']:.0f}"
+                tg_tr_str = f"{item['target']:.0f}"
 
                 # Còn lại
                 con_lai = item['target'] - item['dt']
@@ -1952,13 +1994,7 @@ def build_realtime_flex():
                     con_lai_str = "Đạt"
                     con_color = "#059669"
                 else:
-                    con_val = max(0, con_lai)
-                    if abs(con_val) >= 1000000:
-                        con_lai_str = f"{con_val/1000000:.0f}"
-                    elif abs(con_val) >= 1000:
-                        con_lai_str = f"{con_val/1000:.0f}K"
-                    else:
-                        con_lai_str = f"{con_val:.0f}"
+                    con_lai_str = f"{max(0, con_lai):.0f}"
                     con_color = "#ef4444"
 
                 ht_str = f"{item['ht']*100:.0f}%"
