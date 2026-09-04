@@ -2085,8 +2085,6 @@ def build_realtime_flex():
     
     # Employee Revenue Table Container Card (Bảng Thứ Hạng Doanh Thu Nhân Viên - chèn TRƯỚC bảng chi tiết doanh thu hôm nay)
     data_rt_nv = data.get("Data_Realtime_NV", [])
-    if not data_rt_nv:
-        data_rt_nv = data.get("Data_NV_BI", [])
     if data_rt_nv and isinstance(data_rt_nv, list) and len(data_rt_nv) > 0:
         parsed_nv_rt = []
         for row in data_rt_nv:
