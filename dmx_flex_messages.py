@@ -1422,9 +1422,11 @@ def build_nhanvien_flex():
         if not u_id:
             continue
         dt_qd = parse_number(get_key_val(r, "doanh thu quy đổi", "revenue_kfactor", "dt quy đổi", default=0.0))
+        rev_cum = parse_number(get_key_val(r, "revenue_cum", "revenue_kfactor_cum", default=0.0))
+        b_dt = (rev_cum + dt_qd) if (rev_cum > 0 and dt_qd < rev_cum) else (dt_qd or rev_cum)
         if u_id not in base_user_map:
             base_user_map[u_id] = {"dt": 0.0, "td": {}}
-        base_user_map[u_id]["dt"] += dt_qd
+        base_user_map[u_id]["dt"] += b_dt
         
     for r in b_data_thi_dua:
         u_id = str(get_key_val(r, "staffuser", "mã nv", "employeeid", "user", "mã nhân viên") or "").strip().upper()
@@ -1510,8 +1512,10 @@ def build_nhanvien_flex():
                 u_id = matched_uid
         
         if u_id in user_map:
-            dtqd = parse_number(get_key_val(r, "Doanh thu Quy đổi", "doanh thu quy đổi", "revenue_kfactor", "dt quy đổi", "Doanh thu", default=0.0))
-            user_map[u_id]["dt"] += dtqd
+            raw_today = parse_number(get_key_val(r, "Doanh thu Quy đổi", "doanh thu quy đổi", "revenue_kfactor", "dt quy đổi", "Doanh thu", default=0.0))
+            raw_cum = parse_number(get_key_val(r, "revenue_cum", "revenue_kfactor_cum", "doanh thu lũy kế", "dt lũy kế", default=0.0))
+            dt_total = (raw_cum + raw_today) if (raw_cum > 0 and raw_today < raw_cum) else (raw_today or raw_cum)
+            user_map[u_id]["dt"] += dt_total
 
     # 5. Store Thi Đua Categories (chuẩn 23 nhóm theo baocao_nhanvien.html)
     active_categories = []
