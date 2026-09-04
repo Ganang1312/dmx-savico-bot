@@ -1143,8 +1143,6 @@ def build_individual_staff_card(e, rank, total_emp=11, now_str="", thi_dua_list=
                         "cornerRadius": "sm",
                         "paddingStart": "xs",
                         "paddingEnd": "xs",
-                        "paddingTop": "xxs",
-                        "paddingBottom": "xxs",
                         "alignItems": "center",
                         "flex": 2,
                         "contents": [
@@ -1188,8 +1186,6 @@ def build_individual_staff_card(e, rank, total_emp=11, now_str="", thi_dua_list=
                         "cornerRadius": "sm",
                         "paddingStart": "xs",
                         "paddingEnd": "xs",
-                        "paddingTop": "xxs",
-                        "paddingBottom": "xxs",
                         "alignItems": "center",
                         "flex": 2,
                         "contents": [
@@ -1335,7 +1331,7 @@ def build_individual_staff_card(e, rank, total_emp=11, now_str="", thi_dua_list=
         row_contents = [make_staff_cell(v, w, a, c) for v, c, a, w in zip(vals, colors, aligns, weights)]
 
         row_box = {
-            "type": "box", "layout": "horizontal", "contents": row_contents, "paddingTop": "xxs", "paddingBottom": "xxs"
+            "type": "box", "layout": "horizontal", "contents": row_contents
         }
         if row_bg != "#ffffff":
             row_box["backgroundColor"] = row_bg
