@@ -120,9 +120,27 @@ class TestDmxFlexMessages(unittest.TestCase):
         self.assertIn("BÁO CÁO XẾP HẠNG", str(flex[0]))
         
         staff_card_str = str(flex[1])
-        self.assertIn("Tiến độ Doanh thu", staff_card_str)
-        self.assertIn("Tiến độ Thi đua", staff_card_str)
+        self.assertIn("DOANH THU", staff_card_str.upper())
+        self.assertIn("THI ĐUA", staff_card_str.upper())
         self.assertIn("LK / TG", staff_card_str)
+
+    @patch("dmx_flex_messages.get_dashboard_data")
+    def test_rt1_hides_zero_revenue_staff(self, mock_get_data):
+        mock_data_staff = dict(self.mock_data)
+        mock_data_staff["Config_ThiDua"] = [
+            {"user": "NV01", "% chia": 50.0},
+            {"user": "NV02", "% chia": 50.0},
+        ]
+        mock_data_staff["Data_Realtime_NV"] = [
+            {"mã nv": "NV01", "tên nv": "Nguyễn Văn A", "doanh thu quy đổi": 50.0, "số lượng": 2},
+            {"mã nv": "NV02", "tên nv": "Trần Văn B", "doanh thu quy đổi": 0.0, "số lượng": 0},
+        ]
+        mock_get_data.return_value = mock_data_staff
+        
+        rt_flex = build_realtime_flex()
+        rt_str = str(rt_flex)
+        self.assertIn("NV01", rt_str)
+        self.assertNotIn("NV02", rt_str)
 
     @patch("dmx_flex_messages.get_dashboard_data")
     def test_skip_total_row_no_doubling(self, mock_get_data):
