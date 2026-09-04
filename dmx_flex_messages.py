@@ -1422,8 +1422,8 @@ def build_nhanvien_flex():
         if not u_id:
             continue
         dt_qd = parse_number(get_key_val(r, "doanh thu quy đổi", "revenue_kfactor", "dt quy đổi", default=0.0))
-        rev_cum = parse_number(get_key_val(r, "revenue_cum", "revenue_kfactor_cum", default=0.0))
-        b_dt = (rev_cum + dt_qd) if (rev_cum > 0 and dt_qd < rev_cum) else (dt_qd or rev_cum)
+        rev_k_cum = parse_number(get_key_val(r, "revenue_kfactor_cum", "doanh thu quy đổi lũy kế", default=0.0))
+        b_dt = (rev_k_cum + dt_qd) if (rev_k_cum > 0 and dt_qd < rev_k_cum) else (dt_qd or rev_k_cum)
         if u_id not in base_user_map:
             base_user_map[u_id] = {"dt": 0.0, "td": {}}
         base_user_map[u_id]["dt"] += b_dt
@@ -1512,9 +1512,9 @@ def build_nhanvien_flex():
                 u_id = matched_uid
         
         if u_id in user_map:
-            raw_today = parse_number(get_key_val(r, "Doanh thu Quy đổi", "doanh thu quy đổi", "revenue_kfactor", "dt quy đổi", "Doanh thu", default=0.0))
-            raw_cum = parse_number(get_key_val(r, "revenue_cum", "revenue_kfactor_cum", "doanh thu lũy kế", "dt lũy kế", default=0.0))
-            dt_total = (raw_cum + raw_today) if (raw_cum > 0 and raw_today < raw_cum) else (raw_today or raw_cum)
+            dt_qd = parse_number(get_key_val(r, "Doanh thu Quy đổi", "doanh thu quy đổi", "revenue_kfactor", "dt quy đổi", default=0.0))
+            rev_k_cum = parse_number(get_key_val(r, "revenue_kfactor_cum", "doanh thu quy đổi lũy kế", "dt quy đổi lũy kế", default=0.0))
+            dt_total = (rev_k_cum + dt_qd) if (rev_k_cum > 0 and dt_qd < rev_k_cum) else (dt_qd or rev_k_cum)
             user_map[u_id]["dt"] += dt_total
 
     # 5. Store Thi Đua Categories (chuẩn 23 nhóm theo baocao_nhanvien.html)
@@ -2095,7 +2095,7 @@ def build_realtime_flex():
                 continue
             t_nv = get_key_val(row, "tên nhân viên", "tên nv", "ten_nv", "rowname", "employeeName", default="") or ""
             
-            raw_dt = parse_number(get_key_val(row, "doanh thu quy đổi", "doanh thu", "revenue_kfactor", "revenue", default=0))
+            raw_dt = parse_number(get_key_val(row, "doanh thu quy đổi", "revenue_kfactor", "dt quy đổi", "Doanh thu Quy đổi", default=0))
             if abs(raw_dt) >= 1000000:
                 dt_nv = raw_dt / 1000000.0
             else:
