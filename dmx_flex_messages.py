@@ -1,4 +1,5 @@
 import pytz
+import re
 from datetime import datetime
 from dmx_data_provider import get_dashboard_data, get_locked_target_config, get_staff_history_base
 
@@ -42,6 +43,63 @@ def fmt_num(val):
     num = parse_number(val)
     rounded = int(round(num))
     return f"{rounded:,}"
+
+def parse_is_sl(val):
+    if val is None or val == '':
+        return None
+    if isinstance(val, bool):
+        return val
+    s = str(val).strip().lower()
+    if s in ['true', '1', 'sl', 'số lượng']:
+        return True
+    if s in ['false', '0', 'dt', 'doanh thu']:
+        return False
+    return None
+
+def determine_is_sl(comp_type, nganh_clean, sl=0.0, dt=0.0, tg=0.0, config_obj=None):
+    """
+    Chuẩn hóa xác định chỉ tiêu là Sản Lượng (isSL=True) hay Doanh Thu (isSL=False)
+    đồng bộ 100% với baocao_luyke.html & baocao_realtime.html:
+    1. compType in (2, 6) hoặc nhóm từ khóa ('sim', 'camera', 'nạp rút', 'thẻ tín dụng'): SL
+    2. compType in (1, 3, 4, 5): DT
+    3. Fallback: so sánh tỷ lệ hoàn thành khi sl > 0 và dt > 0
+    4. Ưu tiên cấu hình isSL từ Config_ThiDua nếu có
+    """
+    comp_type_num = int(parse_number(comp_type)) if comp_type is not None else 0
+    clean = str(nganh_clean).lower().strip()
+    
+    is_sl = False
+    if comp_type_num in (2, 6) or any(k in clean for k in ['sim', 'camera', 'nạp rút', 'thẻ tín dụng']):
+        is_sl = True
+    elif comp_type_num in (1, 3, 4, 5):
+        is_sl = False
+    else:
+        is_sl = sl > 0 and (dt == 0 or abs((sl / tg) - 1.0) < abs((dt / tg) - 1.0)) if tg > 0 else (sl > 0 and dt == 0)
+
+    if config_obj and isinstance(config_obj, dict):
+        cfg_is_sl = config_obj.get("isSL")
+        if cfg_is_sl is not None:
+            parsed = parse_is_sl(cfg_is_sl)
+            if parsed is not None:
+                is_sl = parsed
+
+    return is_sl
+
+def fmt_val_td(val, is_sl=False):
+    """
+    Format giá trị Thực hiện / Target cho bảng thi đua:
+    - Nếu là SL: hiển thị số nguyên
+    - Nếu là DT: nếu có số lẻ và < 100 thì giữ tối đa 2 chữ số thập phân (ví dụ 2.45, 19.5),
+      nếu là số nguyên hoặc >= 100 thì làm tròn định dạng hàng nghìn
+    """
+    if val is None or val == '':
+        return "0"
+    num = parse_number(val)
+    if is_sl:
+        return f"{int(round(num)):,}"
+    if abs(num) < 100 and (num != int(num)):
+        return f"{num:.2f}".rstrip('0').rstrip('.')
+    return f"{int(round(num)):,}"
 
 def shorten_name(name):
     if not name:
@@ -310,6 +368,14 @@ def build_luyke_flex():
 
         tDT_CK_total += dt_ck
 
+        diff_ck = 0.0
+        if dt_ck > 0:
+            diff_ck = dt - dt_ck
+        elif tang_giam_ck != 0:
+            diff_ck = dt * (tang_giam_ck / 100.0)
+        else:
+            diff_ck = dt - tg
+
         if dt > 0 or sl > 0:
             parsed_bi.append({
                 "name": shorten_name(nganh),
@@ -317,6 +383,7 @@ def build_luyke_flex():
                 "dt": dt,
                 "tg": tg,
                 "dt_ck": dt_ck,
+                "diff_ck": diff_ck,
                 "tang_giam_ck": tang_giam_ck,
                 "ht": dt / tg if tg > 0 else 0.0
             })
@@ -380,31 +447,40 @@ def build_luyke_flex():
     for c in config_rows:
         ten = get_key_val(c, "ngành hàng", "nhóm ngành hàng", default=None)
         phan_loai = parse_number(get_key_val(c, "phân loại", "loại", default=0.0))
+        is_sl_cfg = parse_is_sl(get_key_val(c, "isSL", "issl", "đơn vị", "donvi", "loại chỉ tiêu", default=None))
         if ten:
-            config_map[str(ten).lower().strip()] = phan_loai
+            clean_ten = str(ten).lower().strip()
+            config_map[clean_ten] = {
+                "phanLoai": phan_loai,
+                "isSL": is_sl_cfg,
+                "thuTu": parse_number(get_key_val(c, "thứ tự", "Ngày", default=999.0))
+            }
 
     parsed_td = []
     cnt_dk = 0
     for r in td_rows:
-        nganh = get_key_val(r, "maingroupname", "main group name", "nhóm ngành hàng", "nhóm ngành hàng chính", default=None)
+        nganh = get_key_val(r, "maingroupname", "main group name", "nhóm ngành hàng", "nhóm ngành hàng chính", "programname", default=None)
         if not nganh or str(nganh).strip().upper() == "N/A":
             continue
         nganh_clean = str(nganh).lower().strip()
-        if config_map and config_map.get(nganh_clean, 0.0) == 0.0:
+        c_obj = config_map.get(nganh_clean) or config_map.get(re.sub(r'^nnh\s+', '', nganh_clean)) or {}
+        if config_map and c_obj.get("phanLoai") == 0.0:
             continue
             
-        tg = parse_number(get_key_val(r, "target", "mục tiêu", default=0.0))
+        tg = parse_number(get_key_val(r, "target", "target (qđ)", "mục tiêu", "kế hoạch", default=0.0))
         if tg <= 0:
             continue
             
-        sl = parse_number(get_key_val(r, "số lượng", "quantity", default=0.0))
-        dt = parse_number(get_key_val(r, "doanh thu", default=0.0))
+        sl = parse_number(get_key_val(r, "số lượng", "quantity", "sl", default=0.0))
+        dt = max(
+            parse_number(get_key_val(r, "doanh thu quy đổi", "revenue_kfactor", default=0.0)),
+            parse_number(get_key_val(r, "doanh thu", "revenue", default=0.0))
+        )
         
-        is_dt = False
-        if dt > 0 and (sl == 0 or abs((dt / tg) - 1) < abs((sl / tg) - 1)):
-            is_dt = True
-            
-        actual = dt if is_dt else sl
+        comp_type = get_key_val(r, "competitiontype", "competitionType", "phân loại", "loại", default=None)
+        is_sl = determine_is_sl(comp_type, nganh_clean, sl=sl, dt=dt, tg=tg, config_obj=c_obj)
+        
+        actual = sl if is_sl else dt
         ht_target = actual / tg
         ht_du_kien = ((actual / days_passed) * days_in_month) / tg if days_passed > 0 else 0.0
         
@@ -413,7 +489,7 @@ def build_luyke_flex():
             
         con_lai = max(0.0, tg - actual)
         mt_ngay_val = (con_lai / days_remaining) if days_remaining > 0 else 0.0
-        if is_dt:
+        if not is_sl:
             mt_ngay_str = f"{mt_ngay_val:.1f} Tr" if mt_ngay_val > 0 else "0 Tr"
         else:
             mt_ngay_str = f"{int(round(mt_ngay_val))} SP" if mt_ngay_val >= 1 else (f"{mt_ngay_val:.1f} SP" if mt_ngay_val > 0 else "0 SP")
@@ -425,9 +501,10 @@ def build_luyke_flex():
             "target": tg,
             "ht": ht_target,
             "ht_dk": ht_du_kien,
-            "unit": "TR" if is_dt else "SP",
+            "unit": "SP" if is_sl else "TR",
+            "is_sl": is_sl,
             "mt_ngay_str": mt_ngay_str,
-            "phan_loai": config_map.get(nganh_clean, 1.0)
+            "phan_loai": c_obj.get("phanLoai", 1.0)
         })
         
     td_done = [x for x in parsed_td if x["ht_dk"] >= 1.0]
@@ -624,45 +701,69 @@ def build_luyke_flex():
         "contents": table_card_contents
     })
 
-    # BẢNG 2: BẢNG TỶ TRỌNG & TĂNG TRƯỜNG SO VỚI CÙNG KỲ (Card riêng biệt)
+    # BẢNG 2: BẢNG TỶ TRỌNG & TĂNG TRƯỞNG SO VỚI CÙNG KỲ (Card riêng biệt)
+    # Cân bằng hợp lý: Top tăng trưởng mạnh & Top giảm sâu so với cùng kỳ
     growth_card_contents = [
-        {"type": "text", "text": "📈 TỶ TRỌNG & TĂNG TRƯỜNG CÙNG KỲ", "size": "xxs", "color": "#0f766e", "weight": "bold", "margin": "xs"}
+        {"type": "text", "text": "📈 TỶ TRỌNG & TĂNG TRƯỞNG CÙNG KỲ", "size": "xxs", "color": "#0f766e", "weight": "bold", "margin": "xs"}
     ]
     headers2 = ["STT", "Ngành hàng", "Tỷ trọng", "vs Cùng kỳ"]
     weights2 = [1, 3, 2, 5]
     aligns2 = ["start", "start", "center", "end"]
-    growth_card_contents.append(make_table_header(headers2, weights2, aligns2, bg_color="#0f766e"))
 
-    for idx, b in enumerate(parsed_bi[:6]):
+    top_growth = sorted([x for x in parsed_bi if x.get("diff_ck", 0.0) > 0], key=lambda x: x.get("diff_ck", 0.0), reverse=True)[:6]
+    top_decline = sorted([x for x in parsed_bi if x.get("diff_ck", 0.0) < 0], key=lambda x: x.get("diff_ck", 0.0))[:6]
+
+    # Section 1: Top Tăng Trưởng Mạnh (Tối đa 6 ngành)
+    growth_card_contents.append({
+        "type": "box",
+        "layout": "horizontal",
+        "backgroundColor": "#f0fdf4",
+        "paddingAll": "xs",
+        "cornerRadius": "xs",
+        "margin": "xs",
+        "contents": [
+            {"type": "text", "text": f"🚀 TOP TĂNG TRƯỞNG DẪN ĐẦU ({len(top_growth)})", "size": "xxs", "color": "#15803d", "weight": "bold"}
+        ]
+    })
+    growth_card_contents.append(make_table_header(headers2, weights2, aligns2, bg_color="#15803d"))
+
+    for idx, b in enumerate(top_growth):
         ty_trong = (b["dt"] / tDT * 100) if tDT > 0 else 0.0
-        dt_ck_val = b.get("dt_ck", 0.0)
+        diff_ck = b.get("diff_ck", 0.0)
         pct_ck = b.get("tang_giam_ck", 0.0)
-        
-        if dt_ck_val > 0 or pct_ck != 0:
-            diff_ck = b["dt"] - dt_ck_val if dt_ck_val > 0 else (b["dt"] * (pct_ck / 100.0) if pct_ck != 0 else 0.0)
-            sign_str = "+" if diff_ck >= 0 else ""
-            pct_sign_str = "+" if pct_ck >= 0 else ""
-            if diff_ck >= 0:
-                growth_text = f"▲ {pct_sign_str}{pct_ck:.1f}% ({sign_str}{fmt_num(diff_ck)} Tr)"
-                growth_color = "#16a34a"
-            else:
-                growth_text = f"▼ {pct_ck:.1f}% (-{fmt_num(abs(diff_ck))} Tr)"
-                growth_color = "#dc2626"
-        else:
-            diff_tg = b["dt"] - b["tg"]
-            pct_tg = (diff_tg / b["tg"] * 100) if b["tg"] > 0 else 0.0
-            sign_str = "+" if diff_tg >= 0 else ""
-            pct_sign_str = "+" if pct_tg >= 0 else ""
-            if diff_tg >= 0:
-                growth_text = f"▲ {pct_sign_str}{pct_tg:.1f}% ({sign_str}{fmt_num(diff_tg)} Tr)"
-                growth_color = "#16a34a"
-            else:
-                growth_text = f"▼ {pct_tg:.1f}% (-{fmt_num(abs(diff_tg))} Tr)"
-                growth_color = "#dc2626"
-
-        row2_vals = [idx+1, b['name'], f"{ty_trong:.0f}%", growth_text]
-        row2_colors = ["#64748b", "#0f172a", "#0284c7", growth_color]
+        sign_str = "+" if diff_ck >= 0 else ""
+        pct_sign_str = "+" if pct_ck >= 0 else ""
+        diff_fmt = fmt_val_td(diff_ck, is_sl=False)
+        growth_text = f"▲ {pct_sign_str}{pct_ck:.1f}% ({sign_str}{diff_fmt} Tr)"
+        row2_vals = [idx + 1, b['name'], f"{ty_trong:.0f}%", growth_text]
+        row2_colors = ["#64748b", "#0f172a", "#0284c7", "#16a34a"]
         growth_card_contents.append(make_table_row(row2_vals, weights2, aligns2, row2_colors))
+
+    # Section 2: Top Giảm So Với Cùng Kỳ (Tối đa 6 ngành)
+    if top_decline:
+        growth_card_contents.append({"type": "separator", "color": "#fecaca", "margin": "sm"})
+        growth_card_contents.append({
+            "type": "box",
+            "layout": "horizontal",
+            "backgroundColor": "#fef2f2",
+            "paddingAll": "xs",
+            "cornerRadius": "xs",
+            "margin": "xs",
+            "contents": [
+                {"type": "text", "text": f"🔻 TOP GIẢM SO VỚI CÙNG KỲ ({len(top_decline)})", "size": "xxs", "color": "#b91c1c", "weight": "bold"}
+            ]
+        })
+        growth_card_contents.append(make_table_header(headers2, weights2, aligns2, bg_color="#b91c1c"))
+
+        for idx, b in enumerate(top_decline):
+            ty_trong = (b["dt"] / tDT * 100) if tDT > 0 else 0.0
+            diff_ck = b.get("diff_ck", 0.0)
+            pct_ck = b.get("tang_giam_ck", 0.0)
+            diff_fmt = fmt_val_td(abs(diff_ck), is_sl=False)
+            growth_text = f"▼ {pct_ck:.1f}% (-{diff_fmt} Tr)"
+            row2_vals = [idx + 1, b['name'], f"{ty_trong:.0f}%", growth_text]
+            row2_colors = ["#64748b", "#0f172a", "#0284c7", "#dc2626"]
+            growth_card_contents.append(make_table_row(row2_vals, weights2, aligns2, row2_colors))
 
     tDT_CK = tDT_CK_total if tDT_CK_total > 0 else sum(b.get("dt_ck", 0.0) for b in parsed_bi)
     if tDT_CK > 0:
@@ -670,19 +771,21 @@ def build_luyke_flex():
         pct_total_ck = (diff_total_ck / tDT_CK * 100)
         sign_str = "+" if diff_total_ck >= 0 else ""
         pct_sign_str = "+" if pct_total_ck >= 0 else ""
+        total_diff_fmt = fmt_val_td(abs(diff_total_ck), is_sl=False)
         if diff_total_ck >= 0:
-            total_growth_str = f"▲ {pct_sign_str}{pct_total_ck:.1f}% ({sign_str}{fmt_num(diff_total_ck)} Tr)"
+            total_growth_str = f"▲ {pct_sign_str}{pct_total_ck:.1f}% ({sign_str}{total_diff_fmt} Tr)"
         else:
-            total_growth_str = f"▼ {pct_total_ck:.1f}% (-{fmt_num(abs(diff_total_ck))} Tr)"
+            total_growth_str = f"▼ {pct_total_ck:.1f}% (-{total_diff_fmt} Tr)"
     else:
         diff_total_tg = tDT - tTG
         pct_total_tg = (diff_total_tg / tTG * 100) if tTG > 0 else 0.0
         sign_str = "+" if diff_total_tg >= 0 else ""
         pct_sign_str = "+" if pct_total_tg >= 0 else ""
+        total_diff_fmt = fmt_val_td(abs(diff_total_tg), is_sl=False)
         if diff_total_tg >= 0:
-            total_growth_str = f"▲ {pct_sign_str}{pct_total_tg:.1f}% ({sign_str}{fmt_num(diff_total_tg)} Tr)"
+            total_growth_str = f"▲ {pct_sign_str}{pct_total_tg:.1f}% ({sign_str}{total_diff_fmt} Tr)"
         else:
-            total_growth_str = f"▼ {pct_total_tg:.1f}% (-{fmt_num(abs(diff_total_tg))} Tr)"
+            total_growth_str = f"▼ {pct_total_tg:.1f}% (-{total_diff_fmt} Tr)"
 
     tot2_vals = ["⭐", "TỔNG CỘNG", "100%", total_growth_str]
     tot2_colors = ["#ffffff", "#ffffff", "#ffffff", "#ffffff"]
@@ -758,10 +861,10 @@ def build_luyke_flex():
             {"type": "separator", "color": "#bbf7d0", "margin": "xs"}
         ]
         for idx, t in enumerate(td_done):
-            unit_tag = "(DT)" if t["unit"] == "TR" else "(SL)"
+            unit_tag = "(SL)" if t.get("is_sl") else "(DT)"
             display_name = f"{t['name']} {unit_tag}"
             mt_str = "🏆" if (t["actual"] >= t["target"] or t.get("ht", 0) >= 1.0) else t.get("mt_ngay_str", "0")
-            act_tg_str = f"{fmt_num(t['actual'])} / {fmt_num(t['target'])}"
+            act_tg_str = f"{fmt_val_td(t['actual'], t.get('is_sl', False))} / {fmt_val_td(t['target'], t.get('is_sl', False))}"
             ht_str = f"{t['ht']*100:.0f}%"
             dk_str = f"{t['ht_dk']*100:.0f}%"
 
@@ -789,10 +892,10 @@ def build_luyke_flex():
             {"type": "separator", "color": "#cbd5e1", "margin": "xs"}
         ]
         for idx, t in enumerate(td_pending):
-            unit_tag = "(DT)" if t["unit"] == "TR" else "(SL)"
+            unit_tag = "(SL)" if t.get("is_sl") else "(DT)"
             display_name = f"{t['name']} {unit_tag}"
             mt_str = "🏆" if (t["actual"] >= t["target"] or t.get("ht", 0) >= 1.0) else t.get("mt_ngay_str", "0")
-            act_tg_str = f"{fmt_num(t['actual'])} / {fmt_num(t['target'])}"
+            act_tg_str = f"{fmt_val_td(t['actual'], t.get('is_sl', False))} / {fmt_val_td(t['target'], t.get('is_sl', False))}"
             ht_str = f"{t['ht']*100:.0f}%"
             dk_str = f"{t['ht_dk']*100:.0f}%"
 
@@ -1401,11 +1504,13 @@ def build_nhanvien_flex():
 
             cat_name = get_key_val(r, "ngành hàng", "Ngành hàng")
             pl_val = get_key_val(r, "phân loại", "Phân loại")
+            is_sl_cfg = parse_is_sl(get_key_val(r, "isSL", "issl", "đơn vị", "donvi", "loại chỉ tiêu", default=None))
             if cat_name and str(cat_name).strip():
                 pl_num = parse_number(pl_val)
                 if pl_num in [1.0, 2.0]:
                     config_map[str(cat_name).lower().strip()] = {
                         "phanLoai": pl_num,
+                        "isSL": is_sl_cfg,
                         "thuTu": parse_number(get_key_val(r, "thứ tự", "Ngày") or 999.0)
                     }
 
@@ -1533,20 +1638,14 @@ def build_nhanvien_flex():
             continue
             
         c_obj = config_map.get(nganh_clean, {"phanLoai": 1.0, "thuTu": 999.0})
-        sl = parse_number(get_key_val(r, "số lượng", "quantity", default=0.0))
-        dt = parse_number(get_key_val(r, "doanh thu", default=0.0))
-        is_sl = True
-        thuc_hien_store = sl
-        if dt > 0:
-            if sl == 0:
-                is_sl = False
-                thuc_hien_store = dt
-            else:
-                ty_le_dt = abs((dt / tg) - 1.0)
-                ty_le_sl = abs((sl / tg) - 1.0)
-                if ty_le_dt < ty_le_sl:
-                    is_sl = False
-                    thuc_hien_store = dt
+        sl = parse_number(get_key_val(r, "số lượng", "quantity", "sl", default=0.0))
+        dt = max(
+            parse_number(get_key_val(r, "doanh thu quy đổi", "revenue_kfactor", default=0.0)),
+            parse_number(get_key_val(r, "doanh thu", "revenue", default=0.0))
+        )
+        comp_type = get_key_val(r, "competitiontype", "competitionType", "phân loại", "loại", default=None)
+        is_sl = determine_is_sl(comp_type, nganh_clean, sl=sl, dt=dt, tg=tg, config_obj=c_obj)
+        thuc_hien_store = sl if is_sl else dt
 
         active_categories.append({
             "nganhHang": nganh_str,
@@ -1823,78 +1922,95 @@ def build_realtime_flex():
 
     bi_map = {x["name"].lower().strip(): x["dt"] for x in parsed_rt_bi}
     
-    thi_dua_luy_ke = {}
-    for r in td_rows:
-        nganh = get_key_val(r, "maingroupname", "main group name", "nhóm ngành hàng", default=None)
-        if not nganh or str(nganh).strip().upper() == "N/A":
-            continue
-        nganh_clean = str(nganh).lower().strip()
-        tg = parse_number(get_key_val(r, "target", "mục tiêu", default=0.0))
-        sl = parse_number(get_key_val(r, "số lượng", default=0.0))
-        dt = parse_number(get_key_val(r, "doanh thu", default=0.0))
-        
-        is_dt = False
-        if nganh_clean == "điện tử tcl" or tg > 150.0:
-            is_dt = True
-        elif dt > 0 and (sl == 0 or abs((dt / tg) - 1) < abs((sl / tg) - 1)):
-            is_dt = True
-            
-        actual = dt if is_dt else sl
-        mt_ngay = max(0.0, (tg - actual) / days_remaining) if days_remaining > 0 else 0.0
-        thi_dua_luy_ke[nganh_clean] = {
-            "mt_ngay": mt_ngay,
-            "is_dt": is_dt,
-            "target_thang": tg,
-            "lk_thuc_hien": actual
-        }
-
     config_map = {}
     for c in config_rows:
         ten = get_key_val(c, "ngành hàng", "nhóm ngành hàng", default=None)
         phan_loai = parse_number(get_key_val(c, "phân loại", "loại", default=0.0))
+        is_sl_cfg = parse_is_sl(get_key_val(c, "isSL", "issl", "đơn vị", "donvi", "loại chỉ tiêu", default=None))
         if ten:
-            config_map[str(ten).lower().strip()] = phan_loai
+            clean_ten = str(ten).lower().strip()
+            config_map[clean_ten] = {
+                "phanLoai": phan_loai,
+                "isSL": is_sl_cfg,
+                "thuTu": parse_number(get_key_val(c, "thứ tự", "Ngày", default=999.0))
+            }
+
+    thi_dua_luy_ke = {}
+    for r in td_rows:
+        nganh = get_key_val(r, "maingroupname", "main group name", "nhóm ngành hàng", "nhóm ngành hàng chính", "programname", default=None)
+        if not nganh or str(nganh).strip().upper() == "N/A":
+            continue
+        nganh_clean = str(nganh).lower().strip()
+        c_obj = config_map.get(nganh_clean) or config_map.get(re.sub(r'^nnh\s+', '', nganh_clean)) or {}
+        
+        tg = parse_number(get_key_val(r, "target", "target (qđ)", "mục tiêu", "kế hoạch", default=0.0))
+        sl = parse_number(get_key_val(r, "số lượng", "quantity", "sl", default=0.0))
+        dt = max(
+            parse_number(get_key_val(r, "doanh thu quy đổi", "revenue_kfactor", default=0.0)),
+            parse_number(get_key_val(r, "doanh thu", "revenue", default=0.0))
+        )
+        
+        comp_type = get_key_val(r, "competitiontype", "competitionType", "phân loại", "loại", default=None)
+        is_sl = determine_is_sl(comp_type, nganh_clean, sl=sl, dt=dt, tg=tg, config_obj=c_obj)
+        
+        actual = sl if is_sl else dt
+        mt_ngay = max(0.0, (tg - actual) / days_remaining) if days_remaining > 0 else 0.0
+        thi_dua_luy_ke[nganh_clean] = {
+            "mt_ngay": mt_ngay,
+            "is_sl": is_sl,
+            "is_dt": not is_sl,
+            "target_thang": tg,
+            "lk_thuc_hien": actual
+        }
 
     parsed_td = []
     rt_cntVD = 0
     for r in rt_td_rows:
-        nganh = get_key_val(r, "maingroupname", "main group name", "nhóm ngành hàng", default=None)
+        nganh = get_key_val(r, "maingroupname", "main group name", "nhóm ngành hàng", "nhóm ngành hàng chính", "programname", default=None)
         if not nganh or str(nganh).strip().upper() == "N/A":
             continue
         nganh_clean = str(nganh).lower().strip()
-        if config_map and config_map.get(nganh_clean, 0.0) == 0.0:
+        c_obj = config_map.get(nganh_clean) or config_map.get(re.sub(r'^nnh\s+', '', nganh_clean)) or {}
+        if config_map and c_obj.get("phanLoai") == 0.0:
             continue
             
-        lk_info = thi_dua_luy_ke.get(nganh_clean, {"mt_ngay": 0.0, "is_dt": False, "target_thang": 0.0, "lk_thuc_hien": 0.0})
+        lk_info = thi_dua_luy_ke.get(nganh_clean, {"mt_ngay": 0.0, "is_sl": False, "is_dt": True, "target_thang": 0.0, "lk_thuc_hien": 0.0})
         
-        rt_dt = max(bi_map.get(nganh_clean, 0.0), parse_number(get_key_val(r, "revenue_RT")), parse_number(get_key_val(r, "revenue_KFactor_RT")), parse_number(get_key_val(r, "doanh thu")))
-        rt_sl = max(parse_number(get_key_val(r, "quantity_RT")), parse_number(get_key_val(r, "quantity_KFactor")), parse_number(get_key_val(r, "số lượng")))
-        target_day = parse_number(get_key_val(r, "target_Day"))
+        rt_dt = max(
+            bi_map.get(nganh_clean, 0.0),
+            parse_number(get_key_val(r, "revenue_RT", "revenue_rt", default=0.0)),
+            parse_number(get_key_val(r, "revenue_KFactor_RT", "revenue_kfactor_rt", default=0.0)),
+            parse_number(get_key_val(r, "doanh thu", "revenue", default=0.0))
+        )
+        rt_sl = max(
+            parse_number(get_key_val(r, "quantity_RT", "quantity_rt", default=0.0)),
+            parse_number(get_key_val(r, "quantity_KFactor", "quantity_kfactor", default=0.0)),
+            parse_number(get_key_val(r, "số lượng", "quantity", default=0.0))
+        )
+        target_day = parse_number(get_key_val(r, "target_Day", "target_day", "mục tiêu ngày", default=0.0))
+        target_effective = target_day if target_day > 0 else lk_info["mt_ngay"]
         
-        if not lk_info["is_dt"]:
-            if target_day > 0:
-                devDT = abs((rt_dt / target_day) - 1) if rt_dt > 0 else 1.0
-                devSL = abs((rt_sl / target_day) - 1) if rt_sl > 0 else 1.0
-                if rt_dt > 0 and (rt_sl == 0 or devDT < devSL):
-                    lk_info["is_dt"] = True
-            elif rt_dt > 0 and rt_sl == 0:
-                lk_info["is_dt"] = True
+        comp_type_rt = get_key_val(r, "competitiontype", "competitionType", "phân loại", "loại", default=None)
+        is_sl_rt = lk_info.get("is_sl")
+        if is_sl_rt is None:
+            is_sl_rt = determine_is_sl(comp_type_rt, nganh_clean, sl=rt_sl, dt=rt_dt, tg=target_effective, config_obj=c_obj)
                 
-        actual = rt_dt if lk_info["is_dt"] else rt_sl
-        ht_target = actual / lk_info["mt_ngay"] if lk_info["mt_ngay"] > 0 else (1.0 if actual > 0 else 0.0)
+        actual = rt_sl if is_sl_rt else rt_dt
+        ht_target = actual / target_effective if target_effective > 0 else (1.0 if actual > 0 else 0.0)
         
         if ht_target >= 1.0:
             rt_cntVD += 1
             
-        con_lai = max(0.0, lk_info["mt_ngay"] - actual)
+        con_lai = max(0.0, target_effective - actual)
         parsed_td.append({
             "name": shorten_name(nganh),
             "actual": actual,
             "con_lai": con_lai,
-            "target": lk_info["mt_ngay"],
+            "target": target_effective,
             "ht": ht_target,
-            "unit": "TR" if lk_info["is_dt"] else "SP",
-            "phan_loai": config_map.get(nganh_clean, 1.0)
+            "unit": "SP" if is_sl_rt else "TR",
+            "is_sl": is_sl_rt,
+            "phan_loai": c_obj.get("phanLoai", 1.0)
         })
         
     td_done = [x for x in parsed_td if x["ht"] >= 1.0 and x["actual"] > 0]
@@ -2302,11 +2418,11 @@ def build_realtime_flex():
             {"type": "separator", "color": "#bbf7d0", "margin": "xs"}
         ]
         for idx, t in enumerate(td_done):
-            unit_tag = "(DT)" if t["unit"] == "TR" else "(SL)"
+            unit_tag = "(SL)" if t.get("is_sl") else "(DT)"
             display_name = f"{t['name']} {unit_tag}"
-            act_str = fmt_num(t['actual'])
-            cl_str = "🏆" if t['con_lai'] <= 0 else fmt_num(t['con_lai'])
-            tg_str = fmt_num(t['target'])
+            act_str = fmt_val_td(t['actual'], t.get('is_sl', False))
+            cl_str = "🏆" if t['con_lai'] <= 0 else fmt_val_td(t['con_lai'], t.get('is_sl', False))
+            tg_str = fmt_val_td(t['target'], t.get('is_sl', False))
             ht_str = f"{t['ht']*100:.0f}%"
 
             name_color = "#dc2626" if t.get("phan_loai") == 2.0 else "#0f172a"
@@ -2335,11 +2451,11 @@ def build_realtime_flex():
             {"type": "separator", "color": "#cbd5e1", "margin": "xs"}
         ]
         for idx, t in enumerate(td_pending):
-            unit_tag = "(DT)" if t["unit"] == "TR" else "(SL)"
+            unit_tag = "(SL)" if t.get("is_sl") else "(DT)"
             display_name = f"{t['name']} {unit_tag}"
-            act_str = fmt_num(t['actual'])
-            cl_str = "🏆" if t['con_lai'] <= 0 else fmt_num(t['con_lai'])
-            tg_str = fmt_num(t['target'])
+            act_str = fmt_val_td(t['actual'], t.get('is_sl', False))
+            cl_str = "🏆" if t['con_lai'] <= 0 else fmt_val_td(t['con_lai'], t.get('is_sl', False))
+            tg_str = fmt_val_td(t['target'], t.get('is_sl', False))
             ht_str = f"{t['ht']*100:.0f}%"
 
             name_color = "#dc2626" if t.get("phan_loai") == 2.0 else "#0f172a"
@@ -2366,7 +2482,7 @@ def build_realtime_flex():
         col2_items = []
         for idx, t in enumerate(td_zero):
             name_color = "#dc2626" if t.get("phan_loai") == 2.0 else "#475569"
-            mt_val = fmt_num(t["target"])
+            mt_val = fmt_val_td(t["target"], t.get("is_sl", False))
             item_text = f"• {t['name']} ({mt_val})"
             item_dict = {"type": "text", "text": item_text, "size": "xxs", "color": name_color, "wrap": True}
             if idx % 2 == 0:
