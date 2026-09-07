@@ -244,23 +244,6 @@ def get_color_class(pct):
     else:
         return "#dc2626" # Red
 
-def get_cat_icon(cat_name):
-    if not cat_name:
-        return "🔹"
-    c = str(cat_name).lower()
-    if any(k in c for k in ["điện tử", "tivi", "loa", "dàn", "âm thanh"]): return "📺"
-    if any(k in c for k in ["điện lạnh", "tủ lạnh", "máy giặt", "máy lạnh", "điều hòa"]): return "❄️"
-    if any(k in c for k in ["gia dụng", "nồi", "quạt", "bếp", "ấm", "chảo"]): return "🍳"
-    if any(k in c for k in ["viễn thông", "điện thoại", "smartphone", "iphone", "samsung"]): return "📱"
-    if any(k in c for k in ["it", "laptop", "máy tính", "màn hình"]): return "💻"
-    if any(k in c for k in ["phụ kiện", "tai nghe", "sạc", "cáp"]): return "🎧"
-    if any(k in c for k in ["máy cũ", "đổi trả"]): return "📦"
-    if any(k in c for k in ["dịch vụ", "bảo hiểm", "sim"]): return "🛡️"
-    if any(k in c for k in ["xe", "xe đạp", "xe máy"]): return "🚲"
-    if any(k in c for k in ["lọc nước", "máy lọc"]): return "💧"
-    return "🔹"
-
-
 def make_thidua_progress_row(idx, name, con_lai_str, ht, unit, mt_ngay_str=None):
     ht_pct = round(ht * 100)
     color = get_color_class(ht)
@@ -1822,7 +1805,7 @@ def build_nhanvien_flex():
     return all_bubbles
 
 def build_realtime_flex():
-    data = get_dashboard_data("Data_BI,Data_ThiDua,Config_ThiDua,Data_Realtime_BI,Data_Realtime_ThiDua,Data_Realtime_NV,Data_Realtime_NV_NganhHang")
+    data = get_dashboard_data("Data_BI,Data_ThiDua,Config_ThiDua,Data_Realtime_BI,Data_Realtime_ThiDua,Data_Realtime_NV")
     config_rows = data.get("Config_ThiDua", [])
     bi_rows = data.get("Data_BI", [])
     rt_rows = data.get("Data_Realtime_BI", [])
@@ -2258,55 +2241,9 @@ def build_realtime_flex():
             
             ht_nv = (dt_nv / target_nv) if target_nv > 0 else (1.0 if dt_nv > 0 else 0.0)
             
-            parsed_nv_rt.append({"name": disp_name, "sl": sl_nv, "dt": dt_nv, "target": target_nv, "ht": ht_nv, "ma_nv": m_nv})
+            parsed_nv_rt.append({"name": disp_name, "sl": sl_nv, "dt": dt_nv, "target": target_nv, "ht": ht_nv})
         
         parsed_nv_rt.sort(key=lambda x: x["dt"], reverse=True)
-
-        # Parse chi tiết ngành hàng của từng nhân viên (Data_Realtime_NV_NganhHang)
-        data_rt_nv_nh = data.get("Data_Realtime_NV_NganhHang", [])
-        staff_nh_map = {}
-        if data_rt_nv_nh and isinstance(data_rt_nv_nh, list):
-            for row in data_rt_nv_nh:
-                raw_sname = str(get_key_val(row, "STOREGROUPNAME", "mã nv", "ma_nv", "user", "rowcode", default="")).strip()
-                if not raw_sname or "online" in raw_sname.lower() or "18001060" in raw_sname:
-                    continue
-                m_nh = raw_sname.split(" - ")[0].strip() if " - " in raw_sname else raw_sname
-                nh_group = str(get_key_val(row, "SALEGROUPNAME", "ngành hàng", "nganh_hang", "nhóm hàng", default="")).strip()
-                if not nh_group:
-                    continue
-                
-                if "REVENUEINSTALLMENT" in row or "REVENUEOFFLINE" in row:
-                    r_coll = parse_number(row.get("REVENUECOLLECTION", 0))
-                    r_on = parse_number(row.get("REVENUEONLINE", 0))
-                    r_off = parse_number(row.get("REVENUEOFFLINE", 0))
-                    r_inst = parse_number(row.get("REVENUEINSTALLMENT", 0))
-                    r_ret = parse_number(row.get("REVENUERETURN", 0))
-                    raw_rev = (r_coll + r_on + r_off + r_inst - r_ret)
-                    
-                    q_coll = parse_number(row.get("QUANTITYCOLLECTION", 0))
-                    q_on = parse_number(row.get("QUANTITYONLINE", 0))
-                    q_off = parse_number(row.get("QUANTITYOFFLINE", 0))
-                    q_inst = parse_number(row.get("QUANTITYINSTALLMENT", 0))
-                    q_ret = parse_number(row.get("QUANTITYRETURN", 0))
-                    qty = (q_coll + q_on + q_off + q_inst - q_ret)
-                else:
-                    raw_rev = parse_number(get_key_val(row, "doanh thu thực", "doanh thu", "dt thực", "revenue", default=0))
-                    qty = parse_number(get_key_val(row, "số lượng", "soluong", "quantity", default=0))
-                
-                if abs(raw_rev) >= 1000000:
-                    rev_tr = raw_rev / 1000000.0
-                else:
-                    rev_tr = raw_rev
-                
-                if rev_tr <= 0 and qty <= 0:
-                    continue
-                    
-                if m_nh not in staff_nh_map:
-                    staff_nh_map[m_nh] = []
-                staff_nh_map[m_nh].append({"group": nh_group, "sl": qty, "dt": rev_tr})
-
-            for m_nh in staff_nh_map:
-                staff_nh_map[m_nh].sort(key=lambda x: x["dt"], reverse=True)
 
         if parsed_nv_rt:
             nv_card_contents = [
@@ -2348,65 +2285,6 @@ def build_realtime_flex():
                     get_color_class(item["ht"])
                 ]
                 nv_card_contents.append(make_table_row(row_vals, nv_weights, nv_aligns, row_colors, bold=(idx < 3)))
-                
-                # Tích hợp chi tiết ngành hàng của nhân viên (nếu có)
-                emp_code = item.get("ma_nv", "")
-                emp_cats = staff_nh_map.get(emp_code, [])
-                if emp_cats:
-                    cat_lines = []
-                    for c in emp_cats:
-                        icon = get_cat_icon(c["group"])
-                        c_name = c["group"]
-                        c_sl = fmt_num(c["sl"])
-                        c_dt = f"{c['dt']:.1f}"
-                        cat_lines.append({
-                            "type": "box",
-                            "layout": "horizontal",
-                            "paddingStart": "sm",
-                            "paddingEnd": "xs",
-                            "margin": "xs",
-                            "contents": [
-                                {
-                                    "type": "text", 
-                                    "text": f"↳ {icon} {c_name}", 
-                                    "size": "xxs", 
-                                    "color": "#475569", 
-                                    "flex": 4, 
-                                    "wrap": False
-                                },
-                                {
-                                    "type": "text", 
-                                    "text": f"{c_sl} SP", 
-                                    "size": "xxs", 
-                                    "color": "#64748b", 
-                                    "flex": 1, 
-                                    "align": "center"
-                                },
-                                {
-                                    "type": "text", 
-                                    "text": f"{c_dt} Tr", 
-                                    "size": "xxs", 
-                                    "color": "#0284c7", 
-                                    "weight": "bold", 
-                                    "flex": 2, 
-                                    "align": "end"
-                                }
-                            ]
-                        })
-                    
-                    sub_box = {
-                        "type": "box",
-                        "layout": "vertical",
-                        "backgroundColor": "#f8fafc",
-                        "borderColor": "#e2e8f0",
-                        "borderWidth": "1px",
-                        "cornerRadius": "sm",
-                        "paddingAll": "xs",
-                        "margin": "xs",
-                        "contents": cat_lines
-                    }
-                    nv_card_contents.append(sub_box)
-
                 if idx < len(parsed_nv_rt) - 1:
                     nv_card_contents.append({"type": "separator", "color": "#f1f5f9", "margin": "xs"})
 
