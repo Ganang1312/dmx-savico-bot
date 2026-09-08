@@ -1181,17 +1181,30 @@ def handle_message(event):
             
         try:
             if isinstance(flex_msg, list) and len(flex_msg) >= 3:
-                # LINE giới hạn 1 carousel tối đa 50KB.
-                # Khi có 3 thẻ lớn (~73KB), tách thành 2 tin nhắn trong 1 lượt reply:
-                # Msg 1: Carousel 2 thẻ Doanh thu P.1 & Thi đua P.2 (~39KB < 50KB)
-                # Msg 2: Thẻ chuyên sâu Chi tiết Doanh thu Nhân viên (~34KB < 50KB)
-                carousel_rt = {"type": "carousel", "contents": [flex_msg[0], flex_msg[2]]}
-                msg1 = FlexSendMessage(alt_text="⚡ BÁO CÁO REALTIME (Doanh Thu & Thi Đua)", contents=carousel_rt)
-                msg2 = FlexSendMessage(alt_text="👑 CHI TIẾT DOANH THU NHÂN VIÊN", contents=flex_msg[1])
-                line_bot_api.reply_message(event.reply_token, [msg1, msg2])
-            elif isinstance(flex_msg, list):
+                # LINE giới hạn 1 carousel tối đa 50KB, 1 bubble tối đa 30KB.
+                # Gom 2 thẻ Siêu Thị (Doanh thu P.1 & Thi đua P.2) vào 1 Carousel (~39KB < 50KB)
+                carousel_rt = {"type": "carousel", "contents": [flex_msg[0], flex_msg[1]]}
+                carousel_size = len(json.dumps(carousel_rt, ensure_ascii=False).encode('utf-8'))
+                
+                msg_list = []
+                if carousel_size <= 45000:
+                    msg_list.append(FlexSendMessage(alt_text="⚡ BÁO CÁO REALTIME (Doanh Thu & Thi Đua)", contents=carousel_rt))
+                else:
+                    msg_list.append(FlexSendMessage(alt_text="⚡ BÁO CÁO REALTIME (Doanh Thu & Tiến Độ)", contents=flex_msg[0]))
+                    msg_list.append(FlexSendMessage(alt_text="⚡ BÁO CÁO REALTIME (Nhóm Hàng Thi Đua)", contents=flex_msg[1]))
+
+                # Các thẻ Chi tiết Doanh thu Nhân viên (Thẻ 3, Thẻ 4...) gửi độc lập dưới dạng bubble (< 24KB < 30KB)
+                nv_bubbles = flex_msg[2:]
+                for idx_nv, b in enumerate(nv_bubbles):
+                    part_tag = f" (P.{idx_nv+1})" if len(nv_bubbles) > 1 else ""
+                    msg_list.append(FlexSendMessage(alt_text=f"👑 CHI TIẾT DOANH THU NHÂN VIÊN{part_tag}", contents=b))
+                    
+                line_bot_api.reply_message(event.reply_token, msg_list)
+            elif isinstance(flex_msg, list) and len(flex_msg) > 1:
                 carousel_content = {"type": "carousel", "contents": flex_msg}
                 line_bot_api.reply_message(event.reply_token, FlexSendMessage(alt_text="⚡ BÁO CÁO REALTIME", contents=carousel_content))
+            elif isinstance(flex_msg, list) and len(flex_msg) == 1:
+                line_bot_api.reply_message(event.reply_token, FlexSendMessage(alt_text="⚡ Báo Cáo Realtime Hôm Nay", contents=flex_msg[0]))
             else:
                 line_bot_api.reply_message(event.reply_token, FlexSendMessage(alt_text="⚡ Báo Cáo Realtime Hôm Nay", contents=flex_msg))
         except Exception as e:
@@ -1245,10 +1258,22 @@ def handle_message(event):
                         else:
                             flex_msg = build_realtime_flex()
                             if isinstance(flex_msg, list) and len(flex_msg) >= 3:
-                                carousel_rt = {"type": "carousel", "contents": [flex_msg[0], flex_msg[2]]}
-                                msg1 = FlexSendMessage(alt_text="⚡ BÁO CÁO REALTIME (Doanh Thu & Thi Đua)", contents=carousel_rt)
-                                msg2 = FlexSendMessage(alt_text="👑 CHI TIẾT DOANH THU NHÂN VIÊN", contents=flex_msg[1])
-                                line_bot_api.push_message(dest_id, [msg1, msg2])
+                                carousel_rt = {"type": "carousel", "contents": [flex_msg[0], flex_msg[1]]}
+                                carousel_size = len(json.dumps(carousel_rt, ensure_ascii=False).encode('utf-8'))
+                                
+                                msg_list = []
+                                if carousel_size <= 45000:
+                                    msg_list.append(FlexSendMessage(alt_text="⚡ BÁO CÁO REALTIME (Doanh Thu & Thi Đua)", contents=carousel_rt))
+                                else:
+                                    msg_list.append(FlexSendMessage(alt_text="⚡ BÁO CÁO REALTIME (Doanh Thu & Tiến Độ)", contents=flex_msg[0]))
+                                    msg_list.append(FlexSendMessage(alt_text="⚡ BÁO CÁO REALTIME (Nhóm Hàng Thi Đua)", contents=flex_msg[1]))
+
+                                nv_bubbles = flex_msg[2:]
+                                for idx_nv, b in enumerate(nv_bubbles):
+                                    part_tag = f" (P.{idx_nv+1})" if len(nv_bubbles) > 1 else ""
+                                    msg_list.append(FlexSendMessage(alt_text=f"👑 CHI TIẾT DOANH THU NHÂN VIÊN{part_tag}", contents=b))
+                                    
+                                line_bot_api.push_message(dest_id, msg_list)
                             elif isinstance(flex_msg, list) and len(flex_msg) > 1:
                                 carousel_content = {"type": "carousel", "contents": flex_msg}
                                 line_bot_api.push_message(dest_id, FlexSendMessage(alt_text="⚡ BÁO CÁO REALTIME", contents=carousel_content))

@@ -1,3 +1,4 @@
+import json
 import pytz
 import re
 from datetime import datetime
@@ -2592,45 +2593,8 @@ def build_realtime_flex():
                 if clean_sname:
                     staff_detail_map.setdefault(clean_sname, []).append(d_item)
 
-    body_contents_nv = []
-    
-    # Sub-overview banner
-    body_contents_nv.append({
-        "type": "box",
-        "layout": "vertical",
-        "backgroundColor": "#fff7ed",
-        "borderColor": "#fed7aa",
-        "borderWidth": "1px",
-        "cornerRadius": "md",
-        "paddingAll": "sm",
-        "margin": "xs",
-        "contents": [
-            {
-                "type": "text",
-                "text": f"👑 Chi tiết ngành hàng thực bán của từng nhân viên ({len(parsed_nv_rt)} nhân sự có số hôm nay):",
-                "size": "xxs",
-                "color": "#c2410c",
-                "weight": "bold",
-                "wrap": True
-            }
-        ]
-    })
-
-    if not parsed_nv_rt:
-        body_contents_nv.append({
-            "type": "box",
-            "layout": "vertical",
-            "backgroundColor": "#f8fafc",
-            "borderColor": "#e2e8f0",
-            "borderWidth": "1px",
-            "cornerRadius": "md",
-            "paddingAll": "md",
-            "margin": "md",
-            "contents": [
-                {"type": "text", "text": "Chưa có nhân viên phát sinh doanh thu trong ngày.", "size": "xs", "color": "#64748b", "align": "center"}
-            ]
-        })
-    else:
+    staff_cards_list = []
+    if parsed_nv_rt:
         rank_styles = [
             {"badge": "🥇 TOP 1", "badge_bg": "#fef3c7", "badge_color": "#b45309", "card_border": "#f97316", "header_bg": "#fff7ed", "bar_color": "#0d9488"},
             {"badge": "🥈 TOP 2", "badge_bg": "#e0f2fe", "badge_color": "#0369a1", "card_border": "#0284c7", "header_bg": "#f0f9ff", "bar_color": "#10b981"},
@@ -2826,31 +2790,127 @@ def build_realtime_flex():
                     }
                 ]
             }
-            body_contents_nv.append(staff_card)
+            staff_cards_list.append(staff_card)
 
-    flex_bubble_rt_nv = {
-        "type": "bubble",
-        "size": "mega",
-        "header": {
-            "type": "box",
-            "layout": "vertical",
-            "backgroundColor": "#ea580c",
-            "paddingAll": "md",
-            "contents": [
-                {"type": "text", "text": "👑 CHI TIẾT DOANH THU NHÂN VIÊN\n(THỰC BÁN THEO NGÀNH HÀNG)", "weight": "bold", "size": "sm", "color": "#ffffff", "align": "center", "wrap": True},
-                {"type": "text", "text": f"🕒 Cập nhật: {now_str} • {len(parsed_nv_rt)} Nhân sự có số", "size": "xxs", "color": "#ffedd5", "align": "center", "margin": "xs"}
-            ]
-        },
-        "body": {
-            "type": "box",
-            "layout": "vertical",
-            "backgroundColor": "#f1f5f9",
-            "paddingAll": "sm",
-            "contents": body_contents_nv
+    flex_bubbles_rt_nv = []
+    if not staff_cards_list:
+        empty_bubble = {
+            "type": "bubble",
+            "size": "mega",
+            "header": {
+                "type": "box",
+                "layout": "vertical",
+                "backgroundColor": "#ea580c",
+                "paddingAll": "md",
+                "contents": [
+                    {"type": "text", "text": "👑 CHI TIẾT DOANH THU NHÂN VIÊN\n(THỰC BÁN THEO NGÀNH HÀNG)", "weight": "bold", "size": "sm", "color": "#ffffff", "align": "center", "wrap": True},
+                    {"type": "text", "text": f"🕒 Cập nhật: {now_str} • 0 Nhân sự có số", "size": "xxs", "color": "#ffedd5", "align": "center", "margin": "xs"}
+                ]
+            },
+            "body": {
+                "type": "box",
+                "layout": "vertical",
+                "backgroundColor": "#f1f5f9",
+                "paddingAll": "md",
+                "contents": [
+                    {
+                        "type": "box",
+                        "layout": "vertical",
+                        "backgroundColor": "#ffffff",
+                        "borderColor": "#e2e8f0",
+                        "borderWidth": "1px",
+                        "cornerRadius": "md",
+                        "paddingAll": "md",
+                        "contents": [
+                            {"type": "text", "text": "Chưa có nhân viên phát sinh doanh thu trong ngày.", "size": "xs", "color": "#64748b", "align": "center"}
+                        ]
+                    }
+                ]
+            }
         }
-    }
+        flex_bubbles_rt_nv.append(empty_bubble)
+    else:
+        # Tách thành các thẻ nhỏ thông minh (tối đa 5 nhân sự/thẻ hoặc khi dung lượng chạm 23KB)
+        # Giúp chia chuẩn: Thẻ 3 (Top 1 - 5: ~22KB) và Thẻ 4 (Top 6 - 9: ~15KB)
+        # Hoàn toàn miễn nhiễm với lỗi 30KB của LINE!
+        chunks = []
+        cur_chunk = []
+        cur_estimated_bytes = 1200
+        for sc in staff_cards_list:
+            sc_bytes = len(json.dumps(sc, ensure_ascii=False).encode('utf-8'))
+            if cur_chunk and (len(cur_chunk) >= 5 or cur_estimated_bytes + sc_bytes > 23000):
+                chunks.append(cur_chunk)
+                cur_chunk = [sc]
+                cur_estimated_bytes = 1200 + sc_bytes
+            else:
+                cur_chunk.append(sc)
+                cur_estimated_bytes += sc_bytes
+        if cur_chunk:
+            chunks.append(cur_chunk)
 
-    return [flex_bubble_rt1, flex_bubble_rt_nv, flex_bubble_rt2]
+        total_chunks = len(chunks)
+        accum_count = 0
+        for c_idx, chk in enumerate(chunks):
+            start_rank = accum_count + 1
+            end_rank = accum_count + len(chk)
+            accum_count += len(chk)
+            
+            if total_chunks > 1:
+                part_title = f" (P.{c_idx+1}/{total_chunks})"
+                hdr_sub = f"🕒 Cập nhật: {now_str} • Top {start_rank} - {end_rank} ({len(chk)}/{len(staff_cards_list)} NV)"
+                banner_txt = f"👑 Chi tiết ngành hàng thực bán (Top {start_rank} - {end_rank} trên {len(staff_cards_list)} NV có số hôm nay):"
+            else:
+                part_title = ""
+                hdr_sub = f"🕒 Cập nhật: {now_str} • {len(staff_cards_list)} Nhân sự có số"
+                banner_txt = f"👑 Chi tiết ngành hàng thực bán của từng nhân viên ({len(staff_cards_list)} nhân sự có số hôm nay):"
+
+            b_contents = [
+                {
+                    "type": "box",
+                    "layout": "vertical",
+                    "backgroundColor": "#fff7ed",
+                    "borderColor": "#fed7aa",
+                    "borderWidth": "1px",
+                    "cornerRadius": "md",
+                    "paddingAll": "sm",
+                    "margin": "xs",
+                    "contents": [
+                        {
+                            "type": "text",
+                            "text": banner_txt,
+                            "size": "xxs",
+                            "color": "#c2410c",
+                            "weight": "bold",
+                            "wrap": True
+                        }
+                    ]
+                }
+            ] + chk
+
+            bubble_nv = {
+                "type": "bubble",
+                "size": "mega",
+                "header": {
+                    "type": "box",
+                    "layout": "vertical",
+                    "backgroundColor": "#ea580c",
+                    "paddingAll": "md",
+                    "contents": [
+                        {"type": "text", "text": f"👑 CHI TIẾT DOANH THU NHÂN VIÊN{part_title}\n(THỰC BÁN THEO NGÀNH HÀNG)", "weight": "bold", "size": "sm", "color": "#ffffff", "align": "center", "wrap": True},
+                        {"type": "text", "text": hdr_sub, "size": "xxs", "color": "#ffedd5", "align": "center", "margin": "xs"}
+                    ]
+                },
+                "body": {
+                    "type": "box",
+                    "layout": "vertical",
+                    "backgroundColor": "#f1f5f9",
+                    "paddingAll": "sm",
+                    "contents": b_contents
+                }
+            }
+            flex_bubbles_rt_nv.append(bubble_nv)
+
+    return [flex_bubble_rt1, flex_bubble_rt2] + flex_bubbles_rt_nv
 
 def build_help_commands_flex():
     """
