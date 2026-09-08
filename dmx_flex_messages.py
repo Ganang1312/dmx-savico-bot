@@ -2610,18 +2610,22 @@ def build_realtime_flex():
                 "bar_color": "#f59e0b" if item["ht"] >= 0.5 else "#ef4444"
             }
 
-            # Còn lại
+            # Còn lại & tiến độ
             con_lai = item["target"] - item["dt"]
             if con_lai <= 0 and item["target"] > 0:
-                con_lai_str = "Đạt"
-                con_color = "#15803d"
+                con_lai_text = "Đã đạt mục tiêu"
+                con_color = "#16a34a"
+            elif item["target"] <= 0:
+                con_lai_text = "Chưa có MT"
+                con_color = "#94a3b8"
             else:
-                con_lai_str = f"{max(0, con_lai):.1f} Tr".replace(".", ",")
+                con_lai_text = f"Còn: {max(0, con_lai):.1f} Tr".replace(".", ",")
                 con_color = "#ef4444"
 
             dt_str = f"{item['dt']:.1f}".replace(".", ",")
             tg_str = f"{item['target']:.1f}".replace(".", ",")
             ht_pct_str = f"{item['ht']*100:.1f}%".replace(".", ",")
+            ht_color = "#16a34a" if item["ht"] >= 1.0 else "#ea580c"
 
             # Chi tiết ngành hàng của nhân viên này
             staff_details = staff_detail_map.get(item["ma_nv"]) or staff_detail_map.get(item.get("clean_name_lower", "")) or []
@@ -2646,7 +2650,6 @@ def build_realtime_flex():
             item_rows = []
             if detail_list:
                 for cat_idx, cat in enumerate(detail_list):
-                    c_emoji = get_cat_emoji(cat["nganh_hang"])
                     item_rows.append({
                         "type": "box",
                         "layout": "horizontal",
@@ -2654,7 +2657,7 @@ def build_realtime_flex():
                         "paddingTop": "xs",
                         "paddingBottom": "xs",
                         "contents": [
-                            {"type": "text", "text": f"{c_emoji} {cat['nganh_hang']}", "size": "xs", "color": "#1e293b", "flex": 5, "wrap": True},
+                            {"type": "text", "text": cat["nganh_hang"], "size": "xs", "color": "#1e293b", "flex": 5, "wrap": True},
                             {
                                 "type": "box",
                                 "layout": "vertical",
@@ -2678,7 +2681,7 @@ def build_realtime_flex():
                     "layout": "horizontal",
                     "paddingAll": "xs",
                     "contents": [
-                        {"type": "text", "text": "ℹ️ Chưa có phát sinh chi tiết ngành hàng thực bán", "size": "xxs", "color": "#94a3b8", "align": "center", "flex": 1}
+                        {"type": "text", "text": "Chưa có phát sinh chi tiết ngành hàng thực bán", "size": "xxs", "color": "#94a3b8", "align": "center", "flex": 1}
                     ]
                 })
 
@@ -2723,46 +2726,37 @@ def build_realtime_flex():
                                     {"type": "text", "text": f"{dt_str} Tr", "size": "sm", "weight": "bold", "color": "#0284c7", "align": "end", "flex": 0}
                                 ]
                             },
-                            # Hàng 2: Mục tiêu, Còn lại, % Đạt
+                            # Hàng 2: Mục tiêu, Còn lại, % Đạt (tránh trùng lặp, không lặp lại số DT và %)
                             {
                                 "type": "box",
                                 "layout": "horizontal",
                                 "margin": "xs",
                                 "alignItems": "center",
                                 "contents": [
-                                    {"type": "text", "text": f"🎯 MT: {dt_str}/{tg_str} Tr", "size": "xxs", "color": "#0284c7", "flex": 4},
-                                    {"type": "text", "text": f"⏳ {con_lai_str}", "size": "xxs", "color": con_color, "weight": "bold" if con_lai <= 0 else "regular", "flex": 3},
-                                    {"type": "text", "text": f"🔥 {ht_pct_str}", "size": "xxs", "weight": "bold", "color": "#ea580c", "align": "end", "flex": 3}
+                                    {"type": "text", "text": f"Mục tiêu: {tg_str} Tr", "size": "xxs", "color": "#64748b", "flex": 0},
+                                    {"type": "text", "text": "•", "size": "xxs", "color": "#cbd5e1", "margin": "xs", "flex": 0},
+                                    {"type": "text", "text": con_lai_text, "size": "xxs", "color": con_color, "weight": "bold" if con_lai <= 0 else "regular", "margin": "xs", "flex": 1},
+                                    {"type": "text", "text": ht_pct_str, "size": "xs", "weight": "bold", "color": ht_color, "align": "end", "flex": 0}
                                 ]
                             },
-                            # Hàng 3: Thanh tiến độ trực quan
+                            # Hàng 3: Thanh tiến độ trực quan full-width (bỏ % trùng lặp ở đuôi thanh)
                             {
                                 "type": "box",
-                                "layout": "horizontal",
+                                "layout": "vertical",
                                 "margin": "xs",
-                                "alignItems": "center",
-                                "spacing": "xs",
+                                "height": "5px",
+                                "backgroundColor": "#e2e8f0",
+                                "cornerRadius": "sm",
                                 "contents": [
                                     {
                                         "type": "box",
                                         "layout": "vertical",
-                                        "flex": 1,
                                         "height": "5px",
-                                        "backgroundColor": "#e2e8f0",
+                                        "backgroundColor": st["bar_color"],
                                         "cornerRadius": "sm",
-                                        "contents": [
-                                            {
-                                                "type": "box",
-                                                "layout": "vertical",
-                                                "height": "5px",
-                                                "backgroundColor": st["bar_color"],
-                                                "cornerRadius": "sm",
-                                                "width": f"{min(100, max(3, round(item['ht'] * 100)))}%",
-                                                "contents": [{"type": "filler"}]
-                                            }
-                                        ]
-                                    },
-                                    {"type": "text", "text": f"{min(100, round(item['ht'] * 100))}%", "size": "xxs", "color": "#64748b", "align": "end", "flex": 0}
+                                        "width": f"{min(100, max(3, round(item['ht'] * 100)))}%",
+                                        "contents": [{"type": "filler"}]
+                                    }
                                 ]
                             }
                         ]
@@ -2776,13 +2770,13 @@ def build_realtime_flex():
                         "paddingAll": "sm",
                         "contents": item_rows + [
                             {"type": "separator", "color": "#e2e8f0", "margin": "xs"},
-                            # Hàng tóm tắt cuối thẻ nhân viên
+                            # Hàng tóm tắt cuối thẻ nhân viên (bỏ icon)
                             {
                                 "type": "box",
                                 "layout": "horizontal",
                                 "margin": "xs",
                                 "contents": [
-                                    {"type": "text", "text": f"📦 Tổng thực bán: {total_thuc_qty} SP", "size": "xxs", "color": "#64748b", "flex": 1},
+                                    {"type": "text", "text": f"Tổng thực bán: {total_thuc_qty} SP", "size": "xxs", "color": "#64748b", "flex": 1},
                                     {"type": "text", "text": f"{total_thuc_rev:.1f} Tr thực".replace(".", ","), "size": "xxs", "color": "#0284c7", "weight": "bold", "align": "end", "flex": 1}
                                 ]
                             }
