@@ -181,6 +181,25 @@ def is_total_row(row_or_name):
         nh = str(row_or_name).strip().upper()
     return nh in ["TỔNG", "TỔNG CỘNG", "TONG CONG", "TOTAL", "GRAND TOTAL"] or nh.startswith("TỔNG ") or nh.startswith("TOTAL ")
 
+def get_cat_emoji(name):
+    n = str(name).strip().upper()
+    if "QUẠT" in n: return "🎐"
+    if "ĐIỆN TỬ" in n or "TIVI" in n or "SONY" in n: return "📺"
+    if "GIẶT" in n or "SẤY" in n: return "🧺"
+    if "PIN" in n or "SẠC" in n: return "🔋"
+    if "LAPTOP" in n or "IT" in n or "MÁY TÍNH" in n: return "💻"
+    if "TỦ LẠNH" in n or "ĐÔNG" in n or "MÁT" in n: return "🧊"
+    if "LỌC" in n or "NƯỚC" in n or "MLN" in n: return "🚰"
+    if "GIA DỤNG" in n: return "🍳"
+    if "ĐIỆN THOẠI" in n or "SMARTPHONE" in n or "PHONE" in n or "FLAGSHIP" in n: return "📱"
+    if "CAMERA" in n: return "📷"
+    if "MÁY LẠNH" in n or "ĐIỀU HÒA" in n or "LẠNH" in n: return "📦"
+    if "ĐỒNG HỒ" in n or "THỜI TRANG" in n or "WEARABLE" in n: return "📦"
+    if "BẢO HIỂM" in n or "FINANCE" in n or "CREDIT" in n: return "💳"
+    if "SIM" in n: return "📶"
+    if "PHỤ KIỆN" in n: return "🎧"
+    return "📦"
+
 def make_table_header(cols, weights, aligns=None, bg_color="#0284c7"):
     if not aligns:
         aligns = ["start"] * len(cols)
@@ -1805,7 +1824,7 @@ def build_nhanvien_flex():
     return all_bubbles
 
 def build_realtime_flex():
-    data = get_dashboard_data("Data_BI,Data_ThiDua,Config_ThiDua,Data_Realtime_BI,Data_Realtime_ThiDua,Data_Realtime_NV")
+    data = get_dashboard_data("Data_BI,Data_ThiDua,Config_ThiDua,Data_Realtime_BI,Data_Realtime_ThiDua,Data_Realtime_NV,Data_Realtime_NV_NganhHang")
     config_rows = data.get("Config_ThiDua", [])
     bi_rows = data.get("Data_BI", [])
     rt_rows = data.get("Data_Realtime_BI", [])
@@ -2201,8 +2220,8 @@ def build_realtime_flex():
     
     # Employee Revenue Table Container Card (Bảng Thứ Hạng Doanh Thu Nhân Viên - chèn TRƯỚC bảng chi tiết doanh thu hôm nay)
     data_rt_nv = data.get("Data_Realtime_NV", [])
+    parsed_nv_rt = []
     if data_rt_nv and isinstance(data_rt_nv, list) and len(data_rt_nv) > 0:
-        parsed_nv_rt = []
         for row in data_rt_nv:
             m_nv = str(get_key_val(row, "mã nv", "ma_nv", "user", "rowcode", default="")).strip()
             if not m_nv or m_nv.lower() == "online" or m_nv == "18001060":
@@ -2241,7 +2260,15 @@ def build_realtime_flex():
             
             ht_nv = (dt_nv / target_nv) if target_nv > 0 else (1.0 if dt_nv > 0 else 0.0)
             
-            parsed_nv_rt.append({"name": disp_name, "sl": sl_nv, "dt": dt_nv, "target": target_nv, "ht": ht_nv})
+            parsed_nv_rt.append({
+                "ma_nv": m_nv,
+                "clean_name_lower": clean_name.lower().strip() if clean_name else "",
+                "name": disp_name, 
+                "sl": sl_nv, 
+                "dt": dt_nv, 
+                "target": target_nv, 
+                "ht": ht_nv
+            })
         
         parsed_nv_rt.sort(key=lambda x: x["dt"], reverse=True)
 
@@ -2538,7 +2565,286 @@ def build_realtime_flex():
         }
     }
 
-    return [flex_bubble_rt1, flex_bubble_rt2]
+    # =========================================================================
+    # THẺ 2: CHI TIẾT DOANH THU NHÂN VIÊN (THỰC BÁN THEO NGÀNH HÀNG - CHUẨN ẢNH)
+    # =========================================================================
+    data_rt_nv_detail = data.get("Data_Realtime_NV_NganhHang", [])
+    staff_detail_map = {}
+    if data_rt_nv_detail and isinstance(data_rt_nv_detail, list):
+        for row in data_rt_nv_detail:
+            m_id = str(get_key_val(row, "Mã NV", "ma_nv", "user", default="")).strip()
+            store_group = str(get_key_val(row, "STOREGROUPNAME", default="")).strip()
+            if not m_id and store_group:
+                m_match = re.match(r"^(\d+)", store_group)
+                if m_match:
+                    m_id = m_match.group(1)
+            s_name = str(get_key_val(row, "Tên Nhân Viên", "Tên NV", "ten_nv", default="")).strip()
+            nganh_hang = str(get_key_val(row, "Ngành Hàng", "SALEGROUPNAME", "nganh_hang", default="")).strip()
+            sl_detail = parse_number(get_key_val(row, "Số Lượng", "so_luong", default=0))
+            raw_dt_thuc = parse_number(get_key_val(row, "Doanh Thu Thực", "Doanh Thu", "Doanh thu", "doanh_thu_thuc", default=0))
+            dt_thuc = raw_dt_thuc / 1000000.0 if abs(raw_dt_thuc) >= 1000000 else raw_dt_thuc
+            
+            d_item = {"nganh_hang": nganh_hang, "sl": sl_detail, "dt_thuc": dt_thuc}
+            if m_id:
+                staff_detail_map.setdefault(m_id, []).append(d_item)
+            if s_name:
+                clean_sname = re.sub(r"^[0-9\s\-]+", "", s_name).lower().strip()
+                if clean_sname:
+                    staff_detail_map.setdefault(clean_sname, []).append(d_item)
+
+    body_contents_nv = []
+    
+    # Sub-overview banner
+    body_contents_nv.append({
+        "type": "box",
+        "layout": "vertical",
+        "backgroundColor": "#fff7ed",
+        "borderColor": "#fed7aa",
+        "borderWidth": "1px",
+        "cornerRadius": "md",
+        "paddingAll": "sm",
+        "margin": "xs",
+        "contents": [
+            {
+                "type": "text",
+                "text": f"👑 Chi tiết ngành hàng thực bán của từng nhân viên ({len(parsed_nv_rt)} nhân sự có số hôm nay):",
+                "size": "xxs",
+                "color": "#c2410c",
+                "weight": "bold",
+                "wrap": True
+            }
+        ]
+    })
+
+    if not parsed_nv_rt:
+        body_contents_nv.append({
+            "type": "box",
+            "layout": "vertical",
+            "backgroundColor": "#f8fafc",
+            "borderColor": "#e2e8f0",
+            "borderWidth": "1px",
+            "cornerRadius": "md",
+            "paddingAll": "md",
+            "margin": "md",
+            "contents": [
+                {"type": "text", "text": "Chưa có nhân viên phát sinh doanh thu trong ngày.", "size": "xs", "color": "#64748b", "align": "center"}
+            ]
+        })
+    else:
+        rank_icons = ["🥇", "🥈", "🥉"]
+        for idx, item in enumerate(parsed_nv_rt):
+            rank_str = rank_icons[idx] if idx < 3 else f"{idx+1}."
+            
+            # Color & Border styling
+            if idx == 0:
+                card_border = "#fdba74"
+                bar_color = "#0d9488"
+            elif idx == 1:
+                card_border = "#a5f3fc"
+                bar_color = "#10b981"
+            elif idx == 2:
+                card_border = "#bef264"
+                bar_color = "#84cc16"
+            elif item["ht"] >= 0.5:
+                card_border = "#e2e8f0"
+                bar_color = "#f59e0b"
+            else:
+                card_border = "#e2e8f0"
+                bar_color = "#ef4444"
+
+            # Con lai
+            con_lai = item["target"] - item["dt"]
+            if con_lai <= 0 and item["target"] > 0:
+                con_lai_str = "Đạt"
+                con_color = "#059669"
+            else:
+                con_lai_str = f"{max(0, con_lai):.1f}tr".replace(".", ",")
+                con_color = "#ef4444"
+
+            dt_str = f"{item['dt']:.1f}".replace(".", ",")
+            tg_str = f"{item['target']:.1f}".replace(".", ",")
+            ht_pct_str = f"{item['ht']*100:.1f}%".replace(".", ",")
+
+            # Detail rows for this staff
+            staff_details = staff_detail_map.get(item["ma_nv"]) or staff_detail_map.get(item.get("clean_name_lower", "")) or []
+            cat_agg = {}
+            total_thuc_qty = 0
+            total_thuc_rev = 0.0
+            for d in staff_details:
+                nh = d["nganh_hang"] or "Khác"
+                if nh not in cat_agg:
+                    cat_agg[nh] = {"nganh_hang": nh, "sl": 0, "dt_thuc": 0.0}
+                cat_agg[nh]["sl"] += int(d["sl"])
+                cat_agg[nh]["dt_thuc"] += d["dt_thuc"]
+                total_thuc_qty += int(d["sl"])
+                total_thuc_rev += d["dt_thuc"]
+            
+            detail_list = sorted(cat_agg.values(), key=lambda x: x["dt_thuc"], reverse=True)
+            if not detail_list and item["sl"] > 0:
+                total_thuc_qty = int(item["sl"])
+                total_thuc_rev = item["dt"]
+
+            # Detail Table Rows
+            detail_table_rows = [
+                # Table Header
+                {
+                    "type": "box",
+                    "layout": "horizontal",
+                    "backgroundColor": "#f1f5f9",
+                    "paddingAll": "xs",
+                    "cornerRadius": "xs",
+                    "contents": [
+                        {"type": "text", "text": "NHÓM / NGÀNH HÀNG", "size": "xxs", "color": "#64748b", "weight": "bold", "flex": 5},
+                        {"type": "text", "text": "SỐ LƯỢNG", "size": "xxs", "color": "#64748b", "weight": "bold", "align": "center", "flex": 2},
+                        {"type": "text", "text": "DT THỰC (TR)", "size": "xxs", "color": "#64748b", "weight": "bold", "align": "end", "flex": 3}
+                    ]
+                },
+                # Summary Row
+                {
+                    "type": "box",
+                    "layout": "horizontal",
+                    "paddingAll": "xs",
+                    "backgroundColor": "#ffffff",
+                    "contents": [
+                        {"type": "text", "text": f"▼ {item['name']}", "size": "xxs", "color": "#0284c7", "weight": "bold", "flex": 5, "wrap": True},
+                        {"type": "text", "text": str(total_thuc_qty), "size": "xxs", "color": "#ea580c", "weight": "bold", "align": "center", "flex": 2},
+                        {"type": "text", "text": f"{total_thuc_rev:.1f}".replace(".", ","), "size": "xxs", "color": "#0f172a", "weight": "bold", "align": "end", "flex": 3}
+                    ]
+                },
+                {"type": "separator", "color": "#cbd5e1", "margin": "xs"}
+            ]
+
+            if detail_list:
+                for cat_idx, cat in enumerate(detail_list):
+                    c_emoji = get_cat_emoji(cat["nganh_hang"])
+                    detail_table_rows.append({
+                        "type": "box",
+                        "layout": "horizontal",
+                        "paddingStart": "xs",
+                        "paddingEnd": "xs",
+                        "paddingTop": "xs",
+                        "paddingBottom": "xs",
+                        "contents": [
+                            {"type": "text", "text": f"{c_emoji} {cat['nganh_hang']}", "size": "xxs", "color": "#334155", "flex": 5, "wrap": True},
+                            {"type": "text", "text": str(cat["sl"]), "size": "xxs", "color": "#ea580c", "weight": "bold", "align": "center", "flex": 2},
+                            {"type": "text", "text": f"{cat['dt_thuc']:.1f}".replace(".", ","), "size": "xxs", "color": "#0f172a", "weight": "bold", "align": "end", "flex": 3}
+                        ]
+                    })
+                    if cat_idx < len(detail_list) - 1:
+                        detail_table_rows.append({"type": "separator", "color": "#f1f5f9", "margin": "xs"})
+            else:
+                detail_table_rows.append({
+                    "type": "box",
+                    "layout": "horizontal",
+                    "paddingAll": "xs",
+                    "contents": [
+                        {"type": "text", "text": "ℹ️ Chưa có phát sinh chi tiết ngành hàng thực bán", "size": "xxs", "color": "#94a3b8", "align": "center", "flex": 1}
+                    ]
+                })
+
+            staff_card = {
+                "type": "box",
+                "layout": "vertical",
+                "backgroundColor": "#ffffff",
+                "borderColor": card_border,
+                "borderWidth": "1px",
+                "cornerRadius": "md",
+                "paddingAll": "sm",
+                "margin": "sm",
+                "contents": [
+                    # Top Row: Rank, Arrow, Name, Revenue
+                    {
+                        "type": "box",
+                        "layout": "horizontal",
+                        "alignItems": "center",
+                        "contents": [
+                            {"type": "text", "text": rank_str, "size": "xs", "weight": "bold", "flex": 0},
+                            {"type": "text", "text": "▾", "size": "xxs", "color": "#f59e0b", "margin": "xs", "flex": 0},
+                            {"type": "text", "text": item["name"], "size": "xs", "weight": "bold", "color": "#0f172a", "margin": "xs", "flex": 1},
+                            {"type": "text", "text": f"{dt_str}tr", "size": "xs", "weight": "bold", "color": "#0284c7", "align": "end", "flex": 0}
+                        ]
+                    },
+                    # Row 2: Target, Con lai, %HT
+                    {
+                        "type": "box",
+                        "layout": "horizontal",
+                        "margin": "xs",
+                        "alignItems": "center",
+                        "contents": [
+                            {"type": "text", "text": f"🎯 {dt_str}/{tg_str}tr", "size": "xxs", "color": "#0284c7", "flex": 4},
+                            {"type": "text", "text": f"⏳ {con_lai_str}", "size": "xxs", "color": con_color, "flex": 3},
+                            {"type": "text", "text": f"🔥 {ht_pct_str}", "size": "xxs", "weight": "bold", "color": "#ea580c", "align": "end", "flex": 3}
+                        ]
+                    },
+                    # Row 3: Progress Bar
+                    {
+                        "type": "box",
+                        "layout": "horizontal",
+                        "margin": "xs",
+                        "alignItems": "center",
+                        "spacing": "xs",
+                        "contents": [
+                            {
+                                "type": "box",
+                                "layout": "vertical",
+                                "flex": 1,
+                                "height": "5px",
+                                "backgroundColor": "#e2e8f0",
+                                "cornerRadius": "sm",
+                                "contents": [
+                                    {
+                                        "type": "box",
+                                        "layout": "vertical",
+                                        "height": "5px",
+                                        "backgroundColor": bar_color,
+                                        "cornerRadius": "sm",
+                                        "width": f"{min(100, max(3, round(item['ht'] * 100)))}%",
+                                        "contents": [{"type": "filler"}]
+                                    }
+                                ]
+                            },
+                            {"type": "text", "text": f"{min(100, round(item['ht'] * 100))}%", "size": "xxs", "color": "#64748b", "align": "end", "flex": 0}
+                        ]
+                    },
+                    # Row 4: Detail Table Container
+                    {
+                        "type": "box",
+                        "layout": "vertical",
+                        "backgroundColor": "#f8fafc",
+                        "borderColor": "#e2e8f0",
+                        "borderWidth": "1px",
+                        "cornerRadius": "sm",
+                        "paddingAll": "xs",
+                        "margin": "sm",
+                        "contents": detail_table_rows
+                    }
+                ]
+            }
+            body_contents_nv.append(staff_card)
+
+    flex_bubble_rt_nv = {
+        "type": "bubble",
+        "size": "mega",
+        "header": {
+            "type": "box",
+            "layout": "vertical",
+            "backgroundColor": "#ea580c",
+            "paddingAll": "md",
+            "contents": [
+                {"type": "text", "text": "👑 CHI TIẾT DOANH THU NHÂN VIÊN\n(THỰC BÁN THEO NGÀNH HÀNG)", "weight": "bold", "size": "sm", "color": "#ffffff", "align": "center", "wrap": True},
+                {"type": "text", "text": f"🕒 Cập nhật: {now_str} • {len(parsed_nv_rt)} Nhân sự", "size": "xxs", "color": "#ffedd5", "align": "center", "margin": "xs"}
+            ]
+        },
+        "body": {
+            "type": "box",
+            "layout": "vertical",
+            "backgroundColor": "#ffffff",
+            "paddingAll": "sm",
+            "contents": body_contents_nv
+        }
+    }
+
+    return [flex_bubble_rt1, flex_bubble_rt_nv, flex_bubble_rt2]
 
 def build_help_commands_flex():
     """
@@ -2547,7 +2853,7 @@ def build_help_commands_flex():
     commands_data = [
         # --- BÁO CÁO DOANH THU & THI ĐUA ---
         {"cmd": "LK1", "desc": "Báo cáo Lũy kế Doanh thu & Ngành hàng thi đua tháng (Flex P.1 & P.2)", "color": "#1e40af"},
-        {"cmd": "RT1", "desc": "Báo cáo Realtime Doanh thu & Ngành hàng thi đua ngày (Flex P.1 & P.2)", "color": "#0284c7"},
+        {"cmd": "RT1", "desc": "Báo cáo Realtime Doanh thu, Chi tiết NV & Ngành hàng thi đua ngày (Flex 3 Thẻ)", "color": "#0284c7"},
         {"cmd": "NV0", "desc": "Bảng Xếp Hạng Doanh Thu NV Pro + Carousel Top 8 NV (#1 - #8)", "color": "#0f766e"},
         {"cmd": "NV1", "desc": "Hiển thị tiếp danh sách Thẻ KPI các Nhân viên còn lại (#9 trở đi)", "color": "#0f766e"},
         {"cmd": "NV <mã>", "desc": "Xem riêng 1 Thẻ KPI Nhân viên (VD: nv 61169 hoặc nv Dương)", "color": "#d97706"},

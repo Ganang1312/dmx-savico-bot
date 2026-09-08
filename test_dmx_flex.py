@@ -66,9 +66,10 @@ class TestDmxFlexMessages(unittest.TestCase):
         
         flex = build_realtime_flex()
         self.assertIsInstance(flex, list)
-        self.assertEqual(len(flex), 2)
+        self.assertEqual(len(flex), 3)
         self.assertEqual(flex[0]["type"], "bubble")
         self.assertEqual(flex[1]["type"], "bubble")
+        self.assertEqual(flex[2]["type"], "bubble")
         
         flex_str = str(flex)
         self.assertIn("Tr", flex_str)

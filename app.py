@@ -1182,7 +1182,7 @@ def handle_message(event):
         try:
             if isinstance(flex_msg, list):
                 carousel_content = {"type": "carousel", "contents": flex_msg}
-                line_bot_api.reply_message(event.reply_token, FlexSendMessage(alt_text="⚡ BÁO CÁO REALTIME (Cuộn Ngang P.1 & P.2)", contents=carousel_content))
+                line_bot_api.reply_message(event.reply_token, FlexSendMessage(alt_text="⚡ BÁO CÁO REALTIME (Cuộn Ngang 3 Thẻ: DT Siêu Thị, Chi Tiết NV & Thi Đua)", contents=carousel_content))
             else:
                 line_bot_api.reply_message(event.reply_token, FlexSendMessage(alt_text="⚡ Báo Cáo Realtime Hôm Nay", contents=flex_msg))
         except Exception as e:
