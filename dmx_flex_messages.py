@@ -2631,41 +2631,35 @@ def build_realtime_flex():
             ]
         })
     else:
-        rank_icons = ["🥇", "🥈", "🥉"]
+        rank_styles = [
+            {"badge": "🥇 TOP 1", "badge_bg": "#fef3c7", "badge_color": "#b45309", "card_border": "#f97316", "header_bg": "#fff7ed", "bar_color": "#0d9488"},
+            {"badge": "🥈 TOP 2", "badge_bg": "#e0f2fe", "badge_color": "#0369a1", "card_border": "#0284c7", "header_bg": "#f0f9ff", "bar_color": "#10b981"},
+            {"badge": "🥉 TOP 3", "badge_bg": "#dcfce7", "badge_color": "#15803d", "card_border": "#16a34a", "header_bg": "#f0fdf4", "bar_color": "#84cc16"},
+        ]
         for idx, item in enumerate(parsed_nv_rt):
-            rank_str = rank_icons[idx] if idx < 3 else f"{idx+1}."
-            
-            # Color & Border styling
-            if idx == 0:
-                card_border = "#fdba74"
-                bar_color = "#0d9488"
-            elif idx == 1:
-                card_border = "#a5f3fc"
-                bar_color = "#10b981"
-            elif idx == 2:
-                card_border = "#bef264"
-                bar_color = "#84cc16"
-            elif item["ht"] >= 0.5:
-                card_border = "#e2e8f0"
-                bar_color = "#f59e0b"
-            else:
-                card_border = "#e2e8f0"
-                bar_color = "#ef4444"
+            st = rank_styles[idx] if idx < 3 else {
+                "badge": f"#{idx+1}",
+                "badge_bg": "#f1f5f9",
+                "badge_color": "#475569",
+                "card_border": "#cbd5e1",
+                "header_bg": "#f8fafc",
+                "bar_color": "#f59e0b" if item["ht"] >= 0.5 else "#ef4444"
+            }
 
-            # Con lai
+            # Còn lại
             con_lai = item["target"] - item["dt"]
             if con_lai <= 0 and item["target"] > 0:
                 con_lai_str = "Đạt"
-                con_color = "#059669"
+                con_color = "#15803d"
             else:
-                con_lai_str = f"{max(0, con_lai):.1f}tr".replace(".", ",")
+                con_lai_str = f"{max(0, con_lai):.1f} Tr".replace(".", ",")
                 con_color = "#ef4444"
 
             dt_str = f"{item['dt']:.1f}".replace(".", ",")
             tg_str = f"{item['target']:.1f}".replace(".", ",")
             ht_pct_str = f"{item['ht']*100:.1f}%".replace(".", ",")
 
-            # Detail rows for this staff
+            # Chi tiết ngành hàng của nhân viên này
             staff_details = staff_detail_map.get(item["ma_nv"]) or staff_detail_map.get(item.get("clean_name_lower", "")) or []
             cat_agg = {}
             total_thuc_qty = 0
@@ -2684,56 +2678,38 @@ def build_realtime_flex():
                 total_thuc_qty = int(item["sl"])
                 total_thuc_rev = item["dt"]
 
-            # Detail Table Rows
-            detail_table_rows = [
-                # Table Header
-                {
-                    "type": "box",
-                    "layout": "horizontal",
-                    "backgroundColor": "#f1f5f9",
-                    "paddingAll": "xs",
-                    "cornerRadius": "xs",
-                    "contents": [
-                        {"type": "text", "text": "NHÓM / NGÀNH HÀNG", "size": "xxs", "color": "#64748b", "weight": "bold", "flex": 5},
-                        {"type": "text", "text": "SỐ LƯỢNG", "size": "xxs", "color": "#64748b", "weight": "bold", "align": "center", "flex": 2},
-                        {"type": "text", "text": "DT THỰC (TR)", "size": "xxs", "color": "#64748b", "weight": "bold", "align": "end", "flex": 3}
-                    ]
-                },
-                # Summary Row
-                {
-                    "type": "box",
-                    "layout": "horizontal",
-                    "paddingAll": "xs",
-                    "backgroundColor": "#ffffff",
-                    "contents": [
-                        {"type": "text", "text": f"▼ {item['name']}", "size": "xxs", "color": "#0284c7", "weight": "bold", "flex": 5, "wrap": True},
-                        {"type": "text", "text": str(total_thuc_qty), "size": "xxs", "color": "#ea580c", "weight": "bold", "align": "center", "flex": 2},
-                        {"type": "text", "text": f"{total_thuc_rev:.1f}".replace(".", ","), "size": "xxs", "color": "#0f172a", "weight": "bold", "align": "end", "flex": 3}
-                    ]
-                },
-                {"type": "separator", "color": "#cbd5e1", "margin": "xs"}
-            ]
-
+            # Danh sách từng ngành hàng (Giao diện dòng trực quan, không cắt chữ, không lặp tiêu đề)
+            item_rows = []
             if detail_list:
                 for cat_idx, cat in enumerate(detail_list):
                     c_emoji = get_cat_emoji(cat["nganh_hang"])
-                    detail_table_rows.append({
+                    item_rows.append({
                         "type": "box",
                         "layout": "horizontal",
-                        "paddingStart": "xs",
-                        "paddingEnd": "xs",
+                        "alignItems": "center",
                         "paddingTop": "xs",
                         "paddingBottom": "xs",
                         "contents": [
-                            {"type": "text", "text": f"{c_emoji} {cat['nganh_hang']}", "size": "xxs", "color": "#334155", "flex": 5, "wrap": True},
-                            {"type": "text", "text": str(cat["sl"]), "size": "xxs", "color": "#ea580c", "weight": "bold", "align": "center", "flex": 2},
-                            {"type": "text", "text": f"{cat['dt_thuc']:.1f}".replace(".", ","), "size": "xxs", "color": "#0f172a", "weight": "bold", "align": "end", "flex": 3}
+                            {"type": "text", "text": f"{c_emoji} {cat['nganh_hang']}", "size": "xs", "color": "#1e293b", "flex": 5, "wrap": True},
+                            {
+                                "type": "box",
+                                "layout": "vertical",
+                                "backgroundColor": "#ffedd5",
+                                "paddingStart": "xs",
+                                "paddingEnd": "xs",
+                                "cornerRadius": "xs",
+                                "flex": 0,
+                                "contents": [
+                                    {"type": "text", "text": f"{cat['sl']} SP", "size": "xxs", "color": "#c2410c", "weight": "bold"}
+                                ]
+                            },
+                            {"type": "text", "text": f"{cat['dt_thuc']:.1f} Tr".replace(".", ","), "size": "xs", "color": "#0f172a", "weight": "bold", "align": "end", "flex": 3}
                         ]
                     })
                     if cat_idx < len(detail_list) - 1:
-                        detail_table_rows.append({"type": "separator", "color": "#f1f5f9", "margin": "xs"})
+                        item_rows.append({"type": "separator", "color": "#f8fafc", "margin": "xs"})
             else:
-                detail_table_rows.append({
+                item_rows.append({
                     "type": "box",
                     "layout": "horizontal",
                     "paddingAll": "xs",
@@ -2742,81 +2718,111 @@ def build_realtime_flex():
                     ]
                 })
 
+            # Từng Thẻ Nhân Viên Độc Lập, Nổi Bật, Dễ Phân Biệt
             staff_card = {
                 "type": "box",
                 "layout": "vertical",
                 "backgroundColor": "#ffffff",
-                "borderColor": card_border,
-                "borderWidth": "1px",
+                "borderColor": st["card_border"],
+                "borderWidth": "1.5px",
                 "cornerRadius": "md",
-                "paddingAll": "sm",
-                "margin": "sm",
+                "margin": "md",
                 "contents": [
-                    # Top Row: Rank, Arrow, Name, Revenue
+                    # Phần 1: Header Thẻ Nhân Viên (Có nền màu nhận diện riêng)
                     {
                         "type": "box",
-                        "layout": "horizontal",
-                        "alignItems": "center",
+                        "layout": "vertical",
+                        "backgroundColor": st["header_bg"],
+                        "paddingAll": "sm",
                         "contents": [
-                            {"type": "text", "text": rank_str, "size": "xs", "weight": "bold", "flex": 0},
-                            {"type": "text", "text": "▾", "size": "xxs", "color": "#f59e0b", "margin": "xs", "flex": 0},
-                            {"type": "text", "text": item["name"], "size": "xs", "weight": "bold", "color": "#0f172a", "margin": "xs", "flex": 1},
-                            {"type": "text", "text": f"{dt_str}tr", "size": "xs", "weight": "bold", "color": "#0284c7", "align": "end", "flex": 0}
-                        ]
-                    },
-                    # Row 2: Target, Con lai, %HT
-                    {
-                        "type": "box",
-                        "layout": "horizontal",
-                        "margin": "xs",
-                        "alignItems": "center",
-                        "contents": [
-                            {"type": "text", "text": f"🎯 {dt_str}/{tg_str}tr", "size": "xxs", "color": "#0284c7", "flex": 4},
-                            {"type": "text", "text": f"⏳ {con_lai_str}", "size": "xxs", "color": con_color, "flex": 3},
-                            {"type": "text", "text": f"🔥 {ht_pct_str}", "size": "xxs", "weight": "bold", "color": "#ea580c", "align": "end", "flex": 3}
-                        ]
-                    },
-                    # Row 3: Progress Bar
-                    {
-                        "type": "box",
-                        "layout": "horizontal",
-                        "margin": "xs",
-                        "alignItems": "center",
-                        "spacing": "xs",
-                        "contents": [
+                            # Hàng 1: Badge Top + Tên + DT Quy đổi
                             {
                                 "type": "box",
-                                "layout": "vertical",
-                                "flex": 1,
-                                "height": "5px",
-                                "backgroundColor": "#e2e8f0",
-                                "cornerRadius": "sm",
+                                "layout": "horizontal",
+                                "alignItems": "center",
                                 "contents": [
                                     {
                                         "type": "box",
                                         "layout": "vertical",
-                                        "height": "5px",
-                                        "backgroundColor": bar_color,
+                                        "backgroundColor": st["badge_bg"],
+                                        "paddingStart": "sm",
+                                        "paddingEnd": "sm",
+                                        "paddingTop": "xs",
+                                        "paddingBottom": "xs",
                                         "cornerRadius": "sm",
-                                        "width": f"{min(100, max(3, round(item['ht'] * 100)))}%",
-                                        "contents": [{"type": "filler"}]
-                                    }
+                                        "flex": 0,
+                                        "contents": [
+                                            {"type": "text", "text": st["badge"], "size": "xxs", "weight": "bold", "color": st["badge_color"]}
+                                        ]
+                                    },
+                                    {"type": "text", "text": item["name"], "size": "sm", "weight": "bold", "color": "#0f172a", "margin": "sm", "flex": 1},
+                                    {"type": "text", "text": f"{dt_str} Tr", "size": "sm", "weight": "bold", "color": "#0284c7", "align": "end", "flex": 0}
                                 ]
                             },
-                            {"type": "text", "text": f"{min(100, round(item['ht'] * 100))}%", "size": "xxs", "color": "#64748b", "align": "end", "flex": 0}
+                            # Hàng 2: Mục tiêu, Còn lại, % Đạt
+                            {
+                                "type": "box",
+                                "layout": "horizontal",
+                                "margin": "xs",
+                                "alignItems": "center",
+                                "contents": [
+                                    {"type": "text", "text": f"🎯 MT: {dt_str}/{tg_str} Tr", "size": "xxs", "color": "#0284c7", "flex": 4},
+                                    {"type": "text", "text": f"⏳ {con_lai_str}", "size": "xxs", "color": con_color, "weight": "bold" if con_lai <= 0 else "regular", "flex": 3},
+                                    {"type": "text", "text": f"🔥 {ht_pct_str}", "size": "xxs", "weight": "bold", "color": "#ea580c", "align": "end", "flex": 3}
+                                ]
+                            },
+                            # Hàng 3: Thanh tiến độ trực quan
+                            {
+                                "type": "box",
+                                "layout": "horizontal",
+                                "margin": "xs",
+                                "alignItems": "center",
+                                "spacing": "xs",
+                                "contents": [
+                                    {
+                                        "type": "box",
+                                        "layout": "vertical",
+                                        "flex": 1,
+                                        "height": "5px",
+                                        "backgroundColor": "#e2e8f0",
+                                        "cornerRadius": "sm",
+                                        "contents": [
+                                            {
+                                                "type": "box",
+                                                "layout": "vertical",
+                                                "height": "5px",
+                                                "backgroundColor": st["bar_color"],
+                                                "cornerRadius": "sm",
+                                                "width": f"{min(100, max(3, round(item['ht'] * 100)))}%",
+                                                "contents": [{"type": "filler"}]
+                                            }
+                                        ]
+                                    },
+                                    {"type": "text", "text": f"{min(100, round(item['ht'] * 100))}%", "size": "xxs", "color": "#64748b", "align": "end", "flex": 0}
+                                ]
+                            }
                         ]
                     },
-                    # Row 4: Detail Table Container
+                    {"type": "separator", "color": "#e2e8f0"},
+                    # Phần 2: Danh Sách Ngành Hàng Thực Bán
                     {
                         "type": "box",
                         "layout": "vertical",
-                        "backgroundColor": "#f8fafc",
-                        "borderColor": "#e2e8f0",
-                        "borderWidth": "1px",
-                        "cornerRadius": "sm",
-                        "paddingAll": "xs",
-                        "margin": "sm",
-                        "contents": detail_table_rows
+                        "backgroundColor": "#ffffff",
+                        "paddingAll": "sm",
+                        "contents": item_rows + [
+                            {"type": "separator", "color": "#e2e8f0", "margin": "xs"},
+                            # Hàng tóm tắt cuối thẻ nhân viên
+                            {
+                                "type": "box",
+                                "layout": "horizontal",
+                                "margin": "xs",
+                                "contents": [
+                                    {"type": "text", "text": f"📦 Tổng thực bán: {total_thuc_qty} SP", "size": "xxs", "color": "#64748b", "flex": 1},
+                                    {"type": "text", "text": f"{total_thuc_rev:.1f} Tr thực".replace(".", ","), "size": "xxs", "color": "#0284c7", "weight": "bold", "align": "end", "flex": 1}
+                                ]
+                            }
+                        ]
                     }
                 ]
             }
@@ -2832,13 +2838,13 @@ def build_realtime_flex():
             "paddingAll": "md",
             "contents": [
                 {"type": "text", "text": "👑 CHI TIẾT DOANH THU NHÂN VIÊN\n(THỰC BÁN THEO NGÀNH HÀNG)", "weight": "bold", "size": "sm", "color": "#ffffff", "align": "center", "wrap": True},
-                {"type": "text", "text": f"🕒 Cập nhật: {now_str} • {len(parsed_nv_rt)} Nhân sự", "size": "xxs", "color": "#ffedd5", "align": "center", "margin": "xs"}
+                {"type": "text", "text": f"🕒 Cập nhật: {now_str} • {len(parsed_nv_rt)} Nhân sự có số", "size": "xxs", "color": "#ffedd5", "align": "center", "margin": "xs"}
             ]
         },
         "body": {
             "type": "box",
             "layout": "vertical",
-            "backgroundColor": "#ffffff",
+            "backgroundColor": "#f1f5f9",
             "paddingAll": "sm",
             "contents": body_contents_nv
         }
