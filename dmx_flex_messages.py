@@ -2803,7 +2803,7 @@ def build_realtime_flex():
                 "backgroundColor": "#ea580c",
                 "paddingAll": "md",
                 "contents": [
-                    {"type": "text", "text": "👑 CHI TIẾT DOANH THU NHÂN VIÊN\n(THỰC BÁN THEO NGÀNH HÀNG)", "weight": "bold", "size": "sm", "color": "#ffffff", "align": "center", "wrap": True},
+                    {"type": "text", "text": "👑 CHI TIẾT DTNV", "weight": "bold", "size": "sm", "color": "#ffffff", "align": "center", "wrap": True},
                     {"type": "text", "text": f"🕒 Cập nhật: {now_str} • 0 Nhân sự có số", "size": "xxs", "color": "#ffedd5", "align": "center", "margin": "xs"}
                 ]
             },
@@ -2896,7 +2896,7 @@ def build_realtime_flex():
                     "backgroundColor": "#ea580c",
                     "paddingAll": "md",
                     "contents": [
-                        {"type": "text", "text": f"👑 CHI TIẾT DOANH THU NHÂN VIÊN{part_title}\n(THỰC BÁN THEO NGÀNH HÀNG)", "weight": "bold", "size": "sm", "color": "#ffffff", "align": "center", "wrap": True},
+                        {"type": "text", "text": f"👑 CHI TIẾT DTNV{part_title}", "weight": "bold", "size": "sm", "color": "#ffffff", "align": "center", "wrap": True},
                         {"type": "text", "text": hdr_sub, "size": "xxs", "color": "#ffedd5", "align": "center", "margin": "xs"}
                     ]
                 },
