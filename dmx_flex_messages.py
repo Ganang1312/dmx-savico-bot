@@ -658,7 +658,7 @@ def build_luyke_flex():
                             "backgroundColor": get_color_class(totalHT),
                             "height": "6px",
                             "cornerRadius": "md",
-                            "width": f"{min(100, round(totalHT * 100))}%",
+                            "width": f"{min(100, max(2, round(totalHT * 100)))}%",
                             "contents": [{"type": "filler"}]
                         }
                     ]
@@ -698,7 +698,7 @@ def build_luyke_flex():
                     "backgroundColor": get_color_class(b["ht"]),
                     "height": "3px",
                     "cornerRadius": "sm",
-                    "width": f"{min(100, round(b['ht'] * 100))}%",
+                    "width": f"{min(100, max(2, round(b['ht'] * 100)))}%",
                     "contents": [{"type": "filler"}]
                 }
             ]
@@ -1914,7 +1914,7 @@ def build_realtime_flex():
         rt_tSL += sl
         rt_tTarget += targetDay
         
-        if dtqd > 0 or sl > 0:
+        if dtqd != 0 or sl != 0:
             parsed_rt_bi.append({
                 "name": shorten_name(nganh),
                 "sl": int(sl),
@@ -2082,7 +2082,7 @@ def build_realtime_flex():
                             "backgroundColor": "#0284c7",
                             "height": "8px",
                             "cornerRadius": "md",
-                            "width": f"{min(100, round(time_ratio * 100))}%",
+                            "width": f"{min(100, max(2, round(time_ratio * 100)))}%",
                             "contents": [{"type": "filler"}]
                         }
                     ]
@@ -2119,7 +2119,7 @@ def build_realtime_flex():
                             "backgroundColor": get_color_class(htChung),
                             "height": "8px",
                             "cornerRadius": "md",
-                            "width": f"{min(100, round(htChung * 100))}%",
+                            "width": f"{min(100, max(2, round(htChung * 100)))}%",
                             "contents": [{"type": "filler"}]
                         }
                     ]
@@ -2237,8 +2237,8 @@ def build_realtime_flex():
                 
             sl_nv = parse_number(get_key_val(row, "số lượng", "soluong", "quantity", "quantity_RT", default=0))
             
-            # Lệnh RT1: Những nhân viên có doanh thu bằng 0 thì ẩn đi không hiển thị
-            if dt_nv <= 0:
+            # Lệnh RT1: Chỉ ẩn những nhân viên hoàn toàn không phát sinh số (bằng 0), doanh thu âm (do trả hàng) vẫn hiển thị
+            if dt_nv == 0 and sl_nv == 0:
                 continue
             # Chỉ hiển thị nhân viên được khai báo ở tab config, ẩn nhân viên khác
             ratio = 0.0
@@ -2288,7 +2288,10 @@ def build_realtime_flex():
                 rank_str = rank_icons[idx] if idx < 3 else f"{idx+1}."
                 
                 sl_str = fmt_num(item["sl"])
-                dt_tr_str = f"{item['dt']:.0f}"
+                if abs(item['dt']) < 1.0 and item['dt'] != 0:
+                    dt_tr_str = f"{item['dt']:.1f}"
+                else:
+                    dt_tr_str = f"{item['dt']:.0f}"
                 tg_tr_str = f"{item['target']:.0f}"
 
                 # Còn lại
@@ -2307,7 +2310,7 @@ def build_realtime_flex():
                     "#d97706" if idx < 3 else "#64748b", 
                     "#0f172a", 
                     "#475569", 
-                    "#059669", 
+                    "#ef4444" if item["dt"] < 0 else "#059669", 
                     "#475569", 
                     con_color, 
                     get_color_class(item["ht"])
@@ -2341,7 +2344,7 @@ def build_realtime_flex():
     for idx, b in enumerate(parsed_rt_bi[:6]):
         ty_trong_rt = (b["dt"] / rt_total * 100) if rt_total > 0 else 0.0
         vals = [idx+1, f"{b['name']} ({ty_trong_rt:.0f}%)", fmt_num(b["sl"]), fmt_num(b["dt"]), fmt_num(b["tg"]), f"{b['ht']*100:.0f}%"]
-        colors = ["#64748b", "#0f172a", "#0f172a", "#0284c7", "#475569", get_color_class(b["ht"])]
+        colors = ["#64748b", "#0f172a", "#0f172a", "#ef4444" if b["dt"] < 0 else "#0284c7", "#475569", get_color_class(b["ht"])]
         table_card_contents.append(make_table_row(vals, weights, aligns, colors))
         table_card_contents.append({
             "type": "box",
@@ -2357,7 +2360,7 @@ def build_realtime_flex():
                     "backgroundColor": get_color_class(b["ht"]),
                     "height": "3px",
                     "cornerRadius": "sm",
-                    "width": f"{min(100, round(b['ht'] * 100))}%",
+                    "width": f"{min(100, max(2, round(b['ht'] * 100)))}%",
                     "contents": [{"type": "filler"}]
                 }
             ]
@@ -2625,7 +2628,7 @@ def build_realtime_flex():
             dt_str = f"{item['dt']:.1f}".replace(".", ",")
             tg_str = f"{item['target']:.1f}".replace(".", ",")
             ht_pct_str = f"{item['ht']*100:.1f}%".replace(".", ",")
-            ht_color = "#16a34a" if item["ht"] >= 1.0 else "#ea580c"
+            ht_color = "#16a34a" if item["ht"] >= 1.0 else ("#ef4444" if item["ht"] < 0 else "#ea580c")
 
             # Chi tiết ngành hàng của nhân viên này
             staff_details = staff_detail_map.get(item["ma_nv"]) or staff_detail_map.get(item.get("clean_name_lower", "")) or []
@@ -2723,7 +2726,7 @@ def build_realtime_flex():
                                         ]
                                     },
                                     {"type": "text", "text": item["name"], "size": "sm", "weight": "bold", "color": "#0f172a", "margin": "sm", "flex": 1},
-                                    {"type": "text", "text": f"{dt_str} Tr", "size": "sm", "weight": "bold", "color": "#0284c7", "align": "end", "flex": 0}
+                                    {"type": "text", "text": f"{dt_str} Tr", "size": "sm", "weight": "bold", "color": "#ef4444" if item["dt"] < 0 else "#0284c7", "align": "end", "flex": 0}
                                 ]
                             },
                             # Hàng 2: Mục tiêu, Còn lại, % Đạt (tránh trùng lặp, không lặp lại số DT và %)
