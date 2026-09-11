@@ -57,6 +57,34 @@ def parse_is_sl(val):
         return False
     return None
 
+def find_td_config(name, config_map):
+    """
+    So khớp ngành hàng thi đua đồng bộ 100% với hàm findTDConfig trong baocao_luyke.html & baocao_realtime.html:
+    1. So khớp chính xác tên
+    2. So khớp bỏ tiền tố 'nnh '
+    3. So khớp thêm tiền tố 'nnh '
+    4. So khớp bỏ hậu tố tháng (ví dụ: 'Đồng hồ tháng 9' vs 'Đồng hồ')
+    """
+    if not name or not config_map:
+        return {}
+    clean = str(name).lower().strip()
+    clean_no_prefix = re.sub(r'^nnh\s+', '', clean)
+    if clean in config_map:
+        return config_map[clean]
+    if clean_no_prefix in config_map:
+        return config_map[clean_no_prefix]
+    if ('nnh ' + clean_no_prefix) in config_map:
+        return config_map['nnh ' + clean_no_prefix]
+    for k in config_map:
+        if re.sub(r'^nnh\s+', '', k) == clean_no_prefix:
+            return config_map[k]
+    clean_no_month = re.sub(r'\s+tháng\s+\d+', '', clean_no_prefix).strip()
+    for k in config_map:
+        k_clean_no_month = re.sub(r'\s+tháng\s+\d+', '', re.sub(r'^nnh\s+', '', k)).strip()
+        if k_clean_no_month == clean_no_month and len(k_clean_no_month) > 3:
+            return config_map[k]
+    return {}
+
 def determine_is_sl(comp_type, nganh_clean, sl=0.0, dt=0.0, tg=0.0, config_obj=None):
     """
     Chuẩn hóa xác định chỉ tiêu là Sản Lượng (isSL=True) hay Doanh Thu (isSL=False)
@@ -483,8 +511,9 @@ def build_luyke_flex():
         if not nganh or str(nganh).strip().upper() == "N/A":
             continue
         nganh_clean = str(nganh).lower().strip()
-        c_obj = config_map.get(nganh_clean) or config_map.get(re.sub(r'^nnh\s+', '', nganh_clean)) or {}
-        if config_map and c_obj.get("phanLoai") == 0.0:
+        c_obj = find_td_config(nganh_clean, config_map)
+        # CHỈ TÍNH NHỮNG MÔN KHAI BÁO TRONG CONFIG VỚI ƯU TIÊN 1 VÀ 2 (ĐỒNG BỘ 100% VỚI BAOCAO_LUYKE.HTML)
+        if config_map and (c_obj.get("phanLoai") not in [1.0, 2.0]):
             continue
             
         tg = parse_number(get_key_val(r, "target", "target (qđ)", "mục tiêu", "kế hoạch", default=0.0))
@@ -1654,10 +1683,11 @@ def build_nhanvien_flex():
         
         nganh_str = str(nganh).strip()
         nganh_clean = nganh_str.lower()
-        if config_map and nganh_clean not in config_map:
+        c_obj = find_td_config(nganh_clean, config_map)
+        if config_map and (c_obj.get("phanLoai") not in [1.0, 2.0]):
             continue
             
-        c_obj = config_map.get(nganh_clean, {"phanLoai": 1.0, "thuTu": 999.0})
+        c_obj = c_obj or {"phanLoai": 1.0, "thuTu": 999.0}
         sl = parse_number(get_key_val(r, "số lượng", "quantity", "sl", default=0.0))
         dt = max(
             parse_number(get_key_val(r, "doanh thu quy đổi", "revenue_kfactor", default=0.0)),
@@ -1961,7 +1991,9 @@ def build_realtime_flex():
         if not nganh or str(nganh).strip().upper() == "N/A":
             continue
         nganh_clean = str(nganh).lower().strip()
-        c_obj = config_map.get(nganh_clean) or config_map.get(re.sub(r'^nnh\s+', '', nganh_clean)) or {}
+        c_obj = find_td_config(nganh_clean, config_map)
+        if config_map and (c_obj.get("phanLoai") not in [1.0, 2.0]):
+            continue
         
         tg = parse_number(get_key_val(r, "target", "target (qđ)", "mục tiêu", "kế hoạch", default=0.0))
         sl = parse_number(get_key_val(r, "số lượng", "quantity", "sl", default=0.0))
@@ -1990,8 +2022,8 @@ def build_realtime_flex():
         if not nganh or str(nganh).strip().upper() == "N/A":
             continue
         nganh_clean = str(nganh).lower().strip()
-        c_obj = config_map.get(nganh_clean) or config_map.get(re.sub(r'^nnh\s+', '', nganh_clean)) or {}
-        if config_map and c_obj.get("phanLoai") == 0.0:
+        c_obj = find_td_config(nganh_clean, config_map)
+        if config_map and (c_obj.get("phanLoai") not in [1.0, 2.0]):
             continue
             
         lk_info = thi_dua_luy_ke.get(nganh_clean, {"mt_ngay": 0.0, "is_sl": False, "is_dt": True, "target_thang": 0.0, "lk_thuc_hien": 0.0})
