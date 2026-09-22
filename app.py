@@ -27,7 +27,8 @@ from flex_handler import (
     initialize_daily_tasks, generate_checklist_flex, get_tasks_status_from_sheet,
     add_adhoc_tasks, generate_adhoc_flex, update_adhoc_task_status,
     add_all_adhoc_tasks, generate_all_adhoc_flex, register_group_member,
-    add_multi_adhoc_tasks, generate_multi_adhoc_flex
+    add_multi_adhoc_tasks, generate_multi_adhoc_flex,
+    find_latest_task_token, cancel_task_group
 )
 from checklist_scheduler import send_initial_checklist, get_checklist_message 
 from meal_handler import generate_meal_flex, update_meal_status
@@ -496,6 +497,25 @@ def handle_postback(event):
             print(f"Lỗi nghiêm trọng khi xử lý postback hoàn thành công việc phát sinh: {e}")
         return
 
+    # 2.6. Hủy nhóm việc — bấm nút "🗑 Hủy nhóm việc này" trên thẻ Flex
+    if action == 'cancel_task_group':
+        group_id = getattr(event.source, 'group_id', None)
+        token = data.get('token')
+        if not group_id or not token:
+            return
+        try:
+            removed, ten_viec = cancel_task_group(group_id, token)
+            if removed:
+                ds = ", ".join(ten_viec[:3])
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(
+                    text=f"🗑 Đã hủy {removed} dòng việc.\nMã nhóm: {token}\nViệc: {ds}"))
+            else:
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(
+                    text="Không còn việc nào để hủy (có thể đã hủy trước đó)."))
+        except Exception as e:
+            print(f"Lỗi hủy nhóm việc qua nút: {e}")
+        return
+
     # 3. Check-in Ăn Sáng/Chiều
     if action == 'meal_checkin':
         session_type = data.get('session')
@@ -571,10 +591,35 @@ _group_members_sheet_cache = None
 
 def get_group_members(group_id):
     """
-    Lấy danh sách tên thành viên trong nhóm Line, loại trừ các bot hoặc tài khoản hệ thống nếu có thể.
+    Lấy danh sách người nhận việc chung @all.
+
+    NGUỒN CHÍNH (22/09/2026): 3 cột E/F/G của sheet `schedules`
+    (E = PG, F = NV, G = QL+TC). Đây là danh sách CHUẨN của siêu thị, không phụ
+    thuộc việc ai đã từng chat trong nhóm (API get_group_member_ids không mở cho
+    tài khoản bot free).
+
+    Ba tầng bên dưới CHỈ CÒN LÀ DỰ PHÒNG, dùng khi không đọc được sheet.
     """
     global _group_members_sheet_cache
     member_names = []
+
+    # 0. NGUỒN CHÍNH: 3 cột E/F/G của sheet `schedules` (PG | NV | QL+TC)
+    #    Anh Dương chốt 22/09/2026: mọi lệnh việc có tag @all/@pg/@st/@nv đều
+    #    phải lấy danh sách từ đúng 3 cột này.
+    try:
+        from meal_handler import get_task_roster
+        _roster = get_task_roster()
+        roster = []
+        for _grp in ('PG', 'NV', 'QL+TC'):
+            for _nm in _roster.get(_grp, []):
+                if _nm not in roster:
+                    roster.append(_nm)
+        if roster:
+            return roster
+        print("Roster từ 3 cột E/F/G trống, chuyển sang phương án dự phòng.")
+    except Exception as e_roster:
+        print(f"Lỗi đọc roster từ sheet schedules: {e_roster}")
+
     # 1. Gọi API Line để lấy danh sách đầy đủ
     try:
         res = line_bot_api.get_group_member_ids(group_id)
@@ -658,155 +703,118 @@ def handle_message(event):
         except Exception as e_reg:
             print(f"Không thể lấy profile để lưu thành viên: {e_reg}")
 
-    # 0. Giao công việc phát sinh (Adhoc task)
+    # 0. Giao công việc phát sinh (Adhoc task) — cú pháp mở rộng 22/09/2026
+    #    Xem task_parser.py để biết toàn bộ cú pháp. Điểm chính:
+    #      - @ nhận ở BẤT KỲ vị trí nào trong dòng ("- @tuấn giá tv" = "- giá tv @tuấn")
+    #      - đích: @all / @nv / @pg / @st / @ql / @tc / @156494 / @Thảo / @Yến Sony
+    from task_parser import is_work_command
     lines = [line.strip() for line in user_message.split('\n') if line.strip()]
-    if len(lines) >= 2 and (lines[0].lower().startswith('việc @') or lines[0].lower().startswith('viec @')):
+    _la_lenh_viec = is_work_command(lines)
+
+    if _la_lenh_viec:
         group_id = getattr(event.source, 'group_id', None)
         if not group_id:
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="⚠️ Chức năng giao việc chỉ sử dụng được trong nhóm chat."))
-            return
-            
-        header = lines[0]
-        idx_at = header.find('@')
-        idx_colon = header.find(':', idx_at)
-        
-        if idx_colon != -1:
-            assignee = header[idx_at + 1 : idx_colon].strip()
-        else:
-            assignee = header[idx_at + 1 :].strip()
-            
-        tasks = []
-        for line in lines[1:]:
-            if line.startswith(('-', '*', '–', '—', '•', '+')):
-                task_name = line[1:].strip()
-                if task_name:
-                    tasks.append(task_name)
-                    
-        if assignee and tasks:
-            try:
-                tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
-                current_hour = datetime.now(tz_vietnam).hour
-                current_shift = 'sang' if current_hour < 15 else 'chieu'
-
-                # Kiểm tra xem nhóm này hôm nay có/đã khởi tạo checklist ca sáng/chiều chưa
-                has_shift_checklist = bool(get_tasks_status_from_sheet(group_id, current_shift))
-
-                # Giao việc @all
-                if assignee.lower() == 'all':
-                    members = get_group_members(group_id)
-                    if not members:
-                        line_bot_api.reply_message(
-                            event.reply_token,
-                            TextSendMessage(text="⚠️ Không tìm thấy thành viên nào trong nhóm hoặc danh sách lịch làm việc trống.")
-                        )
-                        return
-                    
-                    last_hash = None
-                    for task_name in tasks:
-                        task_group_hash = add_all_adhoc_tasks(group_id, members, task_name)
-                        if task_group_hash:
-                            last_hash = task_group_hash
-                    
-                    if last_hash:
-                        if has_shift_checklist:
-                            flex_content = generate_checklist_flex(group_id, current_shift)
-                            alt_text = f"📋 Checklist công việc ca {current_shift} (đã thêm việc chung @all)"
-                        else:
-                            flex_content = generate_all_adhoc_flex(group_id, last_hash)
-                            alt_text = f"📢 Công việc chung @all: {tasks[0] if tasks else ''}"
-
-                        if flex_content:
-                            line_bot_api.reply_message(
-                                event.reply_token,
-                                FlexSendMessage(alt_text=alt_text, contents=flex_content)
-                            )
-                        else:
-                            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ Có lỗi xảy ra khi tạo checklist."))
-                    else:
-                        line_bot_api.reply_message(
-                            event.reply_token,
-                            TextSendMessage(text="❌ Có lỗi xảy ra khi tạo danh sách công việc chung.")
-                        )
-                # Giao việc cá nhân
-                else:
-                    add_adhoc_tasks(group_id, assignee, tasks)
-                    if has_shift_checklist:
-                        flex_content = generate_checklist_flex(group_id, current_shift)
-                        alt_text = f"📋 Checklist công việc ca {current_shift} (đã thêm việc phát sinh cho {assignee})"
-                    else:
-                        flex_content = generate_adhoc_flex(group_id, assignee)
-                        alt_text = f"📋 Công việc phát sinh hôm nay của {assignee}"
-
-                    if flex_content:
-                        line_bot_api.reply_message(
-                            event.reply_token,
-                            FlexSendMessage(alt_text=alt_text, contents=flex_content)
-                        )
-                    else:
-                        line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ Có lỗi xảy ra khi tạo danh sách công việc."))
-            except Exception as e:
-                print(f"Lỗi khi xử lý lệnh giao việc: {e}")
-                line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ Gặp lỗi khi xử lý giao việc."))
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(
+                text="⚠️ Chức năng giao việc chỉ sử dụng được trong nhóm chat."))
             return
 
-    elif len(lines) >= 2 and (lines[0].lower().startswith('việc ') or lines[0].lower().startswith('viec ')):
+        try:
+            from meal_handler import get_task_roster
+            from task_parser import parse_work_command, plan_assignments
+
+            roster = get_task_roster()
+            parsed = parse_work_command(lines, roster)
+
+            if parsed['errors']:
+                msg = "⚠️ Chưa giao được việc, anh kiểm tra giúp em:\n"
+                msg += "\n".join("• " + e for e in parsed['errors'][:6])
+                msg += ("\n\nCú pháp: `việc @all:` rồi xuống dòng `- nội dung việc`.\n"
+                        "Đích dùng được: @all @nv @pg @st, hoặc @156494, hoặc @Thảo.")
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(text=msg))
+                return
+
+            tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
+            current_hour = datetime.now(tz_vietnam).hour
+            current_shift = 'sang' if current_hour < 15 else 'chieu'
+            has_shift_checklist = bool(get_tasks_status_from_sheet(group_id, current_shift))
+
+            # Quy tắc lưu việc nằm ở task_parser.plan_assignments() để test
+            # được offline. Tóm tắt: dòng đầu chỉ có đích + đúng 1 dòng việc
+            # -> thẻ "CÔNG VIỆC CHUNG" như cũ; còn lại gom TẤT CẢ vào MỘT nhóm
+            # (nếu không mỗi dòng lại một mã nhóm, thẻ chỉ hiện nhóm cuối và
+            # nút 🗑 chỉ hủy được nhóm cuối).
+            plan = plan_assignments(parsed)
+            if plan['mode'] == 'all':
+                last_hash = add_all_adhoc_tasks(group_id, plan['names'],
+                                                plan['task'])
+            else:
+                last_hash = add_multi_adhoc_tasks(group_id, plan['job'],
+                                                  plan['pairs'])
+
+            if not last_hash:
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(
+                    text="❌ Có lỗi xảy ra khi lưu công việc."))
+                return
+
+            if has_shift_checklist:
+                flex_content = generate_checklist_flex(group_id, current_shift)
+                alt_text = f"📋 Checklist công việc ca {current_shift} (đã thêm việc mới)"
+            elif plan['mode'] == 'all':
+                flex_content = generate_all_adhoc_flex(group_id, last_hash)
+                alt_text = f"📢 Công việc chung: {plan['job']}"
+            else:
+                flex_content = generate_multi_adhoc_flex(group_id, last_hash)
+                alt_text = f"📋 Checklist công việc: {plan['job']}"
+
+            if flex_content:
+                line_bot_api.reply_message(
+                    event.reply_token,
+                    FlexSendMessage(alt_text=alt_text, contents=flex_content))
+            else:
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(
+                    text="❌ Có lỗi xảy ra khi tạo danh sách công việc."))
+        except Exception as e:
+            print(f"Lỗi khi xử lý lệnh giao việc: {e}")
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(
+                text="❌ Gặp lỗi khi xử lý giao việc."))
+        return
+
+    # 0b. Hủy việc đã giao. Cố tình đòi ĐỦ 2 chữ ("hủy việc") để một tin nhắn
+    #     chat thường chỉ có chữ "hủy" không vô tình xóa mất việc của cả nhóm.
+    _parts = user_message.split()
+    if (len(_parts) >= 2
+            and _parts[0].upper() in ('HỦY', 'HUY', 'XÓA', 'XOA')
+            and _parts[1].upper() in ('VIỆC', 'VIEC', 'TASK')):
         group_id = getattr(event.source, 'group_id', None)
         if not group_id:
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="⚠️ Chức năng giao việc chỉ sử dụng được trong nhóm chat."))
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(
+                text="⚠️ Lệnh hủy chỉ dùng được trong nhóm chat."))
             return
-            
-        header = lines[0]
-        if header.lower().startswith('việc '):
-            job_name = header[5:].strip()
-        else:
-            job_name = header[5:].strip()
-            
-        job_name = job_name.strip(' "\'').strip()
-            
-        task_assignments = []
-        for line in lines[1:]:
-            line_str = line.strip()
-            if line_str.startswith(('-', '*', '–', '—', '•', '+')):
-                line_content = line_str[1:].strip()
-                first_at = line_content.find('@')
-                if first_at != -1:
-                    sub_task = line_content[:first_at].strip().strip(' "\'').strip()
-                    mentions_text = line_content[first_at:]
-                    raw_mentions = [m.strip().strip(' "\'').strip() for m in mentions_text.split('@') if m.strip()]
-                    if sub_task and raw_mentions:
-                        for assignee in raw_mentions:
-                            task_assignments.append((sub_task, assignee))
-                        
-        if job_name and task_assignments:
-            try:
-                tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
-                current_hour = datetime.now(tz_vietnam).hour
-                current_shift = 'sang' if current_hour < 15 else 'chieu'
+        try:
+            token_arg = _parts[2].strip() if len(_parts) >= 3 else None
+            if token_arg:
+                token, label, count = token_arg, "(chỉ định theo mã)", 0
+            else:
+                token, label, count = find_latest_task_token(group_id)
 
-                has_shift_checklist = bool(get_tasks_status_from_sheet(group_id, current_shift))
+            if not token:
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(
+                    text="Hôm nay chưa có việc nào được giao để hủy."))
+                return
 
-                task_group_hash = add_multi_adhoc_tasks(group_id, job_name, task_assignments)
-                if task_group_hash:
-                    if has_shift_checklist:
-                        flex_content = generate_checklist_flex(group_id, current_shift)
-                        alt_text = f"📋 Checklist công việc ca {current_shift} ({job_name})"
-                    else:
-                        flex_content = generate_multi_adhoc_flex(group_id, task_group_hash)
-                        alt_text = f"📋 Checklist công việc: {job_name}"
-
-                    if flex_content:
-                        line_bot_api.reply_message(
-                            event.reply_token,
-                            FlexSendMessage(alt_text=alt_text, contents=flex_content)
-                        )
-                    else:
-                        line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ Có lỗi xảy ra khi tạo danh sách công việc."))
-                else:
-                    line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ Có lỗi xảy ra khi lưu công việc."))
-            except Exception as e:
-                print(f"Lỗi khi xử lý lệnh giao việc checklist: {e}")
-                line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ Gặp lỗi khi xử lý giao việc."))
-            return
+            removed, ten_viec = cancel_task_group(group_id, token)
+            if removed:
+                ds = ", ".join(ten_viec[:3])
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(
+                    text=f"🗑 Đã hủy {removed} dòng việc.\nMã nhóm: {token}\nViệc: {ds}"))
+            else:
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(
+                    text=f"Không tìm thấy việc nào khớp mã {token} để hủy."))
+        except Exception as e:
+            print(f"Lỗi khi hủy việc: {e}")
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(
+                text="❌ Gặp lỗi khi hủy việc."))
+        return
 
     # 1. Admin ADD
     if user_msg_upper.startswith('ADD '):

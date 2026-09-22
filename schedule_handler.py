@@ -40,76 +40,123 @@ def parse_schedule_text(schedule_text):
         
     return schedule_parts
 
+_PREFIX_RE = re.compile(r"^\s*\(\s*\d+[^)]*\)\s*:?\s*")
+
+
+def _count_shift(staff_text, schedule_type):
+    """Đếm số người trong một khối ca (đã bỏ tiền tố '(6 NV):')."""
+    if not staff_text:
+        return 0
+    clean = _PREFIX_RE.sub("", staff_text)
+    if schedule_type == 'employee':
+        items = clean.split(',')
+    else:
+        items = clean.split('\n')
+    return len([s for s in items if s.strip() and not s.strip().isdigit()])
+
+
 def create_schedule_flex_message(schedule_type, schedule_text, schedule_day_str):
-    """Tạo tin nhắn Flex Message cho lịch làm việc."""
+    """Tạo tin nhắn Flex Message cho lịch làm việc (có STT + đếm sáng/chiều)."""
     if schedule_type == 'pg':
         title = f"LỊCH LÀM VIỆC PG - {schedule_day_str.upper()}"
         header_color = "#FF6B6B"
-    else: # employee
+        unit = "PG"
+    else:  # employee
         title = f"LỊCH LÀM VIỆC NHÂN VIÊN - {schedule_day_str.upper()}"
         header_color = "#4D96FF"
+        unit = "NV"
 
     shift_icons = {"Ca Sáng": "☀️", "Ca Chiều": "🌙", "Nghỉ": "⚪️", "Vệ Sinh Kho": "🧹"}
     parsed_schedule = parse_schedule_text(schedule_text)
-    
+
+    # Đếm số người từng ca để ghi rõ "sáng mấy, chiều mấy" (thêm 22/09/2026)
+    dem = {}
+    for part in parsed_schedule:
+        if part["shift"] in ("Ca Sáng", "Ca Chiều"):
+            dem[part["shift"]] = _count_shift(part["staff"], schedule_type)
+    so_sang = dem.get("Ca Sáng", 0)
+    so_chieu = dem.get("Ca Chiều", 0)
+    summary_text = ("☀️ Sáng: %d %s   🌙 Chiều: %d %s   •   Tổng: %d %s"
+                    % (so_sang, unit, so_chieu, unit, so_sang + so_chieu, unit))
+
     body_components = []
     for part in parsed_schedule:
         shift_name = part["shift"]
         staff_list_text = part["staff"]
         icon = shift_icons.get(shift_name, "📌")
+        is_shift = shift_name in ("Ca Sáng", "Ca Chiều")
+
+        header_label = shift_name
+        if is_shift:
+            header_label = "%s  ·  %d %s" % (shift_name, dem.get(shift_name, 0), unit)
 
         section_header = {
             "type": "box", "layout": "horizontal", "spacing": "md",
             "contents": [
                 {"type": "text", "text": icon, "flex": 0, "gravity": "center"},
-                {"type": "text", "text": shift_name, "weight": "bold", "color": "#111111", "size": "sm"}
+                {"type": "text", "text": header_label, "weight": "bold",
+                 "color": "#111111", "size": "sm"}
             ]
         }
-        
+
         content_box = None
 
-        if schedule_type == 'employee' and shift_name in ["Ca Sáng", "Ca Chiều"]:
+        if schedule_type == 'employee' and is_shift:
             special_roles = ['(ERP)', '(GH1)', '(GH2)']
-            special_staff, regular_staff = [], []
-            staff_list_text_clean = re.sub(r'\(\d+\s*NV\):\s*', '', staff_list_text)
-            all_staff = [s.strip() for s in staff_list_text_clean.split(',') if s.strip()]
+            clean = _PREFIX_RE.sub("", staff_list_text)
+            all_staff = [s.strip() for s in clean.split(',')
+                         if s.strip() and not s.strip().isdigit()]
+            numbered = [(i + 1, s) for i, s in enumerate(all_staff)]
+            special_staff = [(n, s) for n, s in numbered
+                             if any(r in s for r in special_roles)]
+            regular_staff = [(n, s) for n, s in numbered
+                             if not any(r in s for r in special_roles)]
 
-            for staff in all_staff:
-                if any(role in staff for role in special_roles):
-                    special_staff.append(staff)
-                else:
-                    regular_staff.append(staff)
+            if not all_staff:
+                content_box = {"type": "text", "text": "Không có ai.",
+                               "size": "xs", "color": "#999999", "margin": "md"}
+            else:
+                col1 = [{"type": "text", "text": "%d. %s" % (n, s), "size": "xs",
+                         "wrap": True, "margin": "xs"} for n, s in special_staff]
+                col2 = [{"type": "text", "text": "%d. %s" % (n, s), "size": "xs",
+                         "wrap": True, "margin": "xs"} for n, s in regular_staff]
+                content_box = {
+                    "type": "box", "layout": "horizontal", "spacing": "md", "margin": "md",
+                    "contents": [
+                        {"type": "box", "layout": "vertical", "flex": 1, "contents": col1},
+                        {"type": "box", "layout": "vertical", "flex": 1, "contents": col2}
+                    ]
+                }
 
-            col1 = [{"type": "text", "text": f"• {s}", "size": "xs", "wrap": True, "margin": "xs"} for s in special_staff]
-            col2 = [{"type": "text", "text": f"• {s}", "size": "xs", "wrap": True, "margin": "xs"} for s in regular_staff]
-            content_box = {
-                "type": "box", "layout": "horizontal", "spacing": "md", "margin": "md",
-                "contents": [
-                    {"type": "box", "layout": "vertical", "flex": 1, "contents": col1},
-                    {"type": "box", "layout": "vertical", "flex": 1, "contents": col2}
-                ]
-            }
-        
-        elif schedule_type == 'pg' and shift_name in ["Ca Sáng", "Ca Chiều"]:
-            staff_list_text_clean = re.sub(r'\(\d+\):\s*', '', staff_list_text)
-            all_staff = [s.strip() for s in staff_list_text_clean.split('\n') if s.strip()]
-            
-            pgs_per_column = 3
-            chunks = [all_staff[i:i + pgs_per_column] for i in range(0, len(all_staff), pgs_per_column)]
-            
-            columns = []
-            for chunk in chunks:
-                col_components = [{"type": "text", "text": f"• {s}", "size": "xs", "wrap": True, "margin": "xs"} for s in chunk]
-                columns.append({"type": "box", "layout": "vertical", "flex": 1, "contents": col_components})
-            
-            content_box = {"type": "box", "layout": "horizontal", "spacing": "sm", "margin": "md", "contents": columns}
+        elif schedule_type == 'pg' and is_shift:
+            clean = _PREFIX_RE.sub("", staff_list_text)
+            all_staff = [s.strip() for s in clean.split('\n')
+                         if s.strip() and not s.strip().isdigit()]
+            numbered = ["%d. %s" % (i + 1, s) for i, s in enumerate(all_staff)]
+
+            if not numbered:
+                content_box = {"type": "text", "text": "Không có ai.",
+                               "size": "xs", "color": "#999999", "margin": "md"}
+            else:
+                pgs_per_column = 3
+                chunks = [numbered[i:i + pgs_per_column]
+                          for i in range(0, len(numbered), pgs_per_column)]
+                columns = []
+                for chunk in chunks:
+                    col_components = [{"type": "text", "text": s, "size": "xs",
+                                       "wrap": True, "margin": "xs"} for s in chunk]
+                    columns.append({"type": "box", "layout": "vertical",
+                                    "flex": 1, "contents": col_components})
+                content_box = {"type": "box", "layout": "horizontal", "spacing": "sm",
+                               "margin": "md", "contents": columns}
 
         else:
-            content_box = {"type": "text", "text": staff_list_text, "wrap": True, "size": "xs", "color": "#555555", "margin": "md"}
+            content_box = {"type": "text", "text": staff_list_text, "wrap": True,
+                           "size": "xs", "color": "#555555", "margin": "md"}
 
         section_component = {
             "type": "box", "layout": "vertical", "margin": "lg", "spacing": "sm",
-            "contents": [ section_header, content_box, {"type": "separator", "margin": "lg"} ]
+            "contents": [section_header, content_box, {"type": "separator", "margin": "lg"}]
         }
         body_components.append(section_component)
 
@@ -117,18 +164,29 @@ def create_schedule_flex_message(schedule_type, schedule_text, schedule_day_str)
         body_components[-1]['contents'].pop()
 
     flex_content = {
-      "type": "bubble", "size": "mega",
-      "header": {
-        "type": "box", "layout": "horizontal", "alignItems": "center", "spacing": "md",
-        "contents": [
-          {"type": "text", "text": "📅", "flex": 0, "size": "xl"},
-          {"type": "text", "text": title, "color": "#FFFFFF", "weight": "bold", "size": "sm", "wrap": True}
-        ],
-        "backgroundColor": header_color, "paddingTop": "12px", "paddingBottom": "12px"
-      },
-      "body": {"type": "box", "layout": "vertical", "contents": body_components, "paddingAll": "md"}
+        "type": "bubble", "size": "mega",
+        "header": {
+            "type": "box", "layout": "vertical", "spacing": "sm",
+            "contents": [
+                {
+                    "type": "box", "layout": "horizontal", "alignItems": "center",
+                    "spacing": "md",
+                    "contents": [
+                        {"type": "text", "text": "📅", "flex": 0, "size": "xl"},
+                        {"type": "text", "text": title, "color": "#FFFFFF",
+                         "weight": "bold", "size": "sm", "wrap": True}
+                    ]
+                },
+                {"type": "text", "text": summary_text, "color": "#FFFFFF",
+                 "size": "xs", "wrap": True}
+            ],
+            "backgroundColor": header_color, "paddingTop": "12px", "paddingBottom": "12px"
+        },
+        "body": {"type": "box", "layout": "vertical", "contents": body_components,
+                 "paddingAll": "md"}
     }
     return flex_content
+
 
 def send_daily_schedule(schedule_type, target_id=None, reply_token=None, day_of_week_str=None, return_msg_only=False):
     """

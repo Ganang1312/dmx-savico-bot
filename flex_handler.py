@@ -563,6 +563,131 @@ def get_adhoc_tasks_for_group_today(group_id):
         print(f"Lỗi khi lấy adhoc tasks của nhóm hôm nay: {e}")
         return []
 
+def task_group_token(task_id):
+    """
+    'all_ab12cd_3' -> 'ab12cd' ; 'multi_ab12cd_3' -> 'ab12cd' ;
+    'adhoc_9f3c1d2e' -> giữ nguyên 'adhoc_9f3c1d2e'.
+    """
+    tid = str(task_id)
+    parts = tid.split('_')
+    if len(parts) >= 3 and parts[0] in ('all', 'multi'):
+        return parts[1]
+    return tid
+
+
+def _adhoc_layout(sheet):
+    """Trả về (headers, chỉ_số_cột) hoặc (None, None)."""
+    all_values = sheet.get_all_values()
+    if len(all_values) <= 1:
+        return (None, None)
+    headers = all_values[0]
+    try:
+        idx = (headers.index('group_id'), headers.index('date'),
+               headers.index('task_id'), headers.index('task_name'))
+    except ValueError:
+        return (None, None)
+    return (all_values, idx)
+
+
+def find_latest_task_token(group_id):
+    """
+    Tìm nhóm việc MỚI NHẤT trong hôm nay của nhóm chat này.
+    Trả về (token, nhãn, số_dòng) hoặc (None, None, 0).
+    """
+    sheet = get_or_create_adhoc_worksheet()
+    if not sheet:
+        return (None, None, 0)
+    try:
+        all_values, idx = _adhoc_layout(sheet)
+        if not all_values:
+            return (None, None, 0)
+        i_gid, i_date, i_tid, i_name = idx
+        today_str = datetime.now(pytz.timezone('Asia/Ho_Chi_Minh')).strftime('%Y-%m-%d')
+
+        rows = [r for r in all_values[1:]
+                if len(r) > max(i_gid, i_date, i_tid)
+                and str(r[i_gid]) == str(group_id) and r[i_date] == today_str]
+        if not rows:
+            return (None, None, 0)
+
+        last = rows[-1]
+        token = task_group_token(str(last[i_tid]))
+        label = last[i_name] if len(last) > i_name else ''
+        count = sum(1 for r in rows if task_group_token(str(r[i_tid])) == token)
+        return (token, label, count)
+    except Exception as e:
+        print(f"Lỗi tìm nhóm việc mới nhất: {e}")
+        return (None, None, 0)
+
+
+def cancel_task_group(group_id, token):
+    """
+    Xoá toàn bộ dòng việc thuộc một nhóm trong HÔM NAY.
+    token: hash nhóm (all_/multi_) hoặc task_id đầy đủ (adhoc_).
+    Trả về (số_dòng_đã_xoá, [tên_việc...]).
+    """
+    sheet = get_or_create_adhoc_worksheet()
+    if not sheet:
+        return (0, [])
+    try:
+        all_values, idx = _adhoc_layout(sheet)
+        if not all_values:
+            return (0, [])
+        i_gid, i_date, i_tid, i_name = idx
+        today_str = datetime.now(pytz.timezone('Asia/Ho_Chi_Minh')).strftime('%Y-%m-%d')
+
+        keep, names, removed = [], [], 0
+        for r in all_values[1:]:
+            if len(r) <= max(i_gid, i_date, i_tid):
+                keep.append(r)
+                continue
+            tid = str(r[i_tid])
+            hit = (str(r[i_gid]) == str(group_id) and r[i_date] == today_str
+                   and (tid == token or tid.startswith(token + "_")
+                        or task_group_token(tid) == token))
+            if hit:
+                removed += 1
+                if len(r) > i_name and r[i_name] not in names:
+                    names.append(r[i_name])
+            else:
+                keep.append(r)
+
+        if removed == 0:
+            return (0, [])
+
+        sheet.clear()
+        sheet.append_row(all_values[0])
+        if keep:
+            sheet.append_rows(keep, value_input_option='USER_ENTERED')
+        print(f"Đã hủy {removed} dòng việc của nhóm {token}.")
+        return (removed, names)
+    except Exception as e:
+        print(f"Lỗi hủy nhóm việc: {e}")
+        return (0, [])
+
+
+def build_cancel_footer(task_group_hash):
+    """Nút hủy nhóm việc ở chân thẻ Flex."""
+    return {
+        "type": "box",
+        "layout": "vertical",
+        "spacing": "sm",
+        "paddingAll": "sm",
+        "contents": [
+            {
+                "type": "button",
+                "style": "secondary",
+                "height": "sm",
+                "action": {
+                    "type": "postback",
+                    "label": "🗑 Hủy nhóm việc này",
+                    "data": f"action=cancel_task_group&token={task_group_hash}"
+                }
+            }
+        ]
+    }
+
+
 def update_adhoc_task_status(group_id, task_id, target_status, completed_by):
     """
     Cập nhật trạng thái của adhoc task.
@@ -928,7 +1053,8 @@ def generate_all_adhoc_flex(group_id, task_group_hash):
                 "spacing": "sm",
                 "paddingAll": "sm",
                 "contents": task_components
-            }
+            },
+            "footer": build_cancel_footer(task_group_hash)
         }
         return flex_content
     except Exception as e:
@@ -1200,7 +1326,8 @@ def generate_multi_adhoc_flex(group_id, task_group_hash):
                 "spacing": "sm",
                 "paddingAll": "sm",
                 "contents": task_components
-            }
+            },
+            "footer": build_cancel_footer(task_group_hash)
         }
         return flex_content
     except Exception as e:

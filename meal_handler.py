@@ -30,6 +30,286 @@ def clean_staff_name(name):
     name = re.sub(r'^[•\-\+:\.]\s*', '', name)
     return name.strip()
 
+
+# ============================================================================
+# DANH SÁCH NGƯỜI LÀM HÔM NAY — đọc thẳng sheet `schedules` (thêm 21/09/2026)
+# ----------------------------------------------------------------------------
+# Sheet `schedules` đã có lịch làm việc của NV + PG cho cả tuần nên đây mới là
+# nguồn chuẩn. Hàm dưới đọc ô `employee_schedule` + `pg_schedule` của ĐÚNG ngày
+# hôm nay, gộp cả Ca Sáng và Ca Chiều, rồi khử trùng theo tên đã chuẩn hoá
+# (bỏ dấu / emoji / ký hiệu vai trò).
+#
+# ĐỊNH DẠNG Ô — suy ra từ schedule_handler.py dòng 74 và 94:
+#   employee_schedule: "Ca Sáng (8 NV): A (ERP), B, C\nCa Chiều (7 NV): D, E\nNghỉ: ..."
+#       -> tên NV ngăn bằng DẤU PHẨY, có tiền tố "(8 NV): "
+#   pg_schedule:       "Ca Sáng (6): A\nB\nC\nCa Chiều (5): ..."
+#       -> tên PG ngăn bằng XUỐNG DÒNG, có tiền tố "(6): "
+#
+# Vì sao cần khử trùng: cùng một người có thể xuất hiện ở cả ca sáng lẫn ca chiều,
+# hoặc bị ghi ở cả cột NV lẫn cột PG -> nếu không khử sẽ nhận 2-3 dòng việc trùng.
+# ============================================================================
+
+SCHEDULE_KEYWORDS = ["Ca Sáng", "Ca Chiều", "Nghỉ", "Vệ Sinh Kho", "Vệ Sinh"]
+SHIFT_BLOCKS = ("Ca Sáng", "Ca Chiều")
+# GHI CHÚ về "(off ca3)" / "(off ca4)" trong cột chi tiết:
+#   Anh Dương xác nhận 22/09/2026 — đó là người đó NGHỈ CA ĐÓ trong ngày
+#   (ví dụ làm ca 2-4-5-6 thì off ca 3), KHÔNG phải nghỉ cả ngày.
+#   => Vẫn đi làm các ca khác, nên VẪN PHẢI có trong danh sách nhận việc.
+#   Trước đây code loại họ ra là SAI. Đừng thêm lại.
+#   (get_working_staff() cho điểm danh ăn uống vẫn giữ luật riêng của nó.)
+
+_EMOJI_RE = re.compile(
+    r"[\U0001F000-\U0001FAFF\u2600-\u27BF\u2B00-\u2BFF\uFE0F\u200D]"
+)
+
+
+def split_schedule_blocks(raw_text):
+    """Tách một ô lịch thành {tên ca: nội dung}."""
+    if not raw_text:
+        return {}
+    text = str(raw_text).replace("<br>", "\n")
+    pattern = "|".join(re.escape(k) for k in SCHEDULE_KEYWORDS)
+    parts = re.split("(%s)" % pattern, text)
+    blocks = {}
+    i = 1 if parts and not parts[0].strip() else 0
+    while i < len(parts):
+        shift = parts[i].strip()
+        content = ""
+        if i + 1 < len(parts):
+            content = parts[i + 1].strip().lstrip(":").lstrip(";").strip()
+        blocks.setdefault(shift, content)
+        i += 2
+    return blocks
+
+
+def clean_person_name(name):
+    """Bỏ tiền tố '(8 NV): ', số thứ tự, ký hiệu đầu dòng và emoji."""
+    if not name:
+        return ""
+    s = _EMOJI_RE.sub(" ", str(name))
+    s = re.sub(r"^\(\s*\d+\s*(?:NV|PG)?\s*\)\s*:?\s*", "", s)
+    s = re.sub(r"^[-+*.\d)]+\s*", "", s)
+    s = re.sub(r"\s+", " ", s)
+    return s.strip(" .,;:-*")
+
+
+def normalize_person_key(name):
+    """Khoá so trùng: bỏ dấu, bỏ ký hiệu vai trò, gộp khoảng trắng, viết thường."""
+    s = clean_person_name(name)
+    s = re.sub(r"\((?:ERP|GH1|GH2|PG|NV)\)", " ", s, flags=re.IGNORECASE)
+    s = s.replace("*", " ")
+    s = unicodedata.normalize("NFD", s)
+    s = "".join(c for c in s if unicodedata.category(c) != "Mn")
+    # BẪeY: 'Đ'/'đ' KHÔNG có phân rã NFD (không phải D + dấu gạch ngang tổ hợp),
+    # nên nếu để nguyên sẽ bị regex [^a-z0-9\s] xoá mất -> "Đỗ Văn Hùng" thành
+    # "o van hung". Phải quy về 'd' thủ công trước khi lọc.
+    s = s.replace("đ", "d").replace("Đ", "d")
+    s = re.sub(r"[^a-z0-9\s]", " ", s.lower())
+    return re.sub(r"\s+", " ", s).strip()
+
+
+def get_daily_roster(day_str=None):
+    """
+    Danh sách người làm hôm nay lấy từ sheet `schedules`, đã khử trùng.
+
+    Trả về list[dict]: [{'name': 'Nguyễn Văn A', 'role': 'NV', 'shift': 'Ca Sáng'}, ...]
+    Khử trùng theo normalize_person_key.
+    """
+    day = day_str or get_vietnamese_day_of_week()
+    try:
+        sheet = get_spreadsheet().worksheet(WORKSHEET_SCHEDULES_NAME)
+        records = sheet.get_all_records()
+    except Exception as e:
+        print("Lỗi đọc sheet schedules: %s" % e)
+        return []
+
+    row = next((r for r in records
+                if str(r.get("day_of_week", "")).strip() == day), None)
+    if not row:
+        print("Sheet schedules không có dòng cho %s." % day)
+        return []
+
+    roster = []
+    seen = set()
+    for role, col_name in (("NV", "employee_schedule"), ("PG", "pg_schedule")):
+        blocks = split_schedule_blocks(row.get(col_name, ""))
+        for shift in SHIFT_BLOCKS:
+            content = blocks.get(shift, "")
+            if not content:
+                continue
+            for raw in re.split(r"[,\n;•+]", content):
+                name = clean_person_name(raw)
+                if not name or name.isdigit() or len(name) < 2:
+                    continue
+                if is_placeholder_name(name):
+                    continue
+                key = normalize_person_key(name)
+                if not key or key in seen:
+                    continue
+                seen.add(key)
+                roster.append({"name": name, "role": role, "shift": shift})
+
+    print("[ROSTER] %s: %d người sau khử trùng (%d NV, %d PG)" % (
+        day, len(roster),
+        sum(1 for r in roster if r["role"] == "NV"),
+        sum(1 for r in roster if r["role"] == "PG")))
+    return roster
+
+
+def get_daily_roster_names(day_str=None):
+    """Tiện dụng: chỉ lấy danh sách tên."""
+    return [r["name"] for r in get_daily_roster(day_str)]
+
+
+# ============================================================================
+# BA NHÓM NGƯỜI NHẬN VIỆC — 3 cột E/F/G của sheet `schedules` (22/09/2026)
+# ----------------------------------------------------------------------------
+# CẤU TRÚC THẬT (đối chiếu file thật 22/09/2026):
+#   A day_of_week | B pg_schedule | C employee_schedule | D (trống)
+#   E PG | F NV | G QL+TC
+#
+#   Dòng 0     = tiêu đề
+#   Dòng 1..7  = Thứ Hai .. Chủ Nhật
+#   Dòng 8+    = cột A TRỐNG, nhưng E/F/G vẫn ghi tiếp tên
+#
+#   => E/F/G là DANH SÁCH DỌC trải nhiều dòng, KHÔNG phải mỗi ngày một ô.
+#      Phải quét HẾT mọi dòng. Lọc theo `day_of_week` sẽ chỉ ra 1 người/nhóm.
+#
+#   Thực tế: E = 12 PG, F = 11 NV, G = 2 QL+TC -> tổng 25 người.
+# ============================================================================
+
+ROSTER_GROUPS = ("PG", "NV", "QL+TC")
+# Cột E, F, G (0-based) — dùng khi dòng tiêu đề bị đổi tên khác
+ROSTER_COL_FALLBACK = {"PG": 4, "NV": 5, "QL+TC": 6}
+
+_PLACEHOLDER_KEYS = ("", "khong co", "khong", "trong", "none", "null", "n a", "na")
+
+
+def is_placeholder_name(name):
+    """True nếu chuỗi không phải tên người (ví dụ 'Không có')."""
+    return normalize_person_key(name) in _PLACEHOLDER_KEYS
+
+
+def _header_and_rows(values):
+    """Tách dòng tiêu đề và các dòng dữ liệu của một bảng giá trị."""
+    if not values:
+        return [], []
+    header = [str(h).strip() for h in values[0]]
+    return header, values[1:]
+
+
+def _find_day_row(values, day):
+    """Trả về dict {tên_cột: giá_trị} của dòng có day_of_week == day."""
+    header, rows = _header_and_rows(values)
+    if "day_of_week" not in header:
+        return None
+    i_day = header.index("day_of_week")
+    for row in rows:
+        if i_day < len(row) and str(row[i_day]).strip() == day:
+            return {header[i]: (row[i] if i < len(row) else "")
+                    for i in range(len(header))}
+    return None
+
+
+def _read_roster_columns(values):
+    """
+    Đọc 3 cột E/F/G thành {'PG': [...], 'NV': [...], 'QL+TC': [...]}.
+
+    QUÉT HẾT MỌI DÒNG — không lọc theo day_of_week, vì danh sách nằm dọc.
+    """
+    from task_parser import split_names
+
+    header, rows = _header_and_rows(values)
+    out = {}
+    for group in ROSTER_GROUPS:
+        if group in header:
+            ci = header.index(group)
+        else:
+            ci = ROSTER_COL_FALLBACK[group]
+        names, seen = [], set()
+        for row in rows:
+            if ci >= len(row):
+                continue
+            for nm in split_names(row[ci]):
+                key = normalize_person_key(nm)
+                if not key or key in seen:
+                    continue
+                seen.add(key)
+                names.append(nm)
+        out[group] = names
+    return out
+
+
+def _names_from_detail(row, col_name):
+    """
+    Bóc tên từ cột chi tiết (gộp Ca Sáng + Ca Chiều). CHỈ dùng làm dự phòng khi
+    cột gọn E/F/G trống hẳn.
+
+    KHÔNG loại người ghi "(off ca3)/(off ca4)": anh Dương xác nhận đó chỉ là
+    ghi chú nghỉ CA ĐÓ trong ngày, người ta vẫn đi làm các ca khác.
+    """
+    out, seen = [], set()
+    blocks = split_schedule_blocks(row.get(col_name, ""))
+    for shift in SHIFT_BLOCKS:
+        content = blocks.get(shift, "")
+        if not content:
+            continue
+        for raw in re.split(r"[,\n;•+]", content):
+            name = clean_person_name(raw)
+            if not name or name.isdigit() or len(name) < 2:
+                continue
+            if is_placeholder_name(name):
+                continue
+            key = normalize_person_key(name)
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            out.append(name)
+    return out
+
+
+def get_task_roster(day_str=None):
+    """
+    Danh sách người nhận việc theo 3 nhóm, đọc 3 cột E/F/G của sheet `schedules`.
+
+    Trả về {'PG': [...], 'NV': [...], 'QL+TC': [...]}
+
+    day_str chỉ dùng cho phần DỰ PHÒNG (khi cột gọn trống hẳn).
+    """
+    empty = {g: [] for g in ROSTER_GROUPS}
+    day = day_str or get_vietnamese_day_of_week()
+    try:
+        sheet = get_spreadsheet().worksheet(WORKSHEET_SCHEDULES_NAME)
+        values = sheet.get_all_values()
+    except Exception as e:
+        print("Lỗi đọc sheet schedules: %s" % e)
+        return empty
+
+    try:
+        roster = _read_roster_columns(values)
+    except Exception as e:
+        print("Lỗi đọc 3 cột PG/NV/QL+TC: %s" % e)
+        return empty
+
+    # Dự phòng: nhóm nào TRỐNG HẲN mới bóc tạm từ cột chi tiết của hôm nay.
+    if not all(roster[g] for g in ROSTER_GROUPS):
+        row = _find_day_row(values, day)
+        if row:
+            for group, detail_col in (("PG", "pg_schedule"),
+                                      ("NV", "employee_schedule")):
+                if not roster[group]:
+                    roster[group] = _names_from_detail(row, detail_col)
+                    if roster[group]:
+                        print("[ROSTER] cột %s trống -> tạm bóc từ %s (%d người)."
+                              % (group, detail_col, len(roster[group])))
+        else:
+            print("[ROSTER] không thấy dòng cho %s để dự phòng." % day)
+
+    print("[ROSTER] PG %d | NV %d | QL+TC %d"
+          % (len(roster["PG"]), len(roster["NV"]), len(roster["QL+TC"])))
+    return roster
+
+
 def get_working_staff(session_type):
     day_str = get_vietnamese_day_of_week()
     target_shift_name = "Ca Sáng" if session_type == 'ansang' else "Ca Chiều"
