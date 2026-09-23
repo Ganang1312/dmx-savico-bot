@@ -1905,7 +1905,166 @@ def build_nhanvien_flex():
         
     return all_bubbles
 
-def build_realtime_flex():
+# ============================================================================
+#  ĐÓNG GÓI MESSAGE CHO LINE — CHỈ dùng tin nhắn MIỄN PHÍ (reply_message)
+#  Tuyệt đối KHÔNG dùng push_message cho báo cáo vì push tốn quota tháng của LINE OA.
+#  Giới hạn thật của LINE (tra tài liệu chính thức 23/09/2026):
+#    - tối đa 5 message object / 1 request
+#    - Flex bubble   ≤ 30 KB JSON
+#    - Flex carousel ≤ 50 KB JSON và ≤ 12 thẻ
+#  => Phải nhét vừa 5 message NGAY từ lần reply đầu, không có van xả bằng push.
+# ============================================================================
+LINE_MAX_MESSAGES = 5
+FLEX_BUBBLE_MAX = 30000
+FLEX_CAROUSEL_MAX = 50000
+FLEX_CAROUSEL_MAX_ITEMS = 12
+
+
+def json_size(obj):
+    """Kích thước thật (byte UTF-8) của object khi serialize sang JSON."""
+    try:
+        return len(json.dumps(obj, ensure_ascii=False).encode("utf-8"))
+    except Exception:
+        return 0
+
+
+def greedy_carousels(bubbles, max_items=FLEX_CAROUSEL_MAX_ITEMS, max_bytes=FLEX_CAROUSEL_MAX):
+    """Chia danh sách bubble thành các carousel, mỗi cái ≤ max_bytes và ≤ max_items thẻ.
+
+    Đi theo đúng thứ tự nên số carousel sinh ra là ÍT NHẤT có thể: đây là bài toán
+    chia đoạn liên tiếp với trần dung lượng, greedy tuần tự là cách chia tối ưu.
+    """
+    parts, cur = [], []
+    for b in bubbles:
+        if cur:
+            cand = {"type": "carousel", "contents": cur + [b]}
+            if len(cur) >= max_items or json_size(cand) > max_bytes:
+                parts.append(cur)
+                cur = [b]
+                continue
+        cur.append(b)
+    if cur:
+        parts.append(cur)
+    return parts
+
+
+def pack_rt_messages(rt_bubbles, nv_bubbles, max_messages=LINE_MAX_MESSAGES):
+    """Đóng gói bubble báo cáo realtime thành TỐI ĐA max_messages tin nhắn.
+
+    Trả về (messages, info) khi xếp vừa, hoặc (None, info) khi KHÔNG vừa
+    — lúc đó caller phải dựng lại với detail_limit nhỏ hơn.
+    messages: list dict {"alt_text", "contents"} — sẵn sàng bọc FlexSendMessage.
+    """
+    rt_parts = greedy_carousels(rt_bubbles)
+    nv_parts = greedy_carousels(nv_bubbles)
+    info = {
+        "rt_parts": len(rt_parts),
+        "nv_parts": len(nv_parts),
+        "rt_bytes": [json_size({"type": "carousel", "contents": p}) for p in rt_parts],
+        "nv_bytes": [json_size({"type": "carousel", "contents": p}) for p in nv_parts],
+        "nv_bubbles": len(nv_bubbles),
+    }
+
+    if len(rt_parts) + len(nv_parts) > max_messages:
+        return None, info
+
+    messages = []
+    for part in rt_parts:
+        if len(part) == 1:
+            messages.append({"alt_text": "⚡ BÁO CÁO REALTIME", "contents": part[0]})
+        else:
+            messages.append({"alt_text": "⚡ BÁO CÁO REALTIME (Doanh Thu & Thi Đua)",
+                             "contents": {"type": "carousel", "contents": part}})
+    total_nv = len(nv_parts)
+    for i, part in enumerate(nv_parts):
+        tag = "" if total_nv == 1 else f" ({i+1}/{total_nv})"
+        messages.append({
+            "alt_text": f"👑 CHI TIẾT DTNV{tag}",
+            "contents": {"type": "carousel", "contents": part} if len(part) > 1 else part[0],
+        })
+    return messages, info
+
+
+# Các mức tiết lưu dòng chi tiết ngành hàng, thử lần lượt từ đầy đủ đến gọn nhất.
+# None = KHÔNG cắt gì (giữ nguyên hành vi cũ).
+RT_DETAIL_FALLBACKS = (None, 8, 6, 4, 3, 2, 1, 0)
+
+
+def build_realtime_messages(max_messages=LINE_MAX_MESSAGES, detail_fallbacks=RT_DETAIL_FALLBACKS):
+    """Dựng báo cáo realtime đã đóng gói, CHỈ dùng tin nhắn miễn phí (≤ 5 message).
+
+    Chiến lược: thử bản ĐẦY ĐỦ trước (không mất số liệu); chỉ khi vẫn quá 5 message
+    mới tiết lưu dần số dòng chi tiết ngành hàng trong từng thẻ NV cho tới khi vừa.
+    Bản gọn nhất (0 dòng chi tiết) luôn vừa nên hàm này không bao giờ trả None
+    vì lý do dung lượng ở quy mô một siêu thị.
+    """
+    last_info = None
+    for lim in detail_fallbacks:
+        bubbles = build_realtime_flex(detail_limit=lim)
+        if not isinstance(bubbles, list):
+            bubbles = [bubbles]
+        if len(bubbles) < 2:
+            return [{"alt_text": "⚡ Báo Cáo Realtime Hôm Nay", "contents": bubbles[0]}], {"detail_limit": lim}
+
+        msgs, info = pack_rt_messages(bubbles[:2], bubbles[2:], max_messages=max_messages)
+        info["detail_limit"] = lim
+        last_info = info
+        if msgs:
+            return msgs, info
+
+    # Chốt hạ — chỉ chạy khi số nhân viên cực lớn (hàng trăm), vượt xa quy mô siêu thị.
+    # Cắt bớt thẻ NV cuối cho vừa số slot còn lại và ghi rõ đã lược bao nhiêu thẻ.
+    # TUYỆT ĐỐI không push để tránh tốn quota.
+    bubbles = build_realtime_flex(detail_limit=detail_fallbacks[-1])
+    if not isinstance(bubbles, list):
+        bubbles = [bubbles]
+    rt_parts = greedy_carousels(bubbles[:2])
+    slots_left = max_messages - len(rt_parts)
+    nv_bubbles = bubbles[2:]
+    if slots_left <= 0 or not nv_bubbles:
+        return None, last_info
+
+    keep = []
+    for b in nv_bubbles:
+        if len(greedy_carousels(keep + [b])) > slots_left:
+            break
+        keep.append(b)
+
+    if len(keep) == len(nv_bubbles):
+        bo_qua = 0
+    else:
+        # Phải chừa sẵn 1 chỗ cho dòng ghi chú "… và N nhân viên khác",
+        # nếu không chính dòng ghi chú đó lại làm vượt số slot.
+        dong_ghi_chu = {
+            "type": "bubble",
+            "size": "micro",
+            "body": {
+                "type": "box",
+                "layout": "vertical",
+                "paddingAll": "md",
+                "contents": [
+                    {"type": "text", "text": "… và 0 nhân viên khác",
+                     "size": "xs", "color": "#64748b", "align": "center", "wrap": True}
+                ]
+            }
+        }
+        keep = []
+        for b in nv_bubbles:
+            if len(greedy_carousels(keep + [b, dong_ghi_chu])) > slots_left:
+                break
+            keep.append(b)
+        bo_qua = len(nv_bubbles) - len(keep)
+        dong_ghi_chu["body"]["contents"][0]["text"] = f"… và {bo_qua} nhân viên khác"
+        keep.append(dong_ghi_chu)
+
+    msgs, info = pack_rt_messages(bubbles[:2], keep, max_messages=max_messages)
+    if info is not None:
+        info["detail_limit"] = detail_fallbacks[-1]
+        info["nv_bi_luoc"] = bo_qua
+    return msgs, info
+
+
+def build_realtime_flex(detail_limit=None):
     data = get_dashboard_data("Data_BI,Data_ThiDua,Config_ThiDua,Data_Realtime_BI,Data_Realtime_ThiDua,Data_Realtime_NV,Data_Realtime_NV_NganhHang")
     config_rows = data.get("Config_ThiDua", [])
     bi_rows = data.get("Data_BI", [])
@@ -2732,6 +2891,25 @@ def build_realtime_flex():
                 total_thuc_qty = int(item["sl"])
                 total_thuc_rev = item["dt"]
 
+            # Tiết lưu khi cần: chỉ giữ top N ngành hàng có doanh thu thực cao nhất.
+            # detail_limit = None -> giữ nguyên như cũ (KHÔNG cắt gì).
+            so_nganh_bi_luoc = 0
+            if detail_limit is not None and len(detail_list) > detail_limit:
+                so_nganh_bi_luoc = len(detail_list) - detail_limit
+                detail_list = detail_list[:detail_limit]
+
+            dong_xem_them = {
+                "type": "box",
+                "layout": "horizontal",
+                "paddingTop": "xs",
+                "paddingBottom": "xs",
+                "contents": [
+                    {"type": "text",
+                     "text": f"… và {so_nganh_bi_luoc} ngành hàng khác",
+                     "size": "xxs", "color": "#94a3b8", "flex": 1}
+                ]
+            }
+
             # Danh sách từng ngành hàng (Giao diện dòng trực quan, không cắt chữ, không lặp tiêu đề)
             item_rows = []
             if detail_list:
@@ -2761,6 +2939,11 @@ def build_realtime_flex():
                     })
                     if cat_idx < len(detail_list) - 1:
                         item_rows.append({"type": "separator", "color": "#f8fafc", "margin": "xs"})
+                if so_nganh_bi_luoc > 0:
+                    item_rows.append(dong_xem_them)
+            elif so_nganh_bi_luoc > 0:
+                # Bị tiết lưu xuống 0 dòng — báo đúng sự thật, không hiện câu "chưa có phát sinh".
+                item_rows.append(dong_xem_them)
             else:
                 item_rows.append({
                     "type": "box",

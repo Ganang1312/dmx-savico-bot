@@ -34,7 +34,9 @@ from checklist_scheduler import send_initial_checklist, get_checklist_message
 from meal_handler import generate_meal_flex, update_meal_status
 from vesinh_handler import generate_vesinh_flex, update_vesinh_status, get_current_vesinh_session
 from dmx_data_provider import trigger_adhoc_scrape, check_scrape_status
-from dmx_flex_messages import build_luyke_flex, build_nhanvien_flex, build_realtime_flex, build_help_commands_flex
+from dmx_flex_messages import (build_luyke_flex, build_nhanvien_flex,
+                               build_help_commands_flex, build_realtime_messages,
+                               LINE_MAX_MESSAGES)
 
 # --- CẤU HÌNH ---
 CHANNEL_ACCESS_TOKEN = os.environ.get('CHANNEL_ACCESS_TOKEN')
@@ -1180,55 +1182,37 @@ def handle_message(event):
         return
 
     if user_msg_upper == 'RT1':
+        # Báo cáo realtime CHỈ gửi bằng reply_message (MIỄN PHÍ).
+        # KHÔNG dùng push_message: push tốn quota tháng của LINE OA.
         try:
-            flex_msg = build_realtime_flex()
+            rt_messages, rt_info = build_realtime_messages(max_messages=LINE_MAX_MESSAGES)
         except Exception as e:
             print(f"Lỗi khởi tạo báo cáo realtime: {e}")
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"Lỗi tạo báo cáo realtime: {str(e)}"))
-            return
-            
-        try:
-            if isinstance(flex_msg, list) and len(flex_msg) >= 3:
-                # LINE giới hạn 1 carousel tối đa 50KB, 1 bubble tối đa 30KB.
-                # Gom 2 thẻ Siêu Thị (Doanh thu P.1 & Thi đua P.2) vào 1 Carousel (~39KB < 50KB)
-                carousel_rt = {"type": "carousel", "contents": [flex_msg[0], flex_msg[1]]}
-                carousel_size = len(json.dumps(carousel_rt, ensure_ascii=False).encode('utf-8'))
-                
-                msg_list = []
-                if carousel_size <= 45000:
-                    msg_list.append(FlexSendMessage(alt_text="⚡ BÁO CÁO REALTIME (Doanh Thu & Thi Đua)", contents=carousel_rt))
-                else:
-                    msg_list.append(FlexSendMessage(alt_text="⚡ BÁO CÁO REALTIME (Doanh Thu & Tiến Độ)", contents=flex_msg[0]))
-                    msg_list.append(FlexSendMessage(alt_text="⚡ BÁO CÁO REALTIME (Nhóm Hàng Thi Đua)", contents=flex_msg[1]))
-
-                # Các thẻ Chi tiết Doanh thu Nhân viên: gom thành 1 Carousel nằm cùng 1 hàng lướt ngang như Thẻ 1 và Thẻ 2
-                nv_bubbles = flex_msg[2:]
-                if len(nv_bubbles) > 1:
-                    carousel_nv = {"type": "carousel", "contents": nv_bubbles}
-                    carousel_nv_size = len(json.dumps(carousel_nv, ensure_ascii=False).encode('utf-8'))
-                    if carousel_nv_size <= 48000:
-                        msg_list.append(FlexSendMessage(alt_text="👑 CHI TIẾT DTNV (P.1 & P.2)", contents=carousel_nv))
-                    else:
-                        for idx_nv, b in enumerate(nv_bubbles):
-                            part_tag = f" (P.{idx_nv+1})"
-                            msg_list.append(FlexSendMessage(alt_text=f"👑 CHI TIẾT DTNV{part_tag}", contents=b))
-                elif len(nv_bubbles) == 1:
-                    msg_list.append(FlexSendMessage(alt_text="👑 CHI TIẾT DTNV", contents=nv_bubbles[0]))
-                    
-                line_bot_api.reply_message(event.reply_token, msg_list)
-            elif isinstance(flex_msg, list) and len(flex_msg) > 1:
-                carousel_content = {"type": "carousel", "contents": flex_msg}
-                line_bot_api.reply_message(event.reply_token, FlexSendMessage(alt_text="⚡ BÁO CÁO REALTIME", contents=carousel_content))
-            elif isinstance(flex_msg, list) and len(flex_msg) == 1:
-                line_bot_api.reply_message(event.reply_token, FlexSendMessage(alt_text="⚡ Báo Cáo Realtime Hôm Nay", contents=flex_msg[0]))
-            else:
-                line_bot_api.reply_message(event.reply_token, FlexSendMessage(alt_text="⚡ Báo Cáo Realtime Hôm Nay", contents=flex_msg))
-        except Exception as e:
-            print(f"Lỗi gửi Flex RT1: {e}")
             try:
-                line_bot_api.push_message(source_id, TextSendMessage(text=f"Lỗi gửi Flex báo cáo realtime: {str(e)}"))
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"Lỗi tạo báo cáo realtime: {str(e)}"))
             except Exception as pe:
-                print(f"Lỗi gửi tin nhắn đẩy dự phòng: {pe}")
+                print(f"Lỗi gửi reply dự phòng: {pe}")
+            return
+
+        try:
+            if not rt_messages:
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(
+                    text="⚠️ Báo cáo realtime hôm nay quá lớn để gói gọn trong 5 tin nhắn.\n"
+                         "Vui lòng xem chi tiết trên dashboard HTML."
+                ))
+                return
+
+            reply_msgs = [FlexSendMessage(alt_text=m["alt_text"], contents=m["contents"])
+                          for m in rt_messages]
+            # Chặn cứng ở 5 message: vượt là LINE trả 400 "Size must be between 1 and 5".
+            line_bot_api.reply_message(event.reply_token, reply_msgs[:LINE_MAX_MESSAGES])
+            print(f"RT1: gửi {min(len(reply_msgs), LINE_MAX_MESSAGES)}/{len(reply_msgs)} message | "
+                  f"tiết lưu chi tiết = {rt_info.get('detail_limit') if rt_info else '?'} | "
+                  f"RT {rt_info.get('rt_parts') if rt_info else '?'} phần, "
+                  f"NV {rt_info.get('nv_parts') if rt_info else '?'} phần")
+        except Exception as e:
+            # KHÔNG push dự phòng (tốn quota) — chỉ ghi log để còn truy vết.
+            print(f"Lỗi gửi Flex RT1 (không push dự phòng): {e}")
         return
 
     if user_msg_upper in ['RT', 'CAO'] or user_msg_upper.startswith(('RT ', 'CAO ')):
@@ -1272,40 +1256,18 @@ def handle_message(event):
                             else:
                                 line_bot_api.push_message(dest_id, FlexSendMessage(alt_text="Báo Cáo Lũy Kế Savico", contents=flex_msg))
                         else:
-                            flex_msg = build_realtime_flex()
-                            if isinstance(flex_msg, list) and len(flex_msg) >= 3:
-                                carousel_rt = {"type": "carousel", "contents": [flex_msg[0], flex_msg[1]]}
-                                carousel_size = len(json.dumps(carousel_rt, ensure_ascii=False).encode('utf-8'))
-                                
-                                msg_list = []
-                                if carousel_size <= 45000:
-                                    msg_list.append(FlexSendMessage(alt_text="⚡ BÁO CÁO REALTIME (Doanh Thu & Thi Đua)", contents=carousel_rt))
-                                else:
-                                    msg_list.append(FlexSendMessage(alt_text="⚡ BÁO CÁO REALTIME (Doanh Thu & Tiến Độ)", contents=flex_msg[0]))
-                                    msg_list.append(FlexSendMessage(alt_text="⚡ BÁO CÁO REALTIME (Nhóm Hàng Thi Đua)", contents=flex_msg[1]))
-
-                                # Các thẻ Chi tiết Doanh thu Nhân viên: gom thành 1 Carousel nằm cùng 1 hàng lướt ngang như Thẻ 1 và Thẻ 2
-                                nv_bubbles = flex_msg[2:]
-                                if len(nv_bubbles) > 1:
-                                    carousel_nv = {"type": "carousel", "contents": nv_bubbles}
-                                    carousel_nv_size = len(json.dumps(carousel_nv, ensure_ascii=False).encode('utf-8'))
-                                    if carousel_nv_size <= 48000:
-                                        msg_list.append(FlexSendMessage(alt_text="👑 CHI TIẾT DTNV (P.1 & P.2)", contents=carousel_nv))
-                                    else:
-                                        for idx_nv, b in enumerate(nv_bubbles):
-                                            part_tag = f" (P.{idx_nv+1})"
-                                            msg_list.append(FlexSendMessage(alt_text=f"👑 CHI TIẾT DTNV{part_tag}", contents=b))
-                                elif len(nv_bubbles) == 1:
-                                    msg_list.append(FlexSendMessage(alt_text="👑 CHI TIẾT DTNV", contents=nv_bubbles[0]))
-                                    
-                                line_bot_api.push_message(dest_id, msg_list)
-                            elif isinstance(flex_msg, list) and len(flex_msg) > 1:
-                                carousel_content = {"type": "carousel", "contents": flex_msg}
-                                line_bot_api.push_message(dest_id, FlexSendMessage(alt_text="⚡ BÁO CÁO REALTIME", contents=carousel_content))
-                            elif isinstance(flex_msg, list) and len(flex_msg) == 1:
-                                line_bot_api.push_message(dest_id, FlexSendMessage(alt_text="⚡ Báo Cáo Realtime Hôm Nay", contents=flex_msg[0]))
+                            # Lệnh RT/CAO phải chờ cào dữ liệu tới 120 giây, mà reply_token chỉ
+                            # sống ~1 phút nên buộc phải push. Vì push tốn quota, vẫn đóng gói
+                            # ≤ 5 message để KHÔNG bao giờ bị LINE trả 400.
+                            rt_messages, _rt_info = build_realtime_messages(max_messages=LINE_MAX_MESSAGES)
+                            if rt_messages:
+                                push_msgs = [FlexSendMessage(alt_text=m["alt_text"], contents=m["contents"])
+                                             for m in rt_messages]
+                                line_bot_api.push_message(dest_id, push_msgs[:LINE_MAX_MESSAGES])
                             else:
-                                line_bot_api.push_message(dest_id, FlexSendMessage(alt_text="⚡ Báo Cáo Realtime Hôm Nay", contents=flex_msg))
+                                line_bot_api.push_message(dest_id, TextSendMessage(
+                                    text="⚠️ Báo cáo realtime quá lớn để gói gọn trong 5 tin nhắn. Vui lòng xem dashboard HTML."
+                                ))
                     except Exception as fe:
                         print(f"Lỗi gửi Flex báo cáo cào: {fe}")
                         try:
