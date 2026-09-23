@@ -1199,7 +1199,7 @@ def build_individual_staff_card(e, rank, total_emp=11, now_str="", thi_dua_list=
     if not thi_dua_list:
         thi_dua_list = []
     else:
-        # Sắp xếp nhóm thi đua theo du_kien giảm dần và GIỮ NGUYÊN 100% 23 nhóm!
+        # Sắp xếp nhóm thi đua theo du_kien giảm dần và GIỮ NGUYÊN toàn bộ nhóm
         thi_dua_list = sorted(thi_dua_list, key=lambda x: x.get("du_kien", 0.0), reverse=True)
 
     td_passed = e.get("count_nh_du_kien")
@@ -1575,9 +1575,10 @@ def build_nhanvien_flex():
         u_id = str(get_key_val(r, "staffuser", "mã nv", "employeeid", "user", "mã nhân viên") or "").strip().upper()
         if not u_id:
             continue
-        dt_qd = parse_number(get_key_val(r, "doanh thu quy đổi", "revenue_kfactor", "dt quy đổi", default=0.0))
-        rev_k_cum = parse_number(get_key_val(r, "revenue_kfactor_cum", "doanh thu quy đổi lũy kế", default=0.0))
-        b_dt = (rev_k_cum + dt_qd) if (rev_k_cum > 0 and dt_qd < rev_k_cum) else (dt_qd or rev_k_cum)
+        dt_qd = parse_number(get_key_val(r, "doanh thu quy đổi", "revenue_kfactor", "dt quy đổi", "revenue_kfactor_ave3m", default=0.0))
+        rev_k_cum = parse_number(get_key_val(r, "revenue_kfactor_cum", "revenue_cum", "doanh thu quy đổi lũy kế", "dt quy đổi lũy kế", "doanh thu lũy kế", "dt lũy kế", default=0.0))
+        # baocao_nhanvien.html (baseUserMap): b_dt = revKCum > 0 ? revKCum : dtQD
+        b_dt = rev_k_cum if rev_k_cum > 0 else dt_qd
         if u_id not in base_user_map:
             base_user_map[u_id] = {"dt": 0.0, "td": {}}
         base_user_map[u_id]["dt"] += b_dt
@@ -1617,13 +1618,19 @@ def build_nhanvien_flex():
     if lock_config and lock_config.get("is_locked") and locked_staff_list:
         initial_ratios = {}
         sum_ratios = 0.0
+        # baocao_nhanvien.html lấy chế độ từ locked_mode của bản khoá (không hardcode hybrid)
+        locked_mode = lock_config.get("locked_mode") or "hybrid"
         for u_id, u_conf in active_config_staff.items():
             locked_s = next((s for s in locked_staff_list if str(s.get("userId", "")).strip().upper() == u_id), None)
             if locked_s and locked_s.get("lockedRatio") is not None:
                 r = parse_number(locked_s.get("lockedRatio"))
-            else:
+            elif locked_mode == "equal":
+                r = 1.0 / num_active_staff
+            elif locked_mode == "hybrid":
                 hcr = base_staff_dt_contrib.get(u_id, u_conf["ratio"])
                 r = 0.6 / num_active_staff + 0.4 * hcr
+            else:
+                r = u_conf["ratio"]
             initial_ratios[u_id] = r
             sum_ratios += r
         if sum_ratios <= 0:
@@ -1666,12 +1673,16 @@ def build_nhanvien_flex():
                 u_id = matched_uid
         
         if u_id in user_map:
-            dt_qd = parse_number(get_key_val(r, "Doanh thu Quy đổi", "doanh thu quy đổi", "revenue_kfactor", "dt quy đổi", default=0.0))
-            rev_k_cum = parse_number(get_key_val(r, "revenue_kfactor_cum", "doanh thu quy đổi lũy kế", "dt quy đổi lũy kế", default=0.0))
-            dt_total = (rev_k_cum + dt_qd) if (rev_k_cum > 0 and dt_qd < rev_k_cum) else (dt_qd or rev_k_cum)
+            dt_qd = parse_number(get_key_val(r, "Doanh thu Quy đổi", "doanh thu quy đổi", "revenue_kfactor", "dt quy đổi", "revenue_kfactor_ave3m", default=0.0))
+            rev_k_cum = parse_number(get_key_val(r, "revenue_kfactor_cum", "revenue_cum", "doanh thu quy đổi lũy kế", "dt quy đổi lũy kế", "doanh thu lũy kế", "dt lũy kế", default=0.0))
+            # baocao_nhanvien.html: totalDT = revKCum > 0 ? revKCum : dtQD
+            # (KHÔNG cộng dồn rev_k_cum + dt_qd — làm vậy là tính trùng doanh thu,
+            #  vì "Doanh thu Quy đổi" và "revenue_kfactor_cum" đang cùng là số lũy kế.)
+            dt_total = rev_k_cum if rev_k_cum > 0 else dt_qd
             user_map[u_id]["dt"] += dt_total
 
-    # 5. Store Thi Đua Categories (chuẩn 23 nhóm theo baocao_nhanvien.html)
+    # 5. Bộ ngành thi đua — DỰNG ĐÚNG THEO baocao_nhanvien.html
+    #    (khớp CHÍNH XÁC tên ngành · chỉ đọc cột "doanh thu" · isSL chỉ so tỷ lệ hoàn thành)
     active_categories = []
     for r in td_store_rows:
         nganh = get_key_val(r, "maingroupname", "main group name", "nhóm ngành hàng", "nhóm ngành hàng chính", "programname", default=None)
@@ -1680,32 +1691,46 @@ def build_nhanvien_flex():
         tg = parse_number(get_key_val(r, "target", "mục tiêu", default=0.0))
         if tg <= 0:
             continue
-        
+
         nganh_str = str(nganh).strip()
         nganh_clean = nganh_str.lower()
-        c_obj = find_td_config(nganh_clean, config_map)
+
+        # KHỚP CHÍNH XÁC — y hệt `configMap[nganhClean]` của baocao_nhanvien.html.
+        # KHÔNG dùng find_td_config() ở đây: hàm đó khớp mờ 4 tầng (bỏ hậu tố "tháng N")
+        # nên sẽ nhận thêm nhóm 'Đồng hồ' từ dòng cấu hình 'Đồng hồ tháng 9'.
+        # Hệ quả: tổng hệ số thành 36 thay vì 34 -> điểm thi đua của MỌI nhân viên bị lệch.
+        c_obj = config_map.get(nganh_clean) or {}
         if config_map and (c_obj.get("phanLoai") not in [1.0, 2.0]):
             continue
-            
+
         c_obj = c_obj or {"phanLoai": 1.0, "thuTu": 999.0}
         sl = parse_number(get_key_val(r, "số lượng", "quantity", "sl", default=0.0))
-        dt = max(
-            parse_number(get_key_val(r, "doanh thu quy đổi", "revenue_kfactor", default=0.0)),
-            parse_number(get_key_val(r, "doanh thu", "revenue", default=0.0))
-        )
-        comp_type = get_key_val(r, "competitiontype", "competitionType", "phân loại", "loại", default=None)
-        is_sl = determine_is_sl(comp_type, nganh_clean, sl=sl, dt=dt, tg=tg, config_obj=c_obj)
-        thuc_hien_store = sl if is_sl else dt
+        dt = parse_number(get_key_val(r, "doanh thu", default=0.0))
+
+        # isSL đúng baocao_nhanvien.html: CHỈ so tỷ lệ hoàn thành giữa SL và DT.
+        # KHÔNG dùng determine_is_sl(): hàm đó có thêm bộ luật compType/từ khóa
+        # (dành cho baocao_luyke.html và baocao_realtime.html) -> lệch 4 ngành.
+        is_sl = True
+        thuc_hien_store = sl
+        if dt > 0:
+            if sl == 0:
+                is_sl = False
+                thuc_hien_store = dt
+            elif abs((dt / tg) - 1) < abs((sl / tg) - 1):
+                is_sl = False
+                thuc_hien_store = dt
 
         active_categories.append({
             "nganhHang": nganh_str,
             "storeTarget": tg,
             "phanLoai": c_obj["phanLoai"],
             "thuTu": c_obj["thuTu"],
-            "isSL": is_sl
+            "isSL": is_sl,
+            "storeHtDuKien": (((thuc_hien_store / days_passed) * days_in_month) / tg) if tg > 0 else 0.0
         })
 
-    active_categories.sort(key=lambda x: x["thuTu"])
+    # baocao_nhanvien.html sắp theo mức hoàn thành dự kiến GIẢM DẦN (không phải theo thứ tự cấu hình)
+    active_categories.sort(key=lambda x: x["storeHtDuKien"], reverse=True)
 
     # 6. Tính target từng ngành hàng thi đua cho từng nhân viên (userCatTargets)
     user_cat_targets = {u_id: {} for u_id in active_config_staff}
@@ -1714,10 +1739,23 @@ def build_nhanvien_flex():
         if lock_config and lock_config.get("is_locked") and locked_staff_list:
             initial_cat_ratios = {}
             sum_cat_ratios = 0.0
+            # baocao_nhanvien.html chọn giá trị dự phòng theo locked_mode của bản khoá
+            locked_mode = lock_config.get("locked_mode") or "hybrid"
             for u_id in active_config_staff:
                 u_conf = active_config_staff.get(u_id, {"ratio": 0.0})
+
+                # Dự phòng ĐÚNG HTML: equal -> chia đều · hybrid -> 0.6/N + 0.4*hcr · còn lại -> % chia.
+                # (Trước đây bot luôn lấy thẳng % chia, nên target của ngành KHÔNG có trong bản khoá
+                #  bị lệch — ví dụ "Gia dụng Kangaroo" và "Đồng hồ".)
+                if locked_mode == "equal":
+                    cat_ratio = 1.0 / num_active_staff
+                elif locked_mode == "hybrid":
+                    hcr = base_staff_cat_contrib.get(u_id, {}).get(nganh_clean, u_conf["ratio"])
+                    cat_ratio = 0.6 / num_active_staff + 0.4 * hcr
+                else:
+                    cat_ratio = u_conf["ratio"]
+
                 locked_s = next((s for s in locked_staff_list if str(s.get("userId", "")).strip().upper() == u_id), None)
-                cat_ratio = u_conf["ratio"]
                 if locked_s and locked_s.get("lockedCatRatios") and nganh_clean in locked_s["lockedCatRatios"]:
                     cat_ratio = parse_number(locked_s["lockedCatRatios"][nganh_clean])
                 initial_cat_ratios[u_id] = cat_ratio
@@ -1733,6 +1771,7 @@ def build_nhanvien_flex():
 
     # 7. Tổng hợp thi đua thực tế của từng NV từ Data_NV_ThiDua
     active_cat_set = set(c["nganhHang"].lower().strip() for c in active_categories)
+    active_cat_is_sl = {c["nganhHang"].lower().strip(): c.get("isSL", True) for c in active_categories}
     for r in nv_td_rows:
         u_id = str(get_key_val(r, "staffuser", "user", "mã nv", "employeeid", "staffUser", default="")).strip().upper()
         if not u_id:
@@ -1749,6 +1788,18 @@ def build_nhanvien_flex():
             continue
         nganh_clean = str(nganh).strip().lower()
         actual = parse_number(get_key_val(r, "value_compe", "Value_Compe", "thực hiện", "đã bán", default=0.0))
+
+        # baocao_nhanvien.html: khi value_compe = 0 thì thay bằng SL hoặc DT thực hiện của dòng đó
+        # (chọn theo isSL của ngành). Trước đây bot bỏ qua bước này nên cộng 0.
+        if actual == 0:
+            if active_cat_is_sl.get(nganh_clean, False):
+                actual = parse_number(get_key_val(r, "số lượng", "quantity", default=0.0))
+            else:
+                actual = max(
+                    parse_number(get_key_val(r, "Doanh thu Quy đổi", "revenue_kfactor", default=0.0)),
+                    parse_number(get_key_val(r, "Doanh thu", "revenue", default=0.0))
+                )
+
         if nganh_clean in active_cat_set:
             user_map[u_id]["td"][nganh_clean] = user_map[u_id]["td"].get(nganh_clean, 0.0) + actual
 
@@ -1845,7 +1896,7 @@ def build_nhanvien_flex():
     # 1. Bubble 1: Bảng Xếp Hạng NV Overview
     overview_bubble = build_leaderboard_overview_bubble(emp_list, now_str)
     
-    # 2. Bubbles 2..N: Thẻ KPI Chi Tiết Từng NV (Truyền 23 ngành hàng thi đua)
+    # 2. Bubbles 2..N: Thẻ KPI Chi Tiết Từng NV (truyền đủ số ngành hàng thi đua của báo cáo)
     all_bubbles = [overview_bubble]
     total_emp = len(emp_list)
     for idx, e in enumerate(emp_list, start=1):
