@@ -1436,12 +1436,12 @@ def build_individual_staff_card(e, rank, total_emp=11, now_str="", thi_dua_list=
         ]
     }
 
-    # 4. Bảng Nhóm Hàng Thi Đua 6 Cột (NH | MT | LK/TG | CÒN | %HT | %DK)
-    #    Bỏ cột "#" (vô nghĩa vì đã sắp xếp theo %DK giảm dần) để NỚI RỘNG cột tên,
-    #    và bật wrap để tên dài ("Lọc K.Khí (SL)") XUỐNG DÒNG thay vì bị cắt thành "…".
-    headers = ["NHÓM HÀNG", "MT", "LK / TG", "CÒN", "%HT", "%DK"]
-    weights = [5, 1, 3, 2, 2, 2]
-    aligns = ["start", "center", "center", "center", "end", "end"]
+    # 4. Bảng Nhóm Hàng Thi Đua 7 Cột (# | NH | MT | LK/TG | CÒN | %HT | %DK)
+    #    Có lại cột "#" (anh Dương muốn nhìn STT cho dễ trao đổi); cột tên vẫn đủ rộng (4/15)
+    #    và có wrap nên tên dài xuống dòng thay vì bị LINE cắt thành "…".
+    headers = ["#", "NHÓM HÀNG", "MT", "LK / TG", "CÒN", "%HT", "%DK"]
+    weights = [1, 4, 1, 3, 2, 2, 2]
+    aligns = ["center", "start", "center", "center", "center", "end", "end"]
 
     td_rows = [{
         "type": "box", "layout": "horizontal", "backgroundColor": "#1e293b", "paddingAll": "xs", "cornerRadius": "sm",
@@ -1468,9 +1468,9 @@ def build_individual_staff_card(e, rank, total_emp=11, now_str="", thi_dua_list=
         if mt == "🏆":
             mt = "✓"
 
-        vals = [name_s, mt, lk_tg, cl, ht_str, dk_str]
+        vals = [str(i), name_s, mt, lk_tg, cl, ht_str, dk_str]
         colors = [
-            name_color, "#059669" if mt == "✓" else "#0284c7",
+            "#64748b", name_color, "#059669" if mt == "✓" else "#0284c7",
             "#0f172a", "#059669" if cl == "Đạt" else "#e11d48",
             get_color_class(ht_val / 100.0), get_color_class(dk_val / 100.0)
         ]
