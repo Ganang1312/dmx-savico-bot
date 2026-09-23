@@ -1191,10 +1191,11 @@ def build_individual_staff_card(e, rank, total_emp=11, now_str="", thi_dua_list=
         rank_badge_text = "#991b1b"
         rank_label = f"⚠️ TOP {rank}"
     else:
+        # Hạng 4+ bỏ chữ "HẠNG #" cho gọn — badge nằm riêng 1 dòng, không còn đè tên NV
         header_bg = "#0f2b48"
         rank_badge_bg = "#e0f2fe"
         rank_badge_text = "#0369a1"
-        rank_label = f"🎖️ HẠNG #{rank}"
+        rank_label = f"#{rank}"
 
     if not thi_dua_list:
         thi_dua_list = []
@@ -1210,65 +1211,71 @@ def build_individual_staff_card(e, rank, total_emp=11, now_str="", thi_dua_list=
     if td_pct is None:
         td_pct = (td_passed / td_total * 100.0) if td_total > 0 else 0.0
 
-    # 1. Header Luxury
+    # 1. Header Luxury — 3 tầng để KHÔNG BAO GIỜ đè nhau:
+    #    tầng 1: badge hạng (trái) + điểm (phải)  |  tầng 2: họ tên đầy đủ  |  tầng 3: mã NV
+    header_rows = [
+        {
+            "type": "box",
+            "layout": "horizontal",
+            "alignItems": "center",
+            "contents": [
+                {
+                    "type": "box",
+                    "layout": "vertical",
+                    "backgroundColor": rank_badge_bg,
+                    "cornerRadius": "md",
+                    "paddingStart": "sm",
+                    "paddingEnd": "sm",
+                    "paddingTop": "xs",
+                    "paddingBottom": "xs",
+                    "flex": 0,
+                    "contents": [
+                        {"type": "text", "text": rank_label, "size": "xxs", "weight": "bold", "color": rank_badge_text}
+                    ]
+                },
+                {"type": "filler"},
+                {
+                    "type": "box",
+                    "layout": "vertical",
+                    "backgroundColor": "#ffffff25",
+                    "cornerRadius": "md",
+                    "paddingStart": "sm",
+                    "paddingEnd": "sm",
+                    "paddingTop": "xs",
+                    "paddingBottom": "xs",
+                    "alignItems": "center",
+                    "flex": 0,
+                    "contents": [
+                        {"type": "text", "text": f"⭐ {score_val:.1f} Đ", "weight": "bold", "size": "xs", "color": "#fef08a", "align": "center"}
+                    ]
+                }
+            ]
+        },
+        {
+            "type": "text",
+            "text": full_name,
+            "weight": "bold",
+            "size": "lg",
+            "color": "#ffffff",
+            "wrap": True
+        }
+    ]
+    if user_id:
+        header_rows.append({
+            "type": "text",
+            "text": f"Mã NV: {user_id}",
+            "size": "xxs",
+            "color": "#e2e8f0",
+            "wrap": True
+        })
+
     header_component = {
         "type": "box",
         "layout": "vertical",
         "backgroundColor": header_bg,
         "paddingAll": "md",
-        "contents": [
-            {
-                "type": "box",
-                "layout": "horizontal",
-                "alignItems": "center",
-                "contents": [
-                    {
-                        "type": "box",
-                        "layout": "horizontal",
-                        "alignItems": "center",
-                        "spacing": "xs",
-                        "flex": 6,
-                        "contents": [
-                            {
-                                "type": "box",
-                                "layout": "vertical",
-                                "backgroundColor": rank_badge_bg,
-                                "cornerRadius": "md",
-                                "paddingStart": "sm",
-                                "paddingEnd": "sm",
-                                "paddingTop": "xs",
-                                "paddingBottom": "xs",
-                                "contents": [
-                                    {"type": "text", "text": rank_label, "size": "xxs", "weight": "bold", "color": rank_badge_text}
-                                ]
-                            },
-                            {
-                                "type": "text",
-                                "text": f"{first_name} ({user_id})" if user_id else first_name,
-                                "weight": "bold",
-                                "size": "sm",
-                                "color": "#ffffff"
-                            }
-                        ]
-                    },
-                    {
-                        "type": "box",
-                        "layout": "vertical",
-                        "backgroundColor": "#ffffff25",
-                        "cornerRadius": "md",
-                        "paddingStart": "sm",
-                        "paddingEnd": "sm",
-                        "paddingTop": "xs",
-                        "paddingBottom": "xs",
-                        "alignItems": "center",
-                        "flex": 3,
-                        "contents": [
-                            {"type": "text", "text": f"⭐ {score_val:.1f} Đ", "weight": "bold", "size": "xs", "color": "#fef08a", "align": "center"}
-                        ]
-                    }
-                ]
-            }
-        ]
+        "spacing": "xs",
+        "contents": header_rows
     }
 
     # 2. Khối 2 Thanh Tiến Độ thiết kế Card sang trọng
@@ -1429,11 +1436,13 @@ def build_individual_staff_card(e, rank, total_emp=11, now_str="", thi_dua_list=
         ]
     }
 
-    # 4. Bảng Nhóm Hàng Thi Đua 7 Cột (# | NH | MT | LK / TG | CÒN | %HT | %DK) Thiết kế Thanh Thoát
-    headers = ["#", "NHÓM HÀNG", "MT", "LK / TG", "CÒN", "%HT", "%DK"]
-    weights = [1, 4, 2, 3, 2, 2, 2]
-    aligns = ["center", "start", "center", "center", "center", "end", "end"]
-    
+    # 4. Bảng Nhóm Hàng Thi Đua 6 Cột (NH | MT | LK/TG | CÒN | %HT | %DK)
+    #    Bỏ cột "#" (vô nghĩa vì đã sắp xếp theo %DK giảm dần) để NỚI RỘNG cột tên,
+    #    và bật wrap để tên dài ("Lọc K.Khí (SL)") XUỐNG DÒNG thay vì bị cắt thành "…".
+    headers = ["NHÓM HÀNG", "MT", "LK / TG", "CÒN", "%HT", "%DK"]
+    weights = [5, 1, 3, 2, 2, 2]
+    aligns = ["start", "center", "center", "center", "end", "end"]
+
     td_rows = [{
         "type": "box", "layout": "horizontal", "backgroundColor": "#1e293b", "paddingAll": "xs", "cornerRadius": "sm",
         "contents": [{"type": "text", "text": h, "size": "xxs", "weight": "bold", "color": "#f8fafc", "align": a, "flex": w} for h, w, a in zip(headers, weights, aligns)]
@@ -1459,15 +1468,16 @@ def build_individual_staff_card(e, rank, total_emp=11, now_str="", thi_dua_list=
         if mt == "🏆":
             mt = "✓"
 
-        vals = [str(i), name_s, mt, lk_tg, cl, ht_str, dk_str]
+        vals = [name_s, mt, lk_tg, cl, ht_str, dk_str]
         colors = [
-            "#64748b", name_color, "#059669" if mt == "✓" else "#0284c7",
+            name_color, "#059669" if mt == "✓" else "#0284c7",
             "#0f172a", "#059669" if cl == "Đạt" else "#e11d48",
             get_color_class(ht_val / 100.0), get_color_class(dk_val / 100.0)
         ]
 
         def make_staff_cell(v, w, a, c):
-            cell = {"type": "text", "text": str(v), "size": "xxs"}
+            # wrap=True là CHÌA KHOÁ: tên ngành dài xuống dòng thay vì bị LINE cắt thành "…"
+            cell = {"type": "text", "text": str(v), "size": "xxs", "wrap": True}
             if w > 1:
                 cell["flex"] = w
             if a and a != "start":
@@ -1483,10 +1493,11 @@ def build_individual_staff_card(e, rank, total_emp=11, now_str="", thi_dua_list=
         row_contents = [make_staff_cell(v, w, a, c) for v, c, a, w in zip(vals, colors, aligns, weights)]
 
         row_box = {
-            "type": "box", "layout": "horizontal", "contents": row_contents
+            "type": "box", "layout": "horizontal", "paddingAll": "xs", "contents": row_contents
         }
         if row_bg != "#ffffff":
             row_box["backgroundColor"] = row_bg
+            row_box["cornerRadius"] = "xs"
 
         td_rows.append(row_box)
 
