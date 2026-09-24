@@ -689,6 +689,28 @@ def get_group_members(group_id):
 
 # --- XỬ LÝ TIN NHẮN ---
 
+def _extract_mentionees(message):
+    """
+    Lấy danh sách MENTION THẬT của LINE trong một tin nhắn văn bản.
+
+    Trả về [{'index', 'length', 'type'}, ...] — index là vị trí dấu '@' trong
+    message.text, length là độ dài CẢ '@' lẫn tên hiển thị, type là 'user'/'all'.
+    Rỗng nếu tin nhắn không có mention (hoặc SDK cũ không hỗ trợ).
+    """
+    mention = getattr(message, 'mention', None)
+    if not mention:
+        return []
+    out = []
+    for m in getattr(mention, 'mentionees', None) or []:
+        idx = getattr(m, 'index', None)
+        ln = getattr(m, 'length', None)
+        if idx is None or ln is None:
+            continue
+        out.append({'index': int(idx), 'length': int(ln),
+                    'type': getattr(m, 'type', 'user') or 'user'})
+    return out
+
+
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
     user_message = event.message.text.strip()
@@ -722,9 +744,20 @@ def handle_message(event):
 
         try:
             from meal_handler import get_task_roster
-            from task_parser import parse_work_command, plan_assignments
+            from task_parser import parse_work_command, plan_assignments, resolve_mentions
 
             roster = get_task_roster()
+
+            # MENTION THẬT CỦA LINE (sửa 24/09/2026): tên hiển thị LINE được phép
+            # có DẤU CÁCH, vd "@SVC Thắng.61271 AIO". Nếu đưa thẳng vào parser thì
+            # nó chỉ lấy được 1 từ ("SVC"), phần còn lại lọt vào TÊN CÔNG VIỆC.
+            # resolve_mentions() viết lại mỗi mention thành MỘT token duy nhất
+            # (ưu tiên tra MÃ NV trong tên hiển thị để ra đúng tên thật).
+            _mentionees = _extract_mentionees(event.message)
+            if _mentionees:
+                _fixed = resolve_mentions(event.message.text, _mentionees, roster)
+                lines = [l.strip() for l in _fixed.split('\n') if l.strip()]
+
             parsed = parse_work_command(lines, roster)
 
             if parsed['errors']:

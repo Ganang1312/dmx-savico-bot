@@ -163,6 +163,75 @@ def hint(err, names):
     return " Không có trong danh sách nhân sự của siêu thị."
 
 
+# ============================================================================
+# MENTION THẬT CỦA LINE — sửa lỗi "tên công việc bị nhảy" (24/09/2026)
+# ----------------------------------------------------------------------------
+# LINE trả về danh sách mention thật trong `event.message.mention.mentionees`,
+# mỗi phần tử có `index` (vị trí dấu '@') + `length` (độ dài CẢ '@' lẫn tên).
+# Nhờ đó bot biết CHÍNH XÁC một mention dài bao nhiêu ký tự — không phải đoán.
+#
+# VÌ SAO CẦN: tên hiển thị LINE được phép có DẤU CÁCH và emoji, ví dụ
+#   "@SVC Thắng.61271 AIO"   (một người, tên hiển thị 4 từ)
+# Trước đây parser dò tiền tố 1..4 từ rồi so với sheet; không khớp thì rơi vào
+# nhánh "lấy 1 từ" -> chỉ được "SVC", phần "Thắng.61271 AIO" còn lại bị dồn vào
+# TÊN CÔNG VIỆC. Hậu quả: thẻ hiện "Thắng.61271 AIO | Thắng.61271 AIO" và người
+# nhận bị cắt còn "SVC" (xem ảnh anh Dương gửi 24/09/2026).
+#
+# CÁCH SỬA: viết lại mỗi mention thành ĐÚNG MỘT token (không có dấu cách) rồi
+# mới đưa cho parser:
+#   • @all (type='all')                        -> "@all"
+#   • tên hiển thị CÓ chứa mã NV trong roster  -> "@<mã>"  (parser tự tra tên thật)
+#   • còn lại                                  -> "@<tên>" với dấu cách -> \uE000
+# ============================================================================
+
+# Ký tự tạm thay cho dấu cách BÊN TRONG một mention. Chọn ký tự PRIVATE USE vì:
+#   - KHÔNG thuộc \s nên re.split(r"\s+") không cắt token,
+#   - normalize_person_key() xoá nó (nhóm [^a-z0-9\s]) nên so khớp vẫn sạch.
+MENTION_SPACE = "\uE000"
+
+
+def roster_code_set(roster_names):
+    """Tập mã NV (chuỗi số) có trong roster — dùng để nhận diện mention."""
+    idx = build_token_index([nm for grp in roster_names.values() for nm in grp])
+    return {tok for tok, _ in idx if tok.isdigit()}
+
+
+def _mention_code(display, code_set):
+    """Mã NV (2-8 chữ số) ĐẦU TIÊN trong tên hiển thị mà CÓ trong roster."""
+    for m in re.finditer(r"\d{2,8}", str(display)):
+        if m.group(0) in code_set:
+            return m.group(0)
+    return None
+
+
+def resolve_mentions(raw_text, mentionees, roster_names):
+    """
+    Viết lại raw_text để mỗi MENTION THẬT trở thành MỘT token duy nhất.
+
+    mentionees: list dict {'index','length','type'} lấy từ
+                event.message.mention.mentionees.
+    Trả về text mới, GIỮ NGUYÊN số dòng (chỉ đổi bên trong span mention).
+    """
+    if not mentionees:
+        return raw_text
+    code_set = roster_code_set(roster_names)
+    out = str(raw_text)
+    # Sửa từ PHẢI sang TRÁI để index phía trước không bị lệch.
+    for m in sorted(mentionees, key=lambda x: x["index"], reverse=True):
+        i, ln = int(m["index"]), int(m["length"])
+        seg = out[i:i + ln]
+        if not seg:
+            continue
+        display = seg[1:] if seg.startswith("@") else seg
+        if str(m.get("type", "user")).lower() == "all":
+            token = "all"
+        else:
+            token = _mention_code(display, code_set) or \
+                display.replace(" ", MENTION_SPACE).strip() or "?"
+        out = out[:i] + "@" + token + out[i + ln:]
+    return out
+
+
 def resolve_target(token, roster_names, index):
     """
     Trả về (danh_sách_tên, lỗi). lỗi ∈ (None, 'empty').
@@ -176,7 +245,9 @@ def resolve_target(token, roster_names, index):
       • Riêng token là SỐ THUẦN (@156494) thì tra mã trong sheet cho ra tên thật,
         vì để nguyên "156494" trên thẻ thì vô nghĩa. Không tra được thì giữ nguyên.
     """
-    t = str(token).strip()
+    # Tên hiển thị mention có thể chứa dấu cách — khi tách token đã tạm đổi
+    # thành \uE000 để không bị cắt; nay trả lại dấu cách thật.
+    t = str(token).strip().replace(MENTION_SPACE, " ")
     low = t.lower()
 
     if low in GROUP_KEYWORDS:
