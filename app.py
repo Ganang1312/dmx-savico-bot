@@ -791,15 +791,17 @@ def handle_message(event):
                     text="❌ Có lỗi xảy ra khi lưu công việc."))
                 return
 
-            if has_shift_checklist:
-                flex_content = generate_checklist_flex(group_id, current_shift)
-                alt_text = f"📋 Checklist công việc ca {current_shift} (đã thêm việc mới)"
-            elif plan['mode'] == 'all':
+            if plan['mode'] == 'all':
                 flex_content = generate_all_adhoc_flex(group_id, last_hash)
                 alt_text = f"📢 Công việc chung: {plan['job']}"
-            else:
+            elif plan['mode'] == 'multi':
                 flex_content = generate_multi_adhoc_flex(group_id, last_hash)
                 alt_text = f"📋 Checklist công việc: {plan['job']}"
+            elif has_shift_checklist:
+                flex_content = generate_checklist_flex(group_id, current_shift)
+                alt_text = f"📋 Checklist công việc ca {current_shift} (đã thêm việc mới)"
+            else:
+                flex_content = None
 
             if flex_content:
                 line_bot_api.reply_message(
