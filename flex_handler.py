@@ -840,148 +840,311 @@ def generate_today_adhoc_flex(group_id):
             if token:
                 latest_token = token
 
-            # Chuẩn hoá tên việc: nếu có "Việc phát sinh | Tên việc" thì lấy "Tên việc"
-            if ' | ' in task_name_val:
-                parts = task_name_val.split(' | ', 1)
-                if parts[0].strip() in ("Việc phát sinh", ""):
-                    display_task_name = parts[1].strip()
-                else:
-                    display_task_name = task_name_val
-            else:
-                display_task_name = task_name_val
-
             created_at = str(record.get('created_at', '')).strip()
 
-            # Nhóm theo token và display_task_name để các thành viên nhận chung 1 việc được gom lại
-            group_key = (token, display_task_name)
-            if group_key not in seen_groups:
-                seen_groups[group_key] = len(ordered_tasks)
-                ordered_tasks.append({
-                    'task_name': display_task_name,
-                    'created_at': created_at,
-                    'token': token,
-                    'assignees': []
-                })
+            # Phân tích xem có tiêu đề việc chung (dạng "In giá | Tivi")
+            parent_job = None
+            sub_task = task_name_val
 
-            idx = seen_groups[group_key]
-            if not ordered_tasks[idx]['created_at'] and created_at:
-                ordered_tasks[idx]['created_at'] = created_at
+            if ' | ' in task_name_val:
+                p_parts = task_name_val.split(' | ', 1)
+                p_lead = p_parts[0].strip()
+                p_sub = p_parts[1].strip()
+                if p_lead and p_lead not in ("Việc phát sinh", ""):
+                    parent_job = p_lead
+                    sub_task = p_sub
+                else:
+                    sub_task = p_sub
 
-            ordered_tasks[idx]['assignees'].append({
+            assignee_data = {
                 'task_id': task_id,
                 'assignee': record.get('assignee', ''),
                 'status': record.get('status', 'incomplete'),
                 'completed_by': record.get('completed_by', ''),
                 'completed_at': record.get('completed_at', '')
-            })
+            }
+
+            if parent_job:
+                # 1 việc chia nhiều nhánh (ví dụ: Việc In giá -> Tivi, tủ lạnh)
+                group_key = (token, parent_job)
+                if group_key not in seen_groups:
+                    seen_groups[group_key] = len(ordered_tasks)
+                    ordered_tasks.append({
+                        'is_branched': True,
+                        'title': parent_job,
+                        'created_at': created_at,
+                        'token': token,
+                        'branches': {}  # sub_task -> list of assignees
+                    })
+                idx = seen_groups[group_key]
+                if not ordered_tasks[idx]['created_at'] and created_at:
+                    ordered_tasks[idx]['created_at'] = created_at
+
+                if sub_task not in ordered_tasks[idx]['branches']:
+                    ordered_tasks[idx]['branches'][sub_task] = []
+                ordered_tasks[idx]['branches'][sub_task].append(assignee_data)
+            else:
+                # Việc đơn lẻ không chia nhánh
+                group_key = (token, sub_task)
+                if group_key not in seen_groups:
+                    seen_groups[group_key] = len(ordered_tasks)
+                    ordered_tasks.append({
+                        'is_branched': False,
+                        'title': sub_task,
+                        'created_at': created_at,
+                        'token': token,
+                        'assignees': []
+                    })
+                idx = seen_groups[group_key]
+                if not ordered_tasks[idx]['created_at'] and created_at:
+                    ordered_tasks[idx]['created_at'] = created_at
+                ordered_tasks[idx]['assignees'].append(assignee_data)
 
         if not ordered_tasks:
             return None
 
         task_components = []
         for stt, item in enumerate(ordered_tasks, start=1):
-            all_complete = all(a.get('status') == 'complete' for a in item['assignees'])
-            main_text_color = "#888888" if all_complete else "#111111"
-            main_decoration = "line-through" if all_complete else "none"
+            if item.get('is_branched'):
+                # --- TRƯỜNG HỢP 1 VIỆC CHIA NHIỀU NHÁNH ---
+                all_assignees = [a for b_list in item['branches'].values() for a in b_list]
+                all_complete = all(a.get('status') == 'complete' for a in all_assignees)
+                main_text_color = "#888888" if all_complete else "#111111"
+                main_decoration = "line-through" if all_complete else "none"
 
-            # 1. Dòng số thứ tự + Tên công việc
-            subtask_header_box = {
-                "type": "box",
-                "layout": "horizontal",
-                "spacing": "sm",
-                "alignItems": "flex-start",
-                "contents": [
-                    {
-                        "type": "text",
-                        "text": "✅" if all_complete else "⏳",
-                        "size": "md",
-                        "flex": 0
-                    },
-                    {
-                        "type": "text",
-                        "text": f"{stt}. {item['task_name']}",
-                        "wrap": True,
-                        "weight": "bold",
-                        "size": "sm",
-                        "color": main_text_color,
-                        "decoration": main_decoration,
-                        "flex": 1
-                    }
-                ]
-            }
-
-            # 2. Dòng thời gian giao việc (chuyển xuống dưới công việc theo yêu cầu)
-            time_row = None
-            created_at_str = item.get('created_at')
-            if created_at_str:
-                time_row = {
-                    "type": "box",
-                    "layout": "horizontal",
-                    "spacing": "xs",
-                    "paddingStart": "24px",
-                    "margin": "xs",
-                    "contents": [
-                        {
-                            "type": "text",
-                            "text": f"🕒 Giao lúc: {created_at_str}",
-                            "size": "xxs",
-                            "color": "#888888"
-                        }
-                    ]
-                }
-
-            # 3. Các dòng người nhận việc kèm nút [ Hoàn tất ] / [ ✓ Xong ]
-            assignee_rows = []
-            for a in item['assignees']:
-                t_id = a.get('task_id')
-                assignee = a.get('assignee')
-                status = a.get('status', 'incomplete')
-                is_comp = (status == 'complete')
-                text_dec = "line-through" if is_comp else "none"
-                text_col = "#888888" if is_comp else "#1565C0"
-                btn_col = "#CCCCCC" if is_comp else "#00B33C"
-                btn_lbl = "✓ Xong" if is_comp else "Hoàn tất"
-                target_status_param = "incomplete" if is_comp else "complete"
-
-                assignee_row = {
+                # 1. Dòng tiêu đề mục lớn (ví dụ: ⏳ 3. In giá)
+                main_header_box = {
                     "type": "box",
                     "layout": "horizontal",
                     "spacing": "sm",
-                    "alignItems": "center",
-                    "paddingStart": "24px",
-                    "margin": "xs",
+                    "alignItems": "flex-start",
                     "contents": [
                         {
                             "type": "text",
-                            "text": f"👤 Giao cho: {assignee}",
-                            "color": text_col,
-                            "size": "xs",
-                            "decoration": text_dec,
-                            "flex": 1,
-                            "wrap": True
+                            "text": "✅" if all_complete else "⏳",
+                            "size": "md",
+                            "flex": 0
                         },
                         {
-                            "type": "button",
-                            "action": {
-                                "type": "postback",
-                                "label": btn_lbl,
-                                "data": f"action=complete_adhoc_task&task_id={t_id}&assignee={assignee}&target_status={target_status_param}"
-                            },
-                            "style": "primary",
-                            "color": btn_col,
-                            "height": "sm",
-                            "flex": 0,
-                            "width": "75px"
+                            "type": "text",
+                            "text": f"{stt}. {item['title']}",
+                            "wrap": True,
+                            "weight": "bold",
+                            "size": "sm",
+                            "color": main_text_color,
+                            "decoration": main_decoration,
+                            "flex": 1
                         }
                     ]
                 }
-                assignee_rows.append(assignee_row)
 
-            # Ghép container cho công việc này
-            item_contents = [subtask_header_box]
-            if time_row:
-                item_contents.append(time_row)
-            item_contents.extend(assignee_rows)
+                # 2. Dòng thời gian giao của việc lớn
+                time_row = None
+                created_at_str = item.get('created_at')
+                if created_at_str:
+                    time_row = {
+                        "type": "box",
+                        "layout": "horizontal",
+                        "spacing": "xs",
+                        "paddingStart": "24px",
+                        "margin": "xs",
+                        "contents": [
+                            {
+                                "type": "text",
+                                "text": f"🕒 Giao lúc: {created_at_str}",
+                                "size": "xxs",
+                                "color": "#888888"
+                            }
+                        ]
+                    }
+
+                # 3. Các nhánh công việc con bên dưới
+                branch_contents = []
+                for sub_name, b_assignees in item['branches'].items():
+                    sub_complete = all(a.get('status') == 'complete' for a in b_assignees)
+                    sub_text_col = "#888888" if sub_complete else "#222222"
+                    sub_text_dec = "line-through" if sub_complete else "none"
+
+                    # Dòng tên nhánh con (ví dụ: 🔹 Tivi hoặc 🔹 tủ lạnh)
+                    branch_title_row = {
+                        "type": "box",
+                        "layout": "horizontal",
+                        "spacing": "xs",
+                        "alignItems": "center",
+                        "paddingStart": "24px",
+                        "marginTop": "sm",
+                        "contents": [
+                            {
+                                "type": "text",
+                                "text": "🔹",
+                                "size": "xs",
+                                "flex": 0
+                            },
+                            {
+                                "type": "text",
+                                "text": sub_name,
+                                "weight": "bold",
+                                "size": "xs",
+                                "color": sub_text_col,
+                                "decoration": sub_text_dec,
+                                "flex": 1,
+                                "wrap": True
+                            }
+                        ]
+                    }
+                    branch_contents.append(branch_title_row)
+
+                    # Danh sách người nhận việc trong nhánh con
+                    for a in b_assignees:
+                        t_id = a.get('task_id')
+                        assignee = a.get('assignee')
+                        status = a.get('status', 'incomplete')
+                        is_comp = (status == 'complete')
+                        text_dec = "line-through" if is_comp else "none"
+                        text_col = "#888888" if is_comp else "#1565C0"
+                        btn_col = "#CCCCCC" if is_comp else "#00B33C"
+                        btn_lbl = "✓ Xong" if is_comp else "Hoàn tất"
+                        target_status_param = "incomplete" if is_comp else "complete"
+
+                        assignee_row = {
+                            "type": "box",
+                            "layout": "horizontal",
+                            "spacing": "sm",
+                            "alignItems": "center",
+                            "paddingStart": "36px",
+                            "margin": "xs",
+                            "contents": [
+                                {
+                                    "type": "text",
+                                    "text": f"👤 Giao cho: {assignee}",
+                                    "color": text_col,
+                                    "size": "xs",
+                                    "decoration": text_dec,
+                                    "flex": 1,
+                                    "wrap": True
+                                },
+                                {
+                                    "type": "button",
+                                    "action": {
+                                        "type": "postback",
+                                        "label": btn_lbl,
+                                        "data": f"action=complete_adhoc_task&task_id={t_id}&assignee={assignee}&target_status={target_status_param}"
+                                    },
+                                    "style": "primary",
+                                    "color": btn_col,
+                                    "height": "sm",
+                                    "flex": 0,
+                                    "width": "75px"
+                                }
+                            ]
+                        }
+                        branch_contents.append(assignee_row)
+
+                item_contents = [main_header_box]
+                if time_row:
+                    item_contents.append(time_row)
+                item_contents.extend(branch_contents)
+
+            else:
+                # --- TRƯỜNG HỢP VIỆC ĐƠN LẺ KHÔNG CHIA NHÁNH ---
+                all_complete = all(a.get('status') == 'complete' for a in item['assignees'])
+                main_text_color = "#888888" if all_complete else "#111111"
+                main_decoration = "line-through" if all_complete else "none"
+
+                subtask_header_box = {
+                    "type": "box",
+                    "layout": "horizontal",
+                    "spacing": "sm",
+                    "alignItems": "flex-start",
+                    "contents": [
+                        {
+                            "type": "text",
+                            "text": "✅" if all_complete else "⏳",
+                            "size": "md",
+                            "flex": 0
+                        },
+                        {
+                            "type": "text",
+                            "text": f"{stt}. {item['title']}",
+                            "wrap": True,
+                            "weight": "bold",
+                            "size": "sm",
+                            "color": main_text_color,
+                            "decoration": main_decoration,
+                            "flex": 1
+                        }
+                    ]
+                }
+
+                time_row = None
+                created_at_str = item.get('created_at')
+                if created_at_str:
+                    time_row = {
+                        "type": "box",
+                        "layout": "horizontal",
+                        "spacing": "xs",
+                        "paddingStart": "24px",
+                        "margin": "xs",
+                        "contents": [
+                            {
+                                "type": "text",
+                                "text": f"🕒 Giao lúc: {created_at_str}",
+                                "size": "xxs",
+                                "color": "#888888"
+                            }
+                        ]
+                    }
+
+                assignee_rows = []
+                for a in item['assignees']:
+                    t_id = a.get('task_id')
+                    assignee = a.get('assignee')
+                    status = a.get('status', 'incomplete')
+                    is_comp = (status == 'complete')
+                    text_dec = "line-through" if is_comp else "none"
+                    text_col = "#888888" if is_comp else "#1565C0"
+                    btn_col = "#CCCCCC" if is_comp else "#00B33C"
+                    btn_lbl = "✓ Xong" if is_comp else "Hoàn tất"
+                    target_status_param = "incomplete" if is_comp else "complete"
+
+                    assignee_row = {
+                        "type": "box",
+                        "layout": "horizontal",
+                        "spacing": "sm",
+                        "alignItems": "center",
+                        "paddingStart": "24px",
+                        "margin": "xs",
+                        "contents": [
+                            {
+                                "type": "text",
+                                "text": f"👤 Giao cho: {assignee}",
+                                "color": text_col,
+                                "size": "xs",
+                                "decoration": text_dec,
+                                "flex": 1,
+                                "wrap": True
+                            },
+                            {
+                                "type": "button",
+                                "action": {
+                                    "type": "postback",
+                                    "label": btn_lbl,
+                                    "data": f"action=complete_adhoc_task&task_id={t_id}&assignee={assignee}&target_status={target_status_param}"
+                                },
+                                "style": "primary",
+                                "color": btn_col,
+                                "height": "sm",
+                                "flex": 0,
+                                "width": "75px"
+                            }
+                        ]
+                    }
+                    assignee_rows.append(assignee_row)
+
+                item_contents = [subtask_header_box]
+                if time_row:
+                    item_contents.append(time_row)
+                item_contents.extend(assignee_rows)
 
             subtask_container = {
                 "type": "box",
