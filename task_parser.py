@@ -204,31 +204,66 @@ def _mention_code(display, code_set):
     return None
 
 
-def resolve_mentions(raw_text, mentionees, roster_names):
+def resolve_mentions(raw_text, mentionees, roster_names=None):
     """
     Viết lại raw_text để mỗi MENTION THẬT trở thành MỘT token duy nhất.
 
     mentionees: list dict {'index','length','type'} lấy từ
-                event.message.mention.mentionees.
-    Trả về text mới, GIỮ NGUYÊN số dòng (chỉ đổi bên trong span mention).
+                event.message.mention.mentionees của LINE Messaging API.
+    CHÚ Ý: index và length của LINE API tính bằng UTF-16 code units.
+    Mỗi emoji (như 😳, 🙂) chiếm 2 code units UTF-16 nhưng chỉ là 1 ký tự Python.
+    Chuyển đổi index & length từ UTF-16 sang Python char offset để cắt chính xác 100%,
+    không bao giờ bị cắt lệch hay nuốt ký tự dòng sau.
     """
-    if not mentionees:
+    if not mentionees or not raw_text:
         return raw_text
-    code_set = roster_code_set(roster_names)
-    out = str(raw_text)
-    # Sửa từ PHẢI sang TRÁI để index phía trước không bị lệch.
-    for m in sorted(mentionees, key=lambda x: x["index"], reverse=True):
-        i, ln = int(m["index"]), int(m["length"])
-        seg = out[i:i + ln]
+
+    # Bảng ánh xạ: utf16_offset -> char_offset
+    utf16_to_char = {}
+    current_utf16 = 0
+    for char_idx, ch in enumerate(raw_text):
+        utf16_to_char[current_utf16] = char_idx
+        current_utf16 += 2 if ord(ch) > 0xFFFF else 1
+    utf16_to_char[current_utf16] = len(raw_text)
+
+    sorted_mentions = sorted(mentionees, key=lambda x: int(x["index"]), reverse=True)
+    out = raw_text
+
+    for m in sorted_mentions:
+        idx = int(m["index"])
+        ln = int(m["length"])
+        end_idx = idx + ln
+
+        # Tra vị trí ký tự trong Python string
+        char_start = utf16_to_char.get(idx)
+        if char_start is None:
+            keys = sorted(utf16_to_char.keys())
+            char_start = utf16_to_char[max(k for k in keys if k <= idx)] if any(k <= idx for k in keys) else 0
+
+        char_end = utf16_to_char.get(end_idx)
+        if char_end is None:
+            keys = sorted(utf16_to_char.keys())
+            char_end = utf16_to_char[min(k for k in keys if k >= end_idx)] if any(k >= end_idx for k in keys) else len(raw_text)
+
+        seg = out[char_start:char_end]
         if not seg:
             continue
+
+        overflow = ""
+        if "\n" in seg:
+            seg, overflow = seg.split("\n", 1)
+            overflow = "\n" + overflow
+
         display = seg[1:] if seg.startswith("@") else seg
+
         if str(m.get("type", "user")).lower() == "all":
             token = "all"
         else:
-            token = _mention_code(display, code_set) or \
-                display.replace(" ", MENTION_SPACE).strip() or "?"
-        out = out[:i] + "@" + token + out[i + ln:]
+            # Giữ nguyên văn tên hiển thị của nick LINE (thay khoảng trắng thành MENTION_SPACE để token không bị split)
+            token = display.replace(" ", MENTION_SPACE).strip() or "?"
+
+        out = out[:char_start] + "@" + token + overflow + out[char_end:]
+
     return out
 
 

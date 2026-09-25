@@ -857,12 +857,12 @@ def generate_all_adhoc_flex(group_id, task_group_hash):
             button_label = "✓ Xong" if is_complete else "Hoàn tất"
             target_status_param = "incomplete" if is_complete else "complete"
             
+            assignee_label = f"👤 Giao cho: {assignee}" if len(filtered_tasks) == 1 else f"{i}. {assignee}"
             task_info_contents = [
                 {
                     "type": "text",
-                    "text": f"{i}. {assignee}",
-                    "wrap": False,
-                    "maxLines": 1,
+                    "text": assignee_label,
+                    "wrap": True,
                     "weight": "bold",
                     "size": "xs",
                     "color": main_text_color,
