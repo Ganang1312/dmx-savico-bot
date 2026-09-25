@@ -38,6 +38,11 @@ from dmx_data_provider import trigger_adhoc_scrape, check_scrape_status
 from dmx_flex_messages import (build_luyke_flex, build_nhanvien_flex,
                                build_help_commands_flex, build_realtime_messages,
                                LINE_MAX_MESSAGES)
+from coupon_handler import (
+    build_category_menu_flex, build_product_list_flex,
+    claim_coupon_for_user, import_coupons_from_text,
+    build_claimed_coupon_flex
+)
 
 # --- CẤU HÌNH ---
 CHANNEL_ACCESS_TOKEN = os.environ.get('CHANNEL_ACCESS_TOKEN')
@@ -510,6 +515,48 @@ def handle_postback(event):
                     text="Không còn việc nào để hủy (có thể đã hủy trước đó)."))
         except Exception as e:
             print(f"Lỗi hủy nhóm việc qua nút: {e}")
+    # 2.7. Xem danh mục phiếu giảm giá (GVGS)
+    if action == 'view_coupon_menu':
+        flex = build_category_menu_flex()
+        line_bot_api.reply_message(event.reply_token, FlexSendMessage(
+            alt_text="🎟️ Danh mục phiếu giảm giá (GVGS)", contents=flex
+        ))
+        return
+
+    # 2.8. Xem danh sách model thuộc ngành hàng
+    if action == 'view_coupon_cat':
+        cat = data.get('cat')
+        flex = build_product_list_flex(cat)
+        line_bot_api.reply_message(event.reply_token, FlexSendMessage(
+            alt_text=f"🎟️ Phiếu giảm giá {cat}", contents=flex
+        ))
+        return
+
+    # 2.9. Cấp mã coupon cho nhân viên (Claim coupon)
+    if action == 'claim_coupon':
+        prod_name = data.get('prod')
+        group_id = getattr(event.source, 'group_id', None)
+        user_id = event.source.user_id
+        
+        user_name = "Nhân viên"
+        try:
+            if group_id:
+                profile = line_bot_api.get_group_member_profile(group_id, user_id)
+            else:
+                profile = line_bot_api.get_profile(user_id)
+            if profile and profile.display_name:
+                user_name = profile.display_name
+        except Exception:
+            pass
+
+        success, res, remaining = claim_coupon_for_user(prod_name, user_name)
+        if success:
+            claimed_flex = build_claimed_coupon_flex(prod_name, res, remaining, user_name)
+            line_bot_api.reply_message(event.reply_token, FlexSendMessage(
+                alt_text=f"🎟️ Mã giảm giá cho {prod_name}: {res}", contents=claimed_flex
+            ))
+        else:
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"⚠️ {res}"))
         return
 
     # 3. Check-in Ăn Sáng/Chiều
@@ -838,6 +885,33 @@ def handle_message(event):
             print(f"Lỗi khi hủy việc: {e}")
             line_bot_api.reply_message(event.reply_token, TextSendMessage(
                 text="❌ Gặp lỗi khi hủy việc."))
+    # 0c. Lệnh nạp mã giảm giá: ADD COUPON: ... hoặc THEM COUPON: ...
+    if (user_msg_upper.startswith('ADD COUPON') or 
+        user_msg_upper.startswith('THEM COUPON') or 
+        user_msg_upper.startswith('THÊM COUPON') or
+        user_msg_upper.startswith('NẠP COUPON') or
+        user_msg_upper.startswith('NAP COUPON')):
+        parts = user_message.split(':', 1) if ':' in user_message else user_message.split('\n', 1)
+        if len(parts) > 1 and parts[1].strip():
+            count, prods = import_coupons_from_text(parts[1].strip())
+            if count > 0:
+                p_sample = ", ".join(prods[:4])
+                if len(prods) > 4:
+                    p_sample += f" và {len(prods) - 4} model khác"
+                reply = f"✅ Đã nạp thành công {count} mã giảm giá vào hệ thống!\n📦 Áp dụng cho: {p_sample}.\nNhân viên có thể gõ `gvgs` để nhận mã."
+            else:
+                reply = "⚠️ Không tìm thấy mã hợp lệ từ nội dung đã gửi. Vui lòng kiểm tra lại định dạng (mỗi dòng gồm Ngày : Sản phẩm : Mã)."
+        else:
+            reply = "⚠️ Vui lòng gửi theo cú pháp:\n`ADD COUPON:` rồi xuống dòng dán danh sách mã."
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
+        return
+
+    # 0d. Lệnh xem và nhận phiếu giảm giá (GVGS)
+    if user_msg_upper in ['GVGS', 'COUPON', 'MA GIAM GIA', 'MÃ GIẢM GIÁ', 'GIAM GIA', 'GIẢM GIÁ']:
+        flex = build_category_menu_flex()
+        line_bot_api.reply_message(event.reply_token, FlexSendMessage(
+            alt_text="🎟️ Danh mục phiếu giảm giá (GVGS)", contents=flex
+        ))
         return
 
     # 1. Admin ADD
@@ -917,7 +991,11 @@ def handle_message(event):
             "\n"
             "**📊 BÁO CÁO REALTIME:**\n"
             "• `ST [Mã ST]` - Báo cáo chi tiết.\n"
-            "• `bxh` - Top 20."
+            "• `bxh` - Top 20.\n"
+            "\n"
+            "**🎟️ PHIẾU GIẢM GIÁ:**\n"
+            "• `gvgs` - Danh mục phiếu giảm giá (Tivi, Tủ lạnh, Máy giặt...).\n"
+            "• `ADD COUPON:` - Quản lý nạp mã hàng tuần."
         )
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=menu_text))
         return
