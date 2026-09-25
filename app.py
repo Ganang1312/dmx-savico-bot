@@ -41,7 +41,7 @@ from dmx_flex_messages import (build_luyke_flex, build_nhanvien_flex,
 from coupon_handler import (
     build_category_menu_flex, build_product_list_flex,
     claim_coupon_for_user, import_coupons_from_text,
-    build_claimed_coupon_flex
+    build_claimed_coupon_flex, clear_all_coupons
 )
 
 # --- CẤU HÌNH ---
@@ -535,6 +535,7 @@ def handle_postback(event):
     # 2.9. Cấp mã coupon cho nhân viên (Claim coupon)
     if action == 'claim_coupon':
         prod_name = data.get('prod')
+        cat_from_data = data.get('cat')
         group_id = getattr(event.source, 'group_id', None)
         user_id = event.source.user_id
         
@@ -549,12 +550,24 @@ def handle_postback(event):
         except Exception:
             pass
 
-        success, res, remaining = claim_coupon_for_user(prod_name, user_name)
+        success, res, remaining, category = claim_coupon_for_user(prod_name, user_name)
         if success:
+            cat_name = cat_from_data or category or "Tất cả"
+            # 1. Thẻ Flex thông báo nhận mã thành công
             claimed_flex = build_claimed_coupon_flex(prod_name, res, remaining, user_name)
-            line_bot_api.reply_message(event.reply_token, FlexSendMessage(
-                alt_text=f"🎟️ Mã giảm giá cho {prod_name}: {res}", contents=claimed_flex
-            ))
+            # 2. Tin nhắn text chứa riêng mã để nhân viên chạm đè sao chép cực nhanh
+            code_text_msg = TextSendMessage(
+                text=f"🎟️ MÃ COUPON:\n{res}\n\n👉 Chạm đè vào mã trên để Sao chép (Copy)!"
+            )
+            # 3. Thẻ Flex cập nhật lại danh mục sản phẩm (hiển thị số lượng đã trừ)
+            updated_list_flex = build_product_list_flex(cat_name)
+
+            messages_to_send = [
+                FlexSendMessage(alt_text=f"🎟️ Nhận mã thành công cho {prod_name}: {res}", contents=claimed_flex),
+                code_text_msg,
+                FlexSendMessage(alt_text=f"🎟️ Phiếu giảm giá {cat_name} (Đã cập nhật)", contents=updated_list_flex)
+            ]
+            line_bot_api.reply_message(event.reply_token, messages_to_send)
         else:
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"⚠️ {res}"))
         return
@@ -891,19 +904,31 @@ def handle_message(event):
         user_msg_upper.startswith('THÊM COUPON') or
         user_msg_upper.startswith('NẠP COUPON') or
         user_msg_upper.startswith('NAP COUPON')):
-        parts = user_message.split(':', 1) if ':' in user_message else user_message.split('\n', 1)
-        if len(parts) > 1 and parts[1].strip():
-            count, prods = import_coupons_from_text(parts[1].strip())
+        # Bóc tách phần nội dung sau tiền tố lệnh bằng regex (bất kể có dấu : hay không)
+        content_after = re.sub(r'^(?:ADD|THEM|THÊM|NẠP|NAP)\s+COUPON\s*:?', '', user_message, flags=re.IGNORECASE).strip()
+        if content_after:
+            count, prods, dup_count = import_coupons_from_text(content_after)
             if count > 0:
                 p_sample = ", ".join(prods[:4])
                 if len(prods) > 4:
                     p_sample += f" và {len(prods) - 4} model khác"
-                reply = f"✅ Đã nạp thành công {count} mã giảm giá vào hệ thống!\n📦 Áp dụng cho: {p_sample}.\nNhân viên có thể gõ `gvgs` để nhận mã."
+                reply = f"✅ Đã nạp thành công thêm {count} mã giảm giá vào hệ thống!\n📦 Áp dụng cho: {p_sample}."
+                if dup_count > 0:
+                    reply += f"\nℹ️ Đã tự động bỏ qua {dup_count} mã bị trùng lặp."
+                reply += "\n\n👉 Nhân viên có thể gõ `gvgs` để nhận mã."
+            elif dup_count > 0:
+                reply = f"ℹ️ Tất cả {dup_count} mã trong nội dung gửi đã tồn tại trên hệ thống từ trước (không nạp trùng lặp)."
             else:
                 reply = "⚠️ Không tìm thấy mã hợp lệ từ nội dung đã gửi. Vui lòng kiểm tra lại định dạng (mỗi dòng gồm Ngày : Sản phẩm : Mã)."
         else:
             reply = "⚠️ Vui lòng gửi theo cú pháp:\n`ADD COUPON:` rồi xuống dòng dán danh sách mã."
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
+        return
+
+    # Lệnh xóa toàn bộ mã giảm giá: xoa gvgs, xóa gvgs, clear gvgs
+    if user_msg_upper in ['XOA GVGS', 'XÓA GVGS', 'CLEAR GVGS', 'RESET GVGS', 'XOA COUPON', 'XÓA COUPON']:
+        success, msg = clear_all_coupons()
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=msg))
         return
 
     # 0d. Lệnh xem và nhận phiếu giảm giá (GVGS)
