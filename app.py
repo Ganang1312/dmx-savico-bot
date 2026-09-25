@@ -555,10 +555,10 @@ def handle_postback(event):
             cat_name = cat_from_data or category or "Tất cả"
             # 1. Thẻ Flex thông báo nhận mã thành công
             claimed_flex = build_claimed_coupon_flex(prod_name, res, remaining, user_name)
-            # 2. Tin nhắn text chứa riêng mã để nhân viên chạm đè sao chép cực nhanh
-            code_text_msg = TextSendMessage(
-                text=f"🎟️ MÃ COUPON:\n{res}\n\n👉 Chạm đè vào mã trên để Sao chép (Copy)!"
-            )
+            # 2. Tin nhắn text CHỈ chứa mã (không thêm chữ nào) để nhân viên chạm đè
+            #    sao chép cực nhanh. Anh Dương chốt 25/09/2026: chỉ gửi mỗi mã,
+            #    vì chạm đè tin nhắn dài sẽ copy lẫn cả phần hướng dẫn.
+            code_text_msg = TextSendMessage(text=str(res))
             # 3. Thẻ Flex cập nhật lại danh mục sản phẩm (hiển thị số lượng đã trừ)
             updated_list_flex = build_product_list_flex(cat_name)
 

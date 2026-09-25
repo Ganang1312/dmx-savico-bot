@@ -901,7 +901,7 @@ def build_claimed_coupon_flex(product_name, coupon_code, remaining_count, user_d
                 },
                 {
                     "type": "text",
-                    "text": "ℹ️ Bạn cũng có thể chạm đè vào tin nhắn văn bản bên dưới để Sao chép (Copy) mã ngay lập tức.",
+                    "text": "👉 Tin nhắn ngay dưới đây CHỈ có mã. Chạm đè vào mã đó để Sao chép (Copy).",
                     "size": "xxs",
                     "color": "#64748B",
                     "wrap": True,

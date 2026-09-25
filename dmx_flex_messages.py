@@ -903,13 +903,21 @@ def build_luyke_flex():
 
     body_contents_p2 = []
 
+    # ===== DMX STT LIEN TUC 25/09/2026 =====
+    # Hai bang (DU KIEN VE DICH / CHUA VE DICH) truoc day moi bang danh lai STT tu 1
+    # => bang duoi ket thuc o 10, nguoi doc tuong chi co 13+9=22 nhom (thuc te 23).
+    # Nay bang 2 danh NOI TIEP tu len(td_done)+1, khop 1-1 voi bang lien tuc cua baocao_luyke.html.
+    shift_done = 0
+    shift_pending = len(td_done)
+    # ===== HET DMX STT LIEN TUC =====
+
     if td_done:
         done_table = [
-            {"type": "text", "text": f"🏆 NHÓM DỰ KIẾN VỀ ĐÍCH ({len(td_done)})", "size": "xxs", "color": "#15803d", "weight": "bold", "margin": "xs"},
+            {"type": "text", "text": f"🏆 NHÓM DỰ KIẾN VỀ ĐÍCH (1–{len(td_done)})", "size": "xxs", "color": "#15803d", "weight": "bold", "margin": "xs"},
             make_table_header(headers_p2, weights_p2, aligns_p2, bg_color="#15803d"),
             {"type": "separator", "color": "#bbf7d0", "margin": "xs"}
         ]
-        for idx, t in enumerate(td_done):
+        for idx, t in enumerate(td_done, start=shift_done + 1):
             unit_tag = "(SL)" if t.get("is_sl") else "(DT)"
             display_name = f"{t['name']} {unit_tag}"
             mt_str = "🏆" if (t["actual"] >= t["target"] or t.get("ht", 0) >= 1.0) else t.get("mt_ngay_str", "0")
@@ -918,7 +926,7 @@ def build_luyke_flex():
             dk_str = f"{t['ht_dk']*100:.0f}%"
 
             name_color = "#dc2626" if t.get("phan_loai") == 2.0 else "#0f172a"
-            vals = [str(idx + 1), display_name, mt_str, act_tg_str, ht_str, dk_str]
+            vals = [str(idx), display_name, mt_str, act_tg_str, ht_str, dk_str]
             colors = ["#64748b", name_color, "#16a34a" if mt_str == "🏆" else "#0284c7", "#0f172a", get_color_class(t["ht"]), get_color_class(t["ht_dk"])]
             done_table.append(make_table_row(vals, weights_p2, aligns_p2, colors))
 
@@ -936,11 +944,11 @@ def build_luyke_flex():
 
     if td_pending:
         pending_table = [
-            {"type": "text", "text": f"🎯 NHÓM CHƯA VỀ ĐÍCH ({len(td_pending)})", "size": "xxs", "color": "#b91c1c", "weight": "bold", "margin": "xs"},
+            {"type": "text", "text": f"🎯 NHÓM CHƯA VỀ ĐÍCH ({len(td_done) + 1}–{len(td_done) + len(td_pending)})", "size": "xxs", "color": "#b91c1c", "weight": "bold", "margin": "xs"},
             make_table_header(headers_p2, weights_p2, aligns_p2, bg_color="#0f766e"),
             {"type": "separator", "color": "#cbd5e1", "margin": "xs"}
         ]
-        for idx, t in enumerate(td_pending):
+        for idx, t in enumerate(td_pending, start=shift_pending + 1):
             unit_tag = "(SL)" if t.get("is_sl") else "(DT)"
             display_name = f"{t['name']} {unit_tag}"
             mt_str = "🏆" if (t["actual"] >= t["target"] or t.get("ht", 0) >= 1.0) else t.get("mt_ngay_str", "0")
@@ -949,7 +957,7 @@ def build_luyke_flex():
             dk_str = f"{t['ht_dk']*100:.0f}%"
 
             name_color = "#dc2626" if t.get("phan_loai") == 2.0 else "#0f172a"
-            vals = [str(idx + 1), display_name, mt_str, act_tg_str, ht_str, dk_str]
+            vals = [str(idx), display_name, mt_str, act_tg_str, ht_str, dk_str]
             colors = ["#64748b", name_color, "#16a34a" if mt_str == "🏆" else "#0284c7", "#0f172a", get_color_class(t["ht"]), get_color_class(t["ht_dk"])]
             pending_table.append(make_table_row(vals, weights_p2, aligns_p2, colors))
 
@@ -2697,11 +2705,11 @@ def build_realtime_flex(detail_limit=None):
 
     if td_done:
         done_table_rt = [
-            {"type": "text", "text": f"🏆 NHÓM VỀ ĐÍCH NGÀY ({len(td_done)})", "size": "xxs", "color": "#15803d", "weight": "bold", "margin": "xs"},
+            {"type": "text", "text": f"🏆 NHÓM VỀ ĐÍCH NGÀY (1–{len(td_done)})", "size": "xxs", "color": "#15803d", "weight": "bold", "margin": "xs"},
             make_table_header(headers_rt2, weights_rt2, aligns_rt2, bg_color="#15803d"),
             {"type": "separator", "color": "#bbf7d0", "margin": "xs"}
         ]
-        for idx, t in enumerate(td_done):
+        for idx, t in enumerate(td_done, start=1):
             unit_tag = "(SL)" if t.get("is_sl") else "(DT)"
             display_name = f"{t['name']} {unit_tag}"
             act_str = fmt_val_td(t['actual'], t.get('is_sl', False))
@@ -2710,9 +2718,9 @@ def build_realtime_flex(detail_limit=None):
             ht_str = f"{t['ht']*100:.0f}%"
 
             name_color = "#dc2626" if t.get("phan_loai") == 2.0 else "#0f172a"
-            vals = [str(idx + 1), display_name, act_str, cl_str, tg_str, ht_str]
+            vals = [str(idx), display_name, act_str, cl_str, tg_str, ht_str]
             colors = ["#64748b", name_color, "#0284c7", "#16a34a" if cl_str == "🏆" else "#dc2626", "#475569", get_color_class(t["ht"])]
-            if idx > 0:
+            if idx > 1:
                 done_table_rt.append({"type": "separator", "color": "#e2e8f0", "margin": "xs"})
             done_table_rt.append(make_table_row(vals, weights_rt2, aligns_rt2, colors))
 
@@ -2730,11 +2738,11 @@ def build_realtime_flex(detail_limit=None):
 
     if td_pending:
         pending_table_rt = [
-            {"type": "text", "text": f"🎯 NHÓM CHƯA VỀ ĐÍCH NGÀY ({len(td_pending)})", "size": "xxs", "color": "#b91c1c", "weight": "bold", "margin": "xs"},
+            {"type": "text", "text": f"🎯 NHÓM CHƯA VỀ ĐÍCH NGÀY ({len(td_done) + 1}–{len(td_done) + len(td_pending)})", "size": "xxs", "color": "#b91c1c", "weight": "bold", "margin": "xs"},
             make_table_header(headers_rt2, weights_rt2, aligns_rt2, bg_color="#0f766e"),
             {"type": "separator", "color": "#cbd5e1", "margin": "xs"}
         ]
-        for idx, t in enumerate(td_pending):
+        for idx, t in enumerate(td_pending, start=len(td_done) + 1):
             unit_tag = "(SL)" if t.get("is_sl") else "(DT)"
             display_name = f"{t['name']} {unit_tag}"
             act_str = fmt_val_td(t['actual'], t.get('is_sl', False))
@@ -2743,9 +2751,9 @@ def build_realtime_flex(detail_limit=None):
             ht_str = f"{t['ht']*100:.0f}%"
 
             name_color = "#dc2626" if t.get("phan_loai") == 2.0 else "#0f172a"
-            vals = [str(idx + 1), display_name, act_str, cl_str, tg_str, ht_str]
+            vals = [str(idx), display_name, act_str, cl_str, tg_str, ht_str]
             colors = ["#64748b", name_color, "#0284c7", "#16a34a" if cl_str == "🏆" else "#dc2626", "#475569", get_color_class(t["ht"])]
-            if idx > 0:
+            if idx > len(td_done) + 1:
                 pending_table_rt.append({"type": "separator", "color": "#f1f5f9", "margin": "xs"})
             pending_table_rt.append(make_table_row(vals, weights_rt2, aligns_rt2, colors))
 
@@ -2764,12 +2772,18 @@ def build_realtime_flex(detail_limit=None):
     if td_zero:
         col1_items = []
         col2_items = []
-        for idx, t in enumerate(td_zero):
+        # ===== DMX STT LIEN TUC 25/09/2026 =====
+        # Bang 3 nay truoc day chi liet ke gach dau dong, KHONG co STT => nguoi doc khong biet
+        # no nam o dau trong tong so nhom. Nay danh noi tiep sau bang 2 (vd 7..23).
+        total_rt = len(td_done) + len(td_pending) + len(td_zero)
+        zero_start = len(td_done) + len(td_pending) + 1
+        # ===== HET DMX STT LIEN TUC =====
+        for idx, t in enumerate(td_zero, start=zero_start):
             name_color = "#dc2626" if t.get("phan_loai") == 2.0 else "#475569"
             mt_val = fmt_val_td(t["target"], t.get("is_sl", False))
-            item_text = f"• {t['name']} ({mt_val})"
+            item_text = f"{idx}. {t['name']} ({mt_val})"
             item_dict = {"type": "text", "text": item_text, "size": "xxs", "color": name_color, "wrap": True}
-            if idx % 2 == 0:
+            if (idx - zero_start) % 2 == 0:
                 col1_items.append(item_dict)
             else:
                 col2_items.append(item_dict)
@@ -2784,7 +2798,7 @@ def build_realtime_flex(detail_limit=None):
             "paddingAll": "sm",
             "margin": "xs",
             "contents": [
-                {"type": "text", "text": f"💤 NHÓM CHƯA PHÁT SINH SỐ ({len(td_zero)})", "size": "xxs", "color": "#64748b", "weight": "bold", "margin": "xs"},
+                {"type": "text", "text": f"💤 NHÓM CHƯA PHÁT SINH SỐ ({zero_start}–{total_rt})", "size": "xxs", "color": "#64748b", "weight": "bold", "margin": "xs"},
                 {"type": "separator", "color": "#cbd5e1", "margin": "xs"},
                 {
                     "type": "box",
