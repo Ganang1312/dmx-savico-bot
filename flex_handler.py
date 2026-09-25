@@ -98,7 +98,10 @@ def initialize_daily_tasks(group_id, shift_type, force=False):
 def get_tasks_status_from_sheet(group_id, shift_type, all_records=None):
     try:
         if all_records is None:
-            sheet = get_spreadsheet().worksheet(WORKSHEET_TRACKER_NAME)
+            ss = get_spreadsheet()
+            if not ss:
+                return {}
+            sheet = ss.worksheet(WORKSHEET_TRACKER_NAME)
             all_records = sheet.get_all_records()
         
         tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
@@ -263,108 +266,6 @@ def generate_checklist_flex(group_id, shift_type, all_records_prefetched=None):
         }
         task_components.append(task_component)
         task_components.append({"type": "separator"})
-
-    # Nối thêm các CÔNG VIỆC PHÁT SINH trong ngày vào cùng thẻ checklist ca
-    if group_id and shift_type in ['sang', 'chieu']:
-        adhoc_tasks = get_adhoc_tasks_for_group_today(group_id)
-        if adhoc_tasks:
-            # Nếu đã có separator ở cuối, bỏ bớt
-            if task_components and task_components[-1].get("type") == "separator":
-                task_components.pop()
-                
-            task_components.append({"type": "separator", "margin": "md"})
-            task_components.append({
-                "type": "box",
-                "layout": "vertical",
-                "backgroundColor": "#F3E8FF",
-                "paddingAll": "xs",
-                "paddingStart": "md",
-                "paddingEnd": "md",
-                "margin": "md",
-                "cornerRadius": "sm",
-                "contents": [
-                    {
-                        "type": "text",
-                        "text": "📌 CÔNG VIỆC PHÁT SINH IN-DAY",
-                        "weight": "bold",
-                        "size": "xs",
-                        "color": "#6B21A8"
-                    }
-                ]
-            })
-            task_components.append({"type": "separator", "margin": "xs"})
-
-            for adhoc in adhoc_tasks:
-                task_id = adhoc.get('task_id')
-                task_name = adhoc.get('task_name')
-                assignee = adhoc.get('assignee', '')
-                status = adhoc.get('status', 'incomplete')
-                created_at = adhoc.get('created_at', '')
-                
-                is_complete = (status == 'complete')
-                text_decoration = "line-through" if is_complete else "none"
-                main_text_color = "#AAAAAA" if is_complete else "#111111"
-                button_color = "#CCCCCC" if is_complete else "#7C3AED"
-                button_label = "✓ Xong" if is_complete else "Hoàn tất"
-                target_status_param = "incomplete" if is_complete else "complete"
-
-                sub_text = f"👤 {assignee}"
-                if created_at:
-                    sub_text += f" • 🕒 Giao: {created_at}"
-
-                adhoc_component = {
-                    "type": "box",
-                    "layout": "horizontal",
-                    "spacing": "lg",
-                    "paddingAll": "md",
-                    "alignItems": "center",
-                    "contents": [
-                        {
-                            "type": "text",
-                            "text": "✅" if is_complete else "📋",
-                            "size": "xl",
-                            "flex": 0
-                        },
-                        {
-                            "type": "box",
-                            "layout": "vertical",
-                            "flex": 1,
-                            "spacing": "xs",
-                            "contents": [
-                                {
-                                    "type": "text",
-                                    "text": task_name,
-                                    "wrap": True,
-                                    "weight": "bold",
-                                    "size": "sm",
-                                    "color": main_text_color,
-                                    "decoration": text_decoration
-                                },
-                                {
-                                    "type": "text",
-                                    "text": sub_text,
-                                    "color": "#888888" if is_complete else "#6B21A8",
-                                    "size": "xs",
-                                    "wrap": True
-                                }
-                            ]
-                        },
-                        {
-                            "type": "button",
-                            "action": {
-                                "type": "postback",
-                                "label": button_label,
-                                "data": f"action=complete_adhoc_task&task_id={task_id}&assignee={assignee}&target_status={target_status_param}&shift={shift_type}"
-                            },
-                            "style": "primary",
-                            "color": button_color,
-                            "height": "sm",
-                            "flex": 0
-                        }
-                    ]
-                }
-                task_components.append(adhoc_component)
-                task_components.append({"type": "separator"})
 
     if task_components and task_components[-1].get("type") == "separator":
         task_components.pop()
@@ -1024,24 +925,24 @@ def generate_all_adhoc_flex(group_id, task_group_hash):
                 "contents": [
                     {
                         "type": "text",
-                        "text": "📢 CÔNG VIỆC CHUNG @ALL",
+                        "text": "📋 CÔNG VIỆC GIAO THÊM",
                         "weight": "bold",
-                        "size": "md",
+                        "size": "sm",
                         "color": "#FFFFFF"
                     },
                     {
                         "type": "text",
                         "text": task_name,
                         "weight": "bold",
-                        "size": "lg",
+                        "size": "md",
                         "color": "#FFFFFF",
-                        "margin": "sm",
+                        "margin": "xs",
                         "wrap": True
                     },
                     {
                         "type": "text",
                         "text": f"📅 Ngày giao: {today_display_str}  |  🕒 Giao lúc: {created_at}",
-                        "size": "xs",
+                        "size": "xxs",
                         "color": "#BBDEFB",
                         "margin": "xs"
                     }
@@ -1128,7 +1029,10 @@ def add_multi_adhoc_tasks(group_id, job_name, task_assignments):
     rows_to_add = []
     for index, (sub_task, assignee) in enumerate(task_assignments):
         task_id = f"multi_{task_group_hash}_{index}"
-        combined_task_name = f"{job_name} | {sub_task}"
+        if job_name and str(job_name).strip() and str(job_name).strip() != "Việc phát sinh":
+            combined_task_name = f"{str(job_name).strip()} | {sub_task}"
+        else:
+            combined_task_name = sub_task
         new_row = [
             str(group_id),
             today_str,
@@ -1173,13 +1077,13 @@ def generate_multi_adhoc_flex(group_id, task_group_hash):
         if not filtered_tasks:
             return None
             
-        combined_name = filtered_tasks[0].get('task_name', 'Công việc phát sinh')
+        combined_name = filtered_tasks[0].get('task_name', '')
         created_at = filtered_tasks[0].get('created_at', '')
         
         if ' | ' in combined_name:
-            main_job_name = combined_name.split(' | ', 1)[0]
+            main_job_name = combined_name.split(' | ', 1)[0].strip()
         else:
-            main_job_name = combined_name
+            main_job_name = ""
 
         grouped_subtasks = {}
         for task in filtered_tasks:
@@ -1283,6 +1187,34 @@ def generate_multi_adhoc_flex(group_id, task_group_hash):
         if task_components:
             task_components.pop()
             
+        header_contents = [
+            {
+                "type": "text",
+                "text": "📋 CÔNG VIỆC GIAO THÊM",
+                "weight": "bold",
+                "size": "sm",
+                "color": "#FFFFFF"
+            }
+        ]
+        # Tiêu đề để trống nếu sau chữ Việc gán nhân viên luôn (không có tên việc chung)
+        if main_job_name and main_job_name != "Việc phát sinh":
+            header_contents.append({
+                "type": "text",
+                "text": main_job_name,
+                "weight": "bold",
+                "size": "md",
+                "color": "#FFFFFF",
+                "margin": "xs",
+                "wrap": True
+            })
+        header_contents.append({
+            "type": "text",
+            "text": f"📅 Ngày giao: {today_display_str}  |  🕒 Giao lúc: {created_at}",
+            "size": "xxs",
+            "color": "#B3E5FC",
+            "margin": "xs"
+        })
+
         flex_content = {
             "type": "bubble",
             "size": "mega",
@@ -1290,35 +1222,11 @@ def generate_multi_adhoc_flex(group_id, task_group_hash):
                 "type": "box",
                 "layout": "vertical",
                 "backgroundColor": "#0288D1",
-                "paddingTop": "16px",
-                "paddingBottom": "16px",
-                "paddingStart": "20px",
-                "paddingEnd": "20px",
-                "contents": [
-                    {
-                        "type": "text",
-                        "text": "📋 DANH SÁCH CHECKLIST CÔNG VIỆC",
-                        "weight": "bold",
-                        "size": "xs",
-                        "color": "#B3E5FC"
-                    },
-                    {
-                        "type": "text",
-                        "text": main_job_name,
-                        "weight": "bold",
-                        "size": "lg",
-                        "color": "#FFFFFF",
-                        "margin": "sm",
-                        "wrap": True
-                    },
-                    {
-                        "type": "text",
-                        "text": f"📅 Ngày giao: {today_display_str}  |  🕒 Giao lúc: {created_at}",
-                        "size": "xs",
-                        "color": "#B3E5FC",
-                        "margin": "xs"
-                    }
-                ]
+                "paddingTop": "14px",
+                "paddingBottom": "14px",
+                "paddingStart": "16px",
+                "paddingEnd": "16px",
+                "contents": header_contents
             },
             "body": {
                 "type": "box",
@@ -1333,3 +1241,87 @@ def generate_multi_adhoc_flex(group_id, task_group_hash):
     except Exception as e:
         print(f"Lỗi khi tạo flex checklist công việc: {e}")
         return None
+
+
+def generate_latest_adhoc_flex(group_id):
+    """
+    Tìm nhóm việc adhoc gần nhất hôm nay của group_id và sinh Flex Bubble tương ứng.
+    """
+    sheet = get_or_create_adhoc_worksheet()
+    if not sheet:
+        return None
+    try:
+        all_values, idx = _adhoc_layout(sheet)
+        if not all_values:
+            return None
+        i_gid, i_date, i_tid, i_name = idx
+        today_str = datetime.now(pytz.timezone('Asia/Ho_Chi_Minh')).strftime('%Y-%m-%d')
+
+        rows = [r for r in all_values[1:]
+                if len(r) > max(i_gid, i_date, i_tid)
+                and str(r[i_gid]) == str(group_id) and r[i_date] == today_str]
+        if not rows:
+            return None
+
+        last = rows[-1]
+        tid = str(last[i_tid])
+        token = task_group_token(tid)
+        if tid.startswith('multi_'):
+            return generate_multi_adhoc_flex(group_id, token)
+        elif tid.startswith('all_'):
+            return generate_all_adhoc_flex(group_id, token)
+        return None
+    except Exception as e:
+        print(f"Lỗi generate_latest_adhoc_flex: {e}")
+        return None
+
+
+def build_work_carousel(checklist_bubble, adhoc_bubble):
+    """
+    Tạo Flex Carousel hiển thị 2 thẻ song song:
+      - Thẻ bên trái: Thẻ checklist ca riêng (sang/chieu/vs)
+      - Thẻ bên phải: Thẻ công việc giao thêm riêng (multi/all adhoc)
+    Nếu chỉ có 1 thẻ thì trả về thẻ đó (bubble).
+    """
+    bubbles = []
+    if checklist_bubble:
+        bubbles.append(checklist_bubble)
+    if adhoc_bubble:
+        bubbles.append(adhoc_bubble)
+
+    if len(bubbles) >= 2:
+        return {
+            "type": "carousel",
+            "contents": bubbles
+        }
+    elif len(bubbles) == 1:
+        return bubbles[0]
+    return None
+
+
+def generate_combined_work_flex(group_id, shift_type=None, adhoc_hash=None, adhoc_mode=None):
+    """
+    Tạo Flex Carousel hiển thị 2 thẻ song song:
+      - Thẻ bên trái: Thẻ checklist ca riêng (sang/chieu/vs)
+      - Thẻ bên phải: Thẻ công việc giao thêm riêng (multi/all adhoc)
+    Nếu chỉ có 1 thẻ thì hiển thị thẻ đó.
+    """
+    if not shift_type:
+        tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
+        current_hour = datetime.now(tz_vietnam).hour
+        shift_type = 'sang' if current_hour < 15 else 'chieu'
+
+    checklist_bubble = generate_checklist_flex(group_id, shift_type)
+    
+    adhoc_bubble = None
+    if adhoc_hash:
+        if adhoc_mode == 'all':
+            adhoc_bubble = generate_all_adhoc_flex(group_id, adhoc_hash)
+        else:
+            adhoc_bubble = generate_multi_adhoc_flex(group_id, adhoc_hash)
+
+    if not adhoc_bubble and group_id:
+        adhoc_bubble = generate_latest_adhoc_flex(group_id)
+
+    return build_work_carousel(checklist_bubble, adhoc_bubble)
+

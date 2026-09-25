@@ -462,7 +462,7 @@ def plan_assignments(parsed):
         task, names = assigns[0]
         return {"mode": "all", "job": task, "task": task, "names": list(names)}
 
-    card_job = job if job else "Việc phát sinh"
+    card_job = job if job else ""
     pairs = []
 
     # Dòng đầu có CẢ đích LẪN nội dung việc, mà bên dưới vẫn có dòng "-":

@@ -28,7 +28,8 @@ from flex_handler import (
     add_adhoc_tasks, generate_adhoc_flex, update_adhoc_task_status,
     add_all_adhoc_tasks, generate_all_adhoc_flex, register_group_member,
     add_multi_adhoc_tasks, generate_multi_adhoc_flex,
-    find_latest_task_token, cancel_task_group
+    find_latest_task_token, cancel_task_group,
+    generate_combined_work_flex
 )
 from checklist_scheduler import send_initial_checklist, get_checklist_message 
 from meal_handler import generate_meal_flex, update_meal_status
@@ -436,9 +437,13 @@ def handle_postback(event):
                     target_record['status'] = target_status
                     target_record['user_name'] = new_user
             
-            updated_flex_content = generate_checklist_flex(group_id, shift_type, all_records_prefetched=all_records)
+            if shift_type == 'vs':
+                updated_flex_content = generate_checklist_flex(group_id, 'vs', all_records_prefetched=all_records)
+                alt_text = "Cập nhật checklist hình ảnh"
+            else:
+                updated_flex_content = generate_combined_work_flex(group_id, shift_type)
+                alt_text = f"📋 Cập nhật checklist ca {shift_type}"
 
-            alt_text = "Cập nhật checklist hình ảnh" if shift_type == 'vs' else f"Cập nhật checklist ca {shift_type}"
             line_bot_api.reply_message(
                 event.reply_token,
                 FlexSendMessage(alt_text=alt_text, contents=updated_flex_content)
@@ -473,22 +478,11 @@ def handle_postback(event):
                     current_hour = datetime.now(tz_vietnam).hour
                     shift_type = 'sang' if current_hour < 15 else 'chieu'
 
-                has_shift_checklist = bool(get_tasks_status_from_sheet(group_id, shift_type))
-
-                if has_shift_checklist:
-                    updated_flex_content = generate_checklist_flex(group_id, shift_type)
-                    alt_text = f"📋 Cập nhật checklist ca {shift_type}"
-                else:
-                    if task_id and str(task_id).startswith('all_') and task_group_hash:
-                        updated_flex_content = generate_all_adhoc_flex(group_id, task_group_hash)
-                        alt_text = "📢 Cập nhật công việc chung @all"
-                    elif task_id and str(task_id).startswith('multi_') and task_group_hash:
-                        updated_flex_content = generate_multi_adhoc_flex(group_id, task_group_hash)
-                        alt_text = "📋 Cập nhật checklist công việc"
-                    else:
-                        target_user = resolved_assignee or assignee or "Nhân viên"
-                        updated_flex_content = generate_adhoc_flex(group_id, target_user)
-                        alt_text = f"📋 Cập nhật công việc phát sinh của {target_user}"
+                mode = 'all' if (task_id and str(task_id).startswith('all_')) else 'multi'
+                updated_flex_content = generate_combined_work_flex(
+                    group_id, shift_type, adhoc_hash=task_group_hash, adhoc_mode=mode
+                )
+                alt_text = "📋 Cập nhật công việc giao thêm"
 
                 if updated_flex_content:
                     line_bot_api.reply_message(
@@ -791,17 +785,10 @@ def handle_message(event):
                     text="❌ Có lỗi xảy ra khi lưu công việc."))
                 return
 
-            if plan['mode'] == 'all':
-                flex_content = generate_all_adhoc_flex(group_id, last_hash)
-                alt_text = f"📢 Công việc chung: {plan['job']}"
-            elif plan['mode'] == 'multi':
-                flex_content = generate_multi_adhoc_flex(group_id, last_hash)
-                alt_text = f"📋 Checklist công việc: {plan['job']}"
-            elif has_shift_checklist:
-                flex_content = generate_checklist_flex(group_id, current_shift)
-                alt_text = f"📋 Checklist công việc ca {current_shift} (đã thêm việc mới)"
-            else:
-                flex_content = None
+            flex_content = generate_combined_work_flex(
+                group_id, current_shift, adhoc_hash=last_hash, adhoc_mode=plan['mode']
+            )
+            alt_text = f"📋 Checklist ca {current_shift} & Công việc giao thêm"
 
             if flex_content:
                 line_bot_api.reply_message(
@@ -1021,7 +1008,7 @@ def handle_message(event):
             return
         try:
             initialize_daily_tasks(group_id, shift_type)
-            flex_content = generate_checklist_flex(group_id, shift_type)
+            flex_content = generate_combined_work_flex(group_id, shift_type)
             
             if flex_content:
                 message = FlexSendMessage(alt_text=f"Checklist công việc ca {shift_type}", contents=flex_content)
