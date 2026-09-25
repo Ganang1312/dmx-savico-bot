@@ -1714,13 +1714,21 @@ def build_nhanvien_flex():
         nganh_str = str(nganh).strip()
         nganh_clean = nganh_str.lower()
 
-        # KHỚP CHÍNH XÁC — y hệt `configMap[nganhClean]` của baocao_nhanvien.html.
-        # KHÔNG dùng find_td_config() ở đây: hàm đó khớp mờ 4 tầng (bỏ hậu tố "tháng N")
-        # nên sẽ nhận thêm nhóm 'Đồng hồ' từ dòng cấu hình 'Đồng hồ tháng 9'.
-        # Hệ quả: tổng hệ số thành 36 thay vì 34 -> điểm thi đua của MỌI nhân viên bị lệch.
-        c_obj = config_map.get(nganh_clean) or {}
+        # ===== DMX DONG BO KHOP MO 25/09/2026 =====
+        # DÙNG find_td_config() — ĐỒNG BỘ với `findTDConfig()` của baocao_nhanvien.html.
+        #
+        # LỊCH SỬ (đừng lặp lại sai lầm cũ): trước đây chỗ này khớp CHÍNH XÁC
+        # (`config_map.get(nganh_clean)`) kèm ghi chú rằng find_td_config "sẽ nhận thêm
+        # Đồng hồ -> tổng hệ số 36 thay vì 34". Ghi chú đó nay ĐÃ LỖI THỜI: chính
+        # baocao_nhanvien.html sau đó được đồng bộ sang findTDConfig (xem khối
+        # "DMX KHOP TEN THIDUA 25/09/2026" trong file HTML), nên HTML tính theo 23 nhóm
+        # / hệ số 36, còn bot tính 22 nhóm / 34 -> ĐIỂM THI ĐUA CỦA MỌI NHÂN VIÊN LỆCH.
+        # Ca thật: Config ghi "Đồng hồ tháng 9", dữ liệu ghi "Đồng hồ" (phanLoai=2).
+        # Kiểm chứng 25/09/2026: khớp thô 22 nhóm/34 hệ số · khớp mờ 23 nhóm/36 hệ số.
+        c_obj = find_td_config(nganh_clean, config_map) or {}
         if config_map and (c_obj.get("phanLoai") not in [1.0, 2.0]):
             continue
+        # ===== HET DMX DONG BO KHOP MO =====
 
         c_obj = c_obj or {"phanLoai": 1.0, "thuTu": 999.0}
         sl = parse_number(get_key_val(r, "số lượng", "quantity", "sl", default=0.0))
