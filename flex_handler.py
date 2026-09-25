@@ -842,53 +842,63 @@ def generate_all_adhoc_flex(group_id, task_group_hash):
         task_name = filtered_tasks[0].get('task_name', 'Công việc chung')
         created_at = filtered_tasks[0].get('created_at', '')
         
-        task_components = []
-        for i, task in enumerate(filtered_tasks, start=1):
+        all_complete = all(t.get('status') == 'complete' for t in filtered_tasks)
+        main_text_color = "#AAAAAA" if all_complete else "#111111"
+        main_decoration = "line-through" if all_complete else "none"
+
+        subtask_header_box = {
+            "type": "box",
+            "layout": "horizontal",
+            "spacing": "sm",
+            "alignItems": "flex-start",
+            "contents": [
+                {
+                    "type": "text",
+                    "text": "✅" if all_complete else "⏳",
+                    "size": "md",
+                    "flex": 0
+                },
+                {
+                    "type": "text",
+                    "text": f"1. {task_name}",
+                    "wrap": True,
+                    "weight": "bold",
+                    "size": "sm",
+                    "color": main_text_color,
+                    "decoration": main_decoration,
+                    "flex": 1
+                }
+            ]
+        }
+
+        assignee_rows = []
+        for task in filtered_tasks:
             task_id = task.get('task_id')
             assignee = task.get('assignee')
             status = task.get('status', 'incomplete')
-            completed_by = task.get('completed_by', '')
-            completed_at = task.get('completed_at', '')
-            
             is_complete = (status == 'complete')
-            main_text_color = "#AAAAAA" if is_complete else "#111111"
-            
+            text_decoration = "line-through" if is_complete else "none"
+            assignee_color = "#888888" if is_complete else "#1565C0"
             button_color = "#CCCCCC" if is_complete else "#00B33C"
             button_label = "✓ Xong" if is_complete else "Hoàn tất"
             target_status_param = "incomplete" if is_complete else "complete"
-            
-            assignee_label = f"👤 Giao cho: {assignee}" if len(filtered_tasks) == 1 else f"{i}. {assignee}"
-            task_info_contents = [
-                {
-                    "type": "text",
-                    "text": assignee_label,
-                    "wrap": True,
-                    "weight": "bold",
-                    "size": "xs",
-                    "color": main_text_color,
-                    "decoration": "line-through" if is_complete else "none"
-                }
-            ]
-                
-            task_component = {
+
+            assignee_row = {
                 "type": "box",
                 "layout": "horizontal",
                 "spacing": "sm",
-                "paddingAll": "sm",
                 "alignItems": "center",
+                "paddingStart": "16px",
+                "margin": "xs",
                 "contents": [
                     {
                         "type": "text",
-                        "text": "✅" if is_complete else "⏳",
-                        "size": "md",
-                        "flex": 0
-                    },
-                    {
-                        "type": "box",
-                        "layout": "vertical",
+                        "text": f"👤 Giao cho: {assignee}",
+                        "color": assignee_color,
+                        "size": "xs",
+                        "decoration": text_decoration,
                         "flex": 1,
-                        "spacing": "xs",
-                        "contents": task_info_contents
+                        "wrap": True
                     },
                     {
                         "type": "button",
@@ -905,45 +915,42 @@ def generate_all_adhoc_flex(group_id, task_group_hash):
                     }
                 ]
             }
-            task_components.append(task_component)
-            task_components.append({"type": "separator"})
-            
-        if task_components:
-            task_components.pop()
-            
+            assignee_rows.append(assignee_row)
+
+        task_components = [
+            {
+                "type": "box",
+                "layout": "vertical",
+                "paddingAll": "sm",
+                "spacing": "xs",
+                "contents": [subtask_header_box] + assignee_rows
+            }
+        ]
+
         flex_content = {
             "type": "bubble",
             "size": "mega",
             "header": {
                 "type": "box",
                 "layout": "vertical",
-                "backgroundColor": "#1565C0",  # Royal Blue đậm chuyên nghiệp
-                "paddingTop": "16px",
-                "paddingBottom": "16px",
-                "paddingStart": "20px",
-                "paddingEnd": "20px",
+                "backgroundColor": "#0288D1",
+                "paddingTop": "14px",
+                "paddingBottom": "14px",
+                "paddingStart": "16px",
+                "paddingEnd": "16px",
                 "contents": [
                     {
                         "type": "text",
                         "text": "📋 CÔNG VIỆC GIAO THÊM",
                         "weight": "bold",
-                        "size": "sm",
-                        "color": "#FFFFFF"
-                    },
-                    {
-                        "type": "text",
-                        "text": task_name,
-                        "weight": "bold",
                         "size": "md",
-                        "color": "#FFFFFF",
-                        "margin": "xs",
-                        "wrap": True
+                        "color": "#FFFFFF"
                     },
                     {
                         "type": "text",
                         "text": f"📅 Ngày giao: {today_display_str}  |  🕒 Giao lúc: {created_at}",
                         "size": "xxs",
-                        "color": "#BBDEFB",
+                        "color": "#B3E5FC",
                         "margin": "xs"
                     }
                 ]
@@ -1107,7 +1114,7 @@ def generate_multi_adhoc_flex(group_id, task_group_hash):
                 "type": "box",
                 "layout": "horizontal",
                 "spacing": "sm",
-                "alignItems": "center",
+                "alignItems": "flex-start",
                 "contents": [
                     {
                         "type": "text",
@@ -1145,7 +1152,7 @@ def generate_multi_adhoc_flex(group_id, task_group_hash):
                     "layout": "horizontal",
                     "spacing": "sm",
                     "alignItems": "center",
-                    "paddingStart": "24px",
+                    "paddingStart": "16px",
                     "margin": "xs",
                     "contents": [
                         {
@@ -1192,28 +1199,17 @@ def generate_multi_adhoc_flex(group_id, task_group_hash):
                 "type": "text",
                 "text": "📋 CÔNG VIỆC GIAO THÊM",
                 "weight": "bold",
-                "size": "sm",
+                "size": "md",
                 "color": "#FFFFFF"
+            },
+            {
+                "type": "text",
+                "text": f"📅 Ngày giao: {today_display_str}  |  🕒 Giao lúc: {created_at}",
+                "size": "xxs",
+                "color": "#B3E5FC",
+                "margin": "xs"
             }
         ]
-        # Tiêu đề để trống nếu sau chữ Việc gán nhân viên luôn (không có tên việc chung)
-        if main_job_name and main_job_name != "Việc phát sinh":
-            header_contents.append({
-                "type": "text",
-                "text": main_job_name,
-                "weight": "bold",
-                "size": "md",
-                "color": "#FFFFFF",
-                "margin": "xs",
-                "wrap": True
-            })
-        header_contents.append({
-            "type": "text",
-            "text": f"📅 Ngày giao: {today_display_str}  |  🕒 Giao lúc: {created_at}",
-            "size": "xxs",
-            "color": "#B3E5FC",
-            "margin": "xs"
-        })
 
         flex_content = {
             "type": "bubble",
