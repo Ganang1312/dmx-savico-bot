@@ -65,20 +65,60 @@ def clear_all_coupons():
 
 
 def detect_category(product_name):
-    """Tự động phân loại ngành hàng từ tên sản phẩm."""
+    """
+    Tự động phân loại ngành hàng từ tên sản phẩm.
+    Hỗ trợ chuẩn xác các nhóm ngành hàng Điện Máy XANH theo yêu cầu:
+      1. Máy Giặt
+      2. Tủ Lạnh
+      3. Tủ Đông
+      4. Máy lọc nước
+      5. Loa Karaoke
+      6. Loa Thanh
+      7. Tivi
+      Và các nhóm phụ: Máy lạnh, Gia dụng, Điện thoại, Khác.
+    """
     p_lower = str(product_name).lower()
-    if any(k in p_lower for k in ['tủ lạnh', 'tu lanh', 'fridge']):
-        return 'Tủ lạnh', '🧊'
-    if any(k in p_lower for k in ['tivi', 'tv', 'tivi ']):
+
+    # 1. Tủ Đông (kiểm tra trước Tủ Lạnh)
+    if any(k in p_lower for k in ['tủ đông', 'tu dong', 'tudong', 'freezer']):
+        return 'Tủ Đông', '❄️'
+
+    # 2. Tủ Lạnh
+    if any(k in p_lower for k in ['tủ lạnh', 'tu lanh', 'tulanh', 'fridge']):
+        return 'Tủ Lạnh', '🧊'
+
+    # 3. Máy lọc nước (kiểm tra trước Gia dụng)
+    if any(k in p_lower for k in ['máy lọc nước', 'may loc nuoc', 'lọc nước', 'loc nuoc', 'ro nóng lạnh', 'water purifier']):
+        return 'Máy lọc nước', '💧'
+
+    # 4. Loa Thanh & Loa Karaoke
+    if any(k in p_lower for k in ['loa thanh', 'soundbar', 'sound bar']):
+        return 'Loa Thanh', '🔊'
+    if any(k in p_lower for k in ['loa karaoke', 'karaoke', 'loa kéo', 'loa keo', 'dalton']):
+        return 'Loa Karaoke', '🎤'
+    if 'loa ' in p_lower or p_lower.startswith('loa'):
+        return 'Loa Karaoke', '🎤'
+
+    # 5. Máy Giặt / Sấy
+    if any(k in p_lower for k in ['máy giặt', 'may giat', 'máy sấy', 'may say', 'giặt sấy', 'giat say', 'washer', 'dryer']):
+        return 'Máy Giặt', '🧺'
+
+    # 6. Tivi
+    if any(k in p_lower for k in ['tivi', 'tv', 'tivi ', 'smart tv', 'qned', 'oled', 'qled', 'bravia', 'mini led']):
         return 'Tivi', '📺'
-    if any(k in p_lower for k in ['máy giặt', 'may giat', 'máy sấy', 'may say']):
-        return 'Máy giặt', '🧺'
-    if any(k in p_lower for k in ['máy lạnh', 'may lanh', 'điều hòa', 'dieu hoa']):
+
+    # 7. Máy lạnh / Điều hòa
+    if any(k in p_lower for k in ['máy lạnh', 'may lanh', 'điều hòa', 'dieu hoa', 'air conditioner']):
         return 'Máy lạnh', '❄️'
-    if any(k in p_lower for k in ['nồi cơm', 'noi com', 'nồi chiên', 'noi chien', 'quạt', 'quat', 'lọc nước']):
+
+    # 8. Gia dụng
+    if any(k in p_lower for k in ['nồi cơm', 'noi com', 'nồi chiên', 'noi chien', 'quạt', 'quat', 'bếp', 'bep', 'lò vi sóng', 'lo vi song', 'máy ép', 'may ep', 'máy xay', 'may xay', 'ấm siêu tốc', 'am sieu toc']):
         return 'Gia dụng', '🍳'
-    if any(k in p_lower for k in ['điện thoại', 'dien thoai', 'iphone', 'samsung', 'oppo', 'xiaomi']):
+
+    # 9. Điện thoại / Tablet
+    if any(k in p_lower for k in ['điện thoại', 'dien thoai', 'smartphone', 'iphone', 'ipad', 'galaxy z', 'galaxy s']):
         return 'Điện thoại', '📱'
+
     return 'Khác', '🎁'
 
 
@@ -228,8 +268,10 @@ def get_available_coupons_today(target_date_str=None):
             if len(row) < 5:
                 continue
             r_date = str(row[0]).strip()
-            r_cat = str(row[1]).strip()
             r_prod = str(row[2]).strip()
+            # Tự động chuẩn hóa ngành hàng theo tên sản phẩm
+            r_cat_auto, _ = detect_category(r_prod)
+            r_cat = r_cat_auto if r_cat_auto != 'Khác' else (str(row[1]).strip() or 'Khác')
             r_code = str(row[3]).strip()
             r_status = str(row[4]).strip().lower()
 
@@ -248,8 +290,9 @@ def get_available_coupons_today(target_date_str=None):
                 if len(row) < 5:
                     continue
                 r_date = str(row[0]).strip()
-                r_cat = str(row[1]).strip()
                 r_prod = str(row[2]).strip()
+                r_cat_auto, _ = detect_category(r_prod)
+                r_cat = r_cat_auto if r_cat_auto != 'Khác' else (str(row[1]).strip() or 'Khác')
                 r_code = str(row[3]).strip()
                 r_status = str(row[4]).strip().lower()
                 if r_status == 'available':
@@ -276,9 +319,11 @@ def get_coupons_summary_by_category(target_date_str=None):
     summary = {}
 
     for c in valid_coupons:
-        cat = c.get('category') or 'Khác'
         prod = c.get('product_name') or 'Sản phẩm'
-        _, icon = detect_category(cat + ' ' + prod)
+        cat, icon = detect_category(prod)
+        if cat == 'Khác' and c.get('category'):
+            cat = c.get('category')
+            _, icon = detect_category(cat)
 
         if cat not in summary:
             summary[cat] = {
@@ -427,8 +472,27 @@ def build_category_menu_flex(target_date_str=None):
             }
         }
 
+    CATEGORY_ORDER = [
+        'Máy Giặt',
+        'Tủ Lạnh',
+        'Tủ Đông',
+        'Máy lọc nước',
+        'Loa Karaoke',
+        'Loa Thanh',
+        'Tivi',
+        'Máy lạnh',
+        'Gia dụng',
+        'Điện thoại',
+        'Khác'
+    ]
+    sorted_cats = sorted(
+        summary.keys(),
+        key=lambda c: CATEGORY_ORDER.index(c) if c in CATEGORY_ORDER else 99
+    )
+
     cat_boxes = []
-    for cat, info in summary.items():
+    for cat in sorted_cats:
+        info = summary[cat]
         icon = info['icon']
         count = info['count']
         num_prod = len(info['products'])
@@ -536,9 +600,16 @@ def build_product_list_flex(category, target_date_str=None):
         target_date_str = datetime.now(tz_vietnam).strftime('%d/%m/%Y')
 
     summary = get_coupons_summary_by_category(target_date_str)
-    cat_info = summary.get(category)
+    cat_info = None
+    target_cat_title = category
 
-    _, icon = detect_category(category)
+    for c_name, c_val in summary.items():
+        if c_name.strip().lower() == str(category).strip().lower():
+            cat_info = c_val
+            target_cat_title = c_name
+            break
+
+    _, icon = detect_category(target_cat_title)
 
     if not cat_info or not cat_info['products']:
         return {
@@ -552,7 +623,7 @@ def build_product_list_flex(category, target_date_str=None):
                 "contents": [
                     {
                         "type": "text",
-                        "text": f"{icon} PHIẾU GIẢM GIÁ {category.upper()}",
+                        "text": f"{icon} PHIẾU GIẢM GIÁ {target_cat_title.upper()}",
                         "weight": "bold",
                         "size": "sm",
                         "color": "#FFFFFF"
@@ -566,7 +637,7 @@ def build_product_list_flex(category, target_date_str=None):
                 "contents": [
                     {
                         "type": "text",
-                        "text": f"Đã hết phiếu giảm giá cho ngành hàng {category} hôm nay.",
+                        "text": f"Đã hết phiếu giảm giá cho ngành hàng {target_cat_title} hôm nay.",
                         "size": "sm",
                         "color": "#666666"
                     }
@@ -627,7 +698,7 @@ def build_product_list_flex(category, target_date_str=None):
                             "action": {
                                 "type": "postback",
                                 "label": "🎟️ Lấy mã",
-                                "data": f"action=claim_coupon&cat={category}&prod={prod_name}"
+                                "data": f"action=claim_coupon&cat={target_cat_title}&prod={prod_name}"
                             },
                             "style": "primary",
                             "color": "#00B33C",
@@ -659,7 +730,7 @@ def build_product_list_flex(category, target_date_str=None):
             "contents": [
                 {
                     "type": "text",
-                    "text": f"{icon} PHIẾU GIẢM GIÁ {category.upper()}",
+                    "text": f"{icon} PHIẾU GIẢM GIÁ {target_cat_title.upper()}",
                     "weight": "bold",
                     "size": "md",
                     "color": "#FFFFFF"
