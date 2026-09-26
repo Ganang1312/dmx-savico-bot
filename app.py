@@ -446,7 +446,7 @@ def handle_postback(event):
             if shift_type == 'vs':
                 updated_flex_content = generate_checklist_flex(group_id, 'vs', all_records_prefetched=all_records)
                 alt_text = "Cập nhật checklist hình ảnh"
-            elif group_id == MAIN_CHECKLIST_GROUP_ID:
+            elif str(group_id).strip() == str(MAIN_CHECKLIST_GROUP_ID).strip():
                 updated_flex_content = generate_combined_work_flex(group_id, shift_type)
                 alt_text = f"📋 Cập nhật checklist ca {shift_type}"
             else:
@@ -488,7 +488,7 @@ def handle_postback(event):
                     shift_type = 'sang' if current_hour < 15 else 'chieu'
 
                 mode = 'all' if (task_id and str(task_id).startswith('all_')) else 'multi'
-                if group_id == MAIN_CHECKLIST_GROUP_ID:
+                if str(group_id).strip() == str(MAIN_CHECKLIST_GROUP_ID).strip():
                     updated_flex_content = generate_combined_work_flex(
                         group_id, shift_type, adhoc_hash=task_group_hash, adhoc_mode=mode
                     )
@@ -852,7 +852,7 @@ def handle_message(event):
                     text="❌ Có lỗi xảy ra khi lưu công việc."))
                 return
 
-            if group_id == MAIN_CHECKLIST_GROUP_ID:
+            if str(group_id).strip() == str(MAIN_CHECKLIST_GROUP_ID).strip():
                 flex_content = generate_combined_work_flex(
                     group_id, current_shift, adhoc_hash=last_hash, adhoc_mode=plan['mode']
                 )
@@ -1122,7 +1122,7 @@ def handle_message(event):
             return
         try:
             initialize_daily_tasks(group_id, shift_type)
-            if group_id == MAIN_CHECKLIST_GROUP_ID:
+            if str(group_id).strip() == str(MAIN_CHECKLIST_GROUP_ID).strip():
                 flex_content = generate_combined_work_flex(group_id, shift_type)
                 alt_text = f"📋 Checklist ca {shift_type} & Việc giao thêm"
             else:

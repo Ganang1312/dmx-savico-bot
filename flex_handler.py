@@ -345,6 +345,59 @@ def get_or_create_adhoc_worksheet():
         print(f"Lỗi khi lấy/tạo worksheet adhoc_tasks: {e}")
         return None
 
+def _get_adhoc_col_indices(headers):
+    """
+    Xác định vị trí các cột trong sheet adhoc_tasks linh hoạt,
+    bất kể viết hoa, thường, có khoảng trắng hay dấu gạch.
+    """
+    norm = [str(h).strip().lower().replace(' ', '_').replace('-', '_') for h in headers]
+    
+    def find_idx(candidates, default_val):
+        for cand in candidates:
+            if cand in norm:
+                return norm.index(cand)
+        return default_val
+
+    i_gid = find_idx(['group_id', 'groupid', 'gid', 'group', 'nhom', 'mã_nhóm', 'nhóm'], 0)
+    i_date = find_idx(['date', 'ngay', 'ngày', 'ngay_giao'], 1)
+    i_assignee = find_idx(['assignee', 'nhan_vien', 'nguoi_nhan', 'ten_nv', 'nhân_viên', 'người_nhận'], 2)
+    i_tid = find_idx(['task_id', 'taskid', 'id', 'ma_viec'], 3)
+    i_name = find_idx(['task_name', 'taskname', 'name', 'ten_viec', 'cong_viec', 'tên_việc', 'công_việc'], 4)
+    i_status = find_idx(['status', 'trang_thai', 'trạng_thái'], 5)
+    i_comp_by = find_idx(['completed_by', 'nguoi_hoan_thanh', 'xong_boi', 'người_hoàn_thành'], 6)
+    i_comp_at = find_idx(['completed_at', 'thoi_gian_xong', 'xong_luc', 'thời_gian_xong'], 7)
+    i_created_at = find_idx(['created_at', 'thoi_gian_giao', 'giao_luc', 'tao_luc', 'thời_gian_giao'], 8)
+    
+    return {
+        'group_id': i_gid,
+        'date': i_date,
+        'assignee': i_assignee,
+        'task_id': i_tid,
+        'task_name': i_name,
+        'status': i_status,
+        'completed_by': i_comp_by,
+        'completed_at': i_comp_at,
+        'created_at': i_created_at
+    }
+
+def _build_adhoc_row(headers, group_id, date_str, assignee, task_id, task_name, status, comp_by, comp_at, created_at):
+    """
+    Tạo dòng dữ liệu mới khớp chính xác 100% với cấu trúc cột thực tế của sheet.
+    """
+    cols = _get_adhoc_col_indices(headers)
+    max_idx = max(max(cols.values()), len(headers) - 1, 8)
+    row = [''] * (max_idx + 1)
+    row[cols['group_id']] = str(group_id).strip()
+    row[cols['date']] = str(date_str).strip()
+    row[cols['assignee']] = str(assignee).strip()
+    row[cols['task_id']] = str(task_id).strip()
+    row[cols['task_name']] = str(task_name).strip()
+    row[cols['status']] = str(status).strip()
+    row[cols['completed_by']] = str(comp_by).strip()
+    row[cols['completed_at']] = str(comp_at).strip()
+    row[cols['created_at']] = str(created_at).strip()
+    return row
+
 def clean_old_adhoc_tasks(sheet):
     """
     Xóa các công việc cũ (khác ngày hôm nay) trong trang tính adhoc_tasks để giải phóng dữ liệu.
@@ -363,10 +416,13 @@ def clean_old_adhoc_tasks(sheet):
             return
         
         headers = all_values[0]
+        cols = _get_adhoc_col_indices(headers)
+        i_date = cols['date']
+        
         rows_to_keep = []
         has_old_rows = False
         for row in all_values[1:]:
-            if len(row) > 1 and row[1] == today_str:
+            if len(row) > i_date and str(row[i_date]).strip() == today_str:
                 rows_to_keep.append(row)
             else:
                 has_old_rows = True
@@ -386,7 +442,7 @@ def add_adhoc_tasks(group_id, assignee, tasks_list):
     Thêm danh sách các công việc phát sinh cho nhân viên vào sheet.
     """
     sheet = get_or_create_adhoc_worksheet()
-    if not sheet:
+    if not sheet or not group_id:
         return False
         
     clean_old_adhoc_tasks(sheet)
@@ -395,74 +451,97 @@ def add_adhoc_tasks(group_id, assignee, tasks_list):
     today_str = datetime.now(tz_vietnam).strftime('%Y-%m-%d')
     time_now_str = datetime.now(tz_vietnam).strftime('%H:%M')
     
-    rows_to_add = []
-    for task_name in tasks_list:
-        task_id = f"adhoc_{uuid.uuid4().hex[:8]}"
-        new_row = [
-            str(group_id),
-            today_str,
-            assignee,
-            task_id,
-            task_name,
-            'incomplete',
-            '',
-            '',
-            time_now_str
-        ]
-        rows_to_add.append(new_row)
-        
-    if rows_to_add:
-        sheet.append_rows(rows_to_add, value_input_option='USER_ENTERED')
-        print(f"Đã thêm {len(rows_to_add)} công việc phát sinh cho {assignee}")
-        return True
-    return False
-
-def get_adhoc_tasks_today(group_id, assignee):
-    """
-    Lấy danh sách công việc phát sinh hôm nay của nhân viên đó.
-    """
-    sheet = get_or_create_adhoc_worksheet()
-    if not sheet:
-        return []
-    
     try:
-        all_records = sheet.get_all_records()
-        tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
-        today_str = datetime.now(tz_vietnam).strftime('%Y-%m-%d')
+        all_values = sheet.get_all_values()
+        headers = all_values[0] if all_values else ['group_id', 'date', 'assignee', 'task_id', 'task_name', 'status', 'completed_by', 'completed_at', 'created_at']
         
-        filtered_tasks = []
-        for record in all_records:
-            if (str(record.get('group_id')) == str(group_id) and 
-                record.get('date') == today_str and 
-                str(record.get('assignee')).strip().lower() == str(assignee).strip().lower()):
-                filtered_tasks.append(record)
-        return filtered_tasks
+        rows_to_add = []
+        for task_name in tasks_list:
+            task_id = f"adhoc_{uuid.uuid4().hex[:8]}"
+            new_row = _build_adhoc_row(
+                headers=headers,
+                group_id=group_id,
+                date_str=today_str,
+                assignee=assignee,
+                task_id=task_id,
+                task_name=task_name,
+                status='incomplete',
+                comp_by='',
+                comp_at='',
+                created_at=time_now_str
+            )
+            rows_to_add.append(new_row)
+            
+        if rows_to_add:
+            sheet.append_rows(rows_to_add, value_input_option='USER_ENTERED')
+            print(f"Đã thêm {len(rows_to_add)} công việc phát sinh cho {assignee} tại group {group_id}")
+            return True
+        return False
     except Exception as e:
-        print(f"Lỗi khi lấy adhoc tasks hôm nay: {e}")
-        return []
+        print(f"Lỗi khi thêm adhoc tasks: {e}")
+        return False
 
 def get_adhoc_tasks_for_group_today(group_id):
     """
     Lấy toàn bộ công việc phát sinh trong ngày của nhóm (mọi nhân viên).
+    CHỈ lấy công việc của ĐÚNG group_id này, cô lập 100% không lẫn sang nhóm khác.
     """
     sheet = get_or_create_adhoc_worksheet()
     if not sheet or not group_id:
         return []
     
     try:
-        all_records = sheet.get_all_records()
+        all_values = sheet.get_all_values()
+        if len(all_values) <= 1:
+            return []
+            
+        cols = _get_adhoc_col_indices(all_values[0])
+        i_gid = cols['group_id']
+        i_date = cols['date']
+        i_assignee = cols['assignee']
+        i_tid = cols['task_id']
+        i_name = cols['task_name']
+        i_status = cols['status']
+        i_comp_by = cols['completed_by']
+        i_comp_at = cols['completed_at']
+        i_created_at = cols['created_at']
+
         tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
         today_str = datetime.now(tz_vietnam).strftime('%Y-%m-%d')
-        
+        target_gid = str(group_id).strip()
+
         filtered_tasks = []
-        for record in all_records:
-            if (str(record.get('group_id')) == str(group_id) and 
-                record.get('date') == today_str):
-                filtered_tasks.append(record)
+        for row in all_values[1:]:
+            if len(row) <= max(i_gid, i_date):
+                continue
+            row_gid = str(row[i_gid]).strip()
+            row_date = str(row[i_date]).strip()
+            
+            # CÔ LẬP TUYỆT ĐỐI THEO GROUP_ID VÀ NGÀY HÔM NAY
+            if row_gid == target_gid and row_date == today_str:
+                filtered_tasks.append({
+                    'group_id': row_gid,
+                    'date': row_date,
+                    'assignee': str(row[i_assignee]).strip() if len(row) > i_assignee else '',
+                    'task_id': str(row[i_tid]).strip() if len(row) > i_tid else '',
+                    'task_name': str(row[i_name]).strip() if len(row) > i_name else '',
+                    'status': str(row[i_status]).strip() if len(row) > i_status else 'incomplete',
+                    'completed_by': str(row[i_comp_by]).strip() if len(row) > i_comp_by else '',
+                    'completed_at': str(row[i_comp_at]).strip() if len(row) > i_comp_at else '',
+                    'created_at': str(row[i_created_at]).strip() if len(row) > i_created_at else ''
+                })
         return filtered_tasks
     except Exception as e:
         print(f"Lỗi khi lấy adhoc tasks của nhóm hôm nay: {e}")
         return []
+
+def get_adhoc_tasks_today(group_id, assignee):
+    """
+    Lấy danh sách công việc phát sinh hôm nay của nhân viên đó trong nhóm.
+    """
+    all_group_tasks = get_adhoc_tasks_for_group_today(group_id)
+    target_assignee = str(assignee).strip().lower()
+    return [t for t in all_group_tasks if str(t.get('assignee', '')).strip().lower() == target_assignee]
 
 def task_group_token(task_id):
     """
@@ -477,16 +556,12 @@ def task_group_token(task_id):
 
 
 def _adhoc_layout(sheet):
-    """Trả về (headers, chỉ_số_cột) hoặc (None, None)."""
+    """Trả về (all_values, idx) hoặc (None, None)."""
     all_values = sheet.get_all_values()
     if len(all_values) <= 1:
         return (None, None)
-    headers = all_values[0]
-    try:
-        idx = (headers.index('group_id'), headers.index('date'),
-               headers.index('task_id'), headers.index('task_name'))
-    except ValueError:
-        return (None, None)
+    cols = _get_adhoc_col_indices(all_values[0])
+    idx = (cols['group_id'], cols['date'], cols['task_id'], cols['task_name'])
     return (all_values, idx)
 
 
@@ -496,7 +571,7 @@ def find_latest_task_token(group_id):
     Trả về (token, nhãn, số_dòng) hoặc (None, None, 0).
     """
     sheet = get_or_create_adhoc_worksheet()
-    if not sheet:
+    if not sheet or not group_id:
         return (None, None, 0)
     try:
         all_values, idx = _adhoc_layout(sheet)
@@ -504,10 +579,11 @@ def find_latest_task_token(group_id):
             return (None, None, 0)
         i_gid, i_date, i_tid, i_name = idx
         today_str = datetime.now(pytz.timezone('Asia/Ho_Chi_Minh')).strftime('%Y-%m-%d')
+        target_gid = str(group_id).strip()
 
         rows = [r for r in all_values[1:]
                 if len(r) > max(i_gid, i_date, i_tid)
-                and str(r[i_gid]) == str(group_id) and r[i_date] == today_str]
+                and str(r[i_gid]).strip() == target_gid and str(r[i_date]).strip() == today_str]
         if not rows:
             return (None, None, 0)
 
@@ -528,7 +604,7 @@ def cancel_task_group(group_id, token):
     Trả về (số_dòng_đã_xoá, [tên_việc...]).
     """
     sheet = get_or_create_adhoc_worksheet()
-    if not sheet:
+    if not sheet or not group_id or not token:
         return (0, [])
     try:
         all_values, idx = _adhoc_layout(sheet)
@@ -536,14 +612,17 @@ def cancel_task_group(group_id, token):
             return (0, [])
         i_gid, i_date, i_tid, i_name = idx
         today_str = datetime.now(pytz.timezone('Asia/Ho_Chi_Minh')).strftime('%Y-%m-%d')
+        target_gid = str(group_id).strip()
 
         keep, names, removed = [], [], 0
         for r in all_values[1:]:
             if len(r) <= max(i_gid, i_date, i_tid):
                 keep.append(r)
                 continue
-            tid = str(r[i_tid])
-            hit = (str(r[i_gid]) == str(group_id) and r[i_date] == today_str
+            r_gid = str(r[i_gid]).strip()
+            r_date = str(r[i_date]).strip()
+            tid = str(r[i_tid]).strip()
+            hit = (r_gid == target_gid and r_date == today_str
                    and (tid == token or tid.startswith(token + "_")
                         or task_group_token(tid) == token))
             if hit:
@@ -560,7 +639,7 @@ def cancel_task_group(group_id, token):
         sheet.append_row(all_values[0])
         if keep:
             sheet.append_rows(keep, value_input_option='USER_ENTERED')
-        print(f"Đã hủy {removed} dòng việc của nhóm {token}.")
+        print(f"Đã hủy {removed} dòng việc của nhóm {token} trong group {group_id}.")
         return (removed, names)
     except Exception as e:
         print(f"Lỗi hủy nhóm việc: {e}")
@@ -591,40 +670,61 @@ def build_cancel_footer(task_group_hash):
 
 def update_adhoc_task_status(group_id, task_id, target_status, completed_by):
     """
-    Cập nhật trạng thái của adhoc task.
+    Cập nhật trạng thái của adhoc task theo đúng group_id và task_id.
     """
     sheet = get_or_create_adhoc_worksheet()
-    if not sheet:
+    if not sheet or not group_id or not task_id:
         return False, None, None
     
     try:
-        all_records = sheet.get_all_records()
-        tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
-        today_str = datetime.now(tz_vietnam).strftime('%Y-%m-%d')
-        time_str = datetime.now(tz_vietnam).strftime('%H:%M')
-        
+        all_values = sheet.get_all_values()
+        if len(all_values) <= 1:
+            return False, None, None
+
+        cols = _get_adhoc_col_indices(all_values[0])
+        i_gid = cols['group_id']
+        i_tid = cols['task_id']
+        i_assignee = cols['assignee']
+        i_status = cols['status']
+        i_comp_by = cols['completed_by']
+        i_comp_at = cols['completed_at']
+
+        time_str = datetime.now(pytz.timezone('Asia/Ho_Chi_Minh')).strftime('%H:%M')
+        target_gid = str(group_id).strip()
+
         row_idx = -1
         assignee = None
         task_group_hash = None
-        for i, record in enumerate(all_records):
-            if (str(record.get('group_id')) == str(group_id) and 
-                record.get('task_id') == task_id):
-                row_idx = i + 2  # 1-indexed and header row
-                assignee = record.get('assignee')
+
+        for i, row in enumerate(all_values[1:], start=2):
+            if len(row) <= max(i_gid, i_tid):
+                continue
+            r_gid = str(row[i_gid]).strip()
+            r_tid = str(row[i_tid]).strip()
+
+            if r_gid == target_gid and r_tid == str(task_id).strip():
+                row_idx = i
+                assignee = str(row[i_assignee]).strip() if len(row) > i_assignee else ''
                 if str(task_id).startswith('all_') or str(task_id).startswith('multi_'):
                     parts = str(task_id).split('_')
                     if len(parts) >= 3:
                         task_group_hash = parts[1]
                 break
-                
+
         if row_idx != -1:
             comp_by = completed_by if target_status == 'complete' else ''
             comp_at = time_str if target_status == 'complete' else ''
-            
-            # Cột F: status, Cột G: completed_by, Cột H: completed_at
-            range_to_update = f'F{row_idx}:H{row_idx}'
-            sheet.update(range_name=range_to_update, values=[[target_status, comp_by, comp_at]])
+
+            import gspread.utils
+            col_letter_status = gspread.utils.rowcol_to_a1(row_idx, i_status + 1)
+            col_letter_comp_by = gspread.utils.rowcol_to_a1(row_idx, i_comp_by + 1)
+            col_letter_comp_at = gspread.utils.rowcol_to_a1(row_idx, i_comp_at + 1)
+
+            sheet.update(range_name=col_letter_status, values=[[target_status]])
+            sheet.update(range_name=col_letter_comp_by, values=[[comp_by]])
+            sheet.update(range_name=col_letter_comp_at, values=[[comp_at]])
             return True, assignee, task_group_hash
+
         return False, None, None
     except Exception as e:
         print(f"Lỗi khi cập nhật trạng thái adhoc task: {e}")
@@ -779,7 +879,7 @@ def add_all_adhoc_tasks(group_id, members, task_name):
     Giao việc chung @all cho toàn bộ thành viên trong nhóm.
     """
     sheet = get_or_create_adhoc_worksheet()
-    if not sheet:
+    if not sheet or not group_id:
         return None
         
     clean_old_adhoc_tasks(sheet)
@@ -790,27 +890,35 @@ def add_all_adhoc_tasks(group_id, members, task_name):
     
     task_group_hash = uuid.uuid4().hex[:6]
     
-    rows_to_add = []
-    for index, member in enumerate(members):
-        task_id = f"all_{task_group_hash}_{index}"
-        new_row = [
-            str(group_id),
-            today_str,
-            member,
-            task_id,
-            task_name,
-            'incomplete',
-            '',
-            '',
-            time_now_str
-        ]
-        rows_to_add.append(new_row)
+    try:
+        all_values = sheet.get_all_values()
+        headers = all_values[0] if all_values else ['group_id', 'date', 'assignee', 'task_id', 'task_name', 'status', 'completed_by', 'completed_at', 'created_at']
         
-    if rows_to_add:
-        sheet.append_rows(rows_to_add, value_input_option='USER_ENTERED')
-        print(f"Đã thêm việc @all {task_name} cho {len(rows_to_add)} thành viên")
-        return task_group_hash
-    return None
+        rows_to_add = []
+        for index, member in enumerate(members):
+            task_id = f"all_{task_group_hash}_{index}"
+            new_row = _build_adhoc_row(
+                headers=headers,
+                group_id=group_id,
+                date_str=today_str,
+                assignee=member,
+                task_id=task_id,
+                task_name=task_name,
+                status='incomplete',
+                comp_by='',
+                comp_at='',
+                created_at=time_now_str
+            )
+            rows_to_add.append(new_row)
+            
+        if rows_to_add:
+            sheet.append_rows(rows_to_add, value_input_option='USER_ENTERED')
+            print(f"Đã thêm việc @all {task_name} cho {len(rows_to_add)} thành viên tại group {group_id}")
+            return task_group_hash
+        return None
+    except Exception as e:
+        print(f"Lỗi khi thêm adhoc tasks @all: {e}")
+        return None
 
 def generate_today_adhoc_flex(group_id):
     """
@@ -1262,7 +1370,7 @@ def add_multi_adhoc_tasks(group_id, job_name, task_assignments):
     task_assignments là danh sách các tuple dạng (sub_task_name, assignee).
     """
     sheet = get_or_create_adhoc_worksheet()
-    if not sheet:
+    if not sheet or not group_id:
         return None
         
     clean_old_adhoc_tasks(sheet)
@@ -1273,31 +1381,39 @@ def add_multi_adhoc_tasks(group_id, job_name, task_assignments):
     
     task_group_hash = uuid.uuid4().hex[:6]
     
-    rows_to_add = []
-    for index, (sub_task, assignee) in enumerate(task_assignments):
-        task_id = f"multi_{task_group_hash}_{index}"
-        if job_name and str(job_name).strip() and str(job_name).strip() != "Việc phát sinh":
-            combined_task_name = f"{str(job_name).strip()} | {sub_task}"
-        else:
-            combined_task_name = sub_task
-        new_row = [
-            str(group_id),
-            today_str,
-            assignee,
-            task_id,
-            combined_task_name,
-            'incomplete',
-            '',
-            '',
-            time_now_str
-        ]
-        rows_to_add.append(new_row)
+    try:
+        all_values = sheet.get_all_values()
+        headers = all_values[0] if all_values else ['group_id', 'date', 'assignee', 'task_id', 'task_name', 'status', 'completed_by', 'completed_at', 'created_at']
         
-    if rows_to_add:
-        sheet.append_rows(rows_to_add, value_input_option='USER_ENTERED')
-        print(f"Đã thêm checklist công việc '{job_name}' cho {len(rows_to_add)} nhân sự")
-        return task_group_hash
-    return None
+        rows_to_add = []
+        for index, (sub_task, assignee) in enumerate(task_assignments):
+            task_id = f"multi_{task_group_hash}_{index}"
+            if job_name and str(job_name).strip() and str(job_name).strip() != "Việc phát sinh":
+                combined_task_name = f"{str(job_name).strip()} | {sub_task}"
+            else:
+                combined_task_name = sub_task
+            new_row = _build_adhoc_row(
+                headers=headers,
+                group_id=group_id,
+                date_str=today_str,
+                assignee=assignee,
+                task_id=task_id,
+                task_name=combined_task_name,
+                status='incomplete',
+                comp_by='',
+                comp_at='',
+                created_at=time_now_str
+            )
+            rows_to_add.append(new_row)
+            
+        if rows_to_add:
+            sheet.append_rows(rows_to_add, value_input_option='USER_ENTERED')
+            print(f"Đã thêm checklist công việc '{job_name}' cho {len(rows_to_add)} nhân sự tại group {group_id}")
+            return task_group_hash
+        return None
+    except Exception as e:
+        print(f"Lỗi khi thêm multi adhoc tasks: {e}")
+        return None
 
 def generate_multi_adhoc_flex(group_id, task_group_hash=None):
     """Ủy quyền sang generate_today_adhoc_flex để luôn hiển thị đầy đủ mọi việc hôm nay."""
@@ -1347,7 +1463,7 @@ def generate_combined_work_flex(group_id, shift_type=None, adhoc_hash=None, adho
     adhoc_bubble = generate_today_adhoc_flex(group_id)
 
     # Chỉ nhóm C37e48216804398593d8c79fe3edacdc7 mới được gộp 2 thẻ
-    if group_id == MAIN_CHECKLIST_GROUP_ID:
+    if str(group_id).strip() == str(MAIN_CHECKLIST_GROUP_ID).strip():
         if not shift_type:
             tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
             current_hour = datetime.now(tz_vietnam).hour
