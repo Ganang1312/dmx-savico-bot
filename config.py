@@ -34,3 +34,6 @@ WORKSHEET_SCHEDULES_NAME = 'schedules'
 WORKSHEET_MEAL_TRACKER_NAME = 'meal_tracker'
 WORKSHEET_ADHOC_TASKS = 'adhoc_tasks'
 WORKSHEET_VESINH_TRACKER_NAME = 'vesinh_tracker'
+
+# Nhóm duy nhất được phép gộp Checklist ca và Công việc giao thêm
+MAIN_CHECKLIST_GROUP_ID = os.environ.get('MAIN_CHECKLIST_GROUP_ID') or os.environ.get('CHECKLIST_GROUP_ID') or 'C37e48216804398593d8c79fe3edacdc7'

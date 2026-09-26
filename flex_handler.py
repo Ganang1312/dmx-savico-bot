@@ -1,7 +1,7 @@
 from datetime import datetime
 import pytz
 # Import từ file cấu hình trung tâm
-from config import CLIENT, SHEET_NAME, WORKSHEET_TRACKER_NAME, get_spreadsheet
+from config import CLIENT, SHEET_NAME, WORKSHEET_TRACKER_NAME, get_spreadsheet, MAIN_CHECKLIST_GROUP_ID
 
 # --- Danh sách công việc ---
 TASKS = {
@@ -1336,18 +1336,30 @@ def build_work_carousel(checklist_bubble, adhoc_bubble):
 
 def generate_combined_work_flex(group_id, shift_type=None, adhoc_hash=None, adhoc_mode=None):
     """
-    Tạo Flex Carousel hiển thị 2 thẻ song song:
-      - Thẻ bên trái: Thẻ checklist ca riêng (sang/chieu/vs)
-      - Thẻ bên phải: Thẻ công việc giao thêm riêng (gộp toàn bộ việc hôm nay từ việc 1 đến việc N)
-    Nếu chỉ có 1 thẻ thì hiển thị thẻ đó.
+    Tạo Flex hiển thị công việc:
+      - CHỈ nhóm MAIN_CHECKLIST_GROUP_ID (C37e48216804398593d8c79fe3edacdc7) mới gộp 2 thẻ:
+          + Thẻ bên trái: Thẻ checklist ca riêng (sang/chieu/vs)
+          + Thẻ bên phải: Thẻ công việc giao thêm riêng (gộp toàn bộ việc hôm nay từ việc 1 đến việc N)
+      - Các nhóm khác:
+          + KHÔNG được gộp công việc ca sáng/chiều vào.
+          + Trả về thẻ công việc giao thêm riêng (nếu có), hoặc thẻ checklist ca riêng (nếu gọi checklist).
     """
-    if not shift_type:
-        tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
-        current_hour = datetime.now(tz_vietnam).hour
-        shift_type = 'sang' if current_hour < 15 else 'chieu'
-
-    checklist_bubble = generate_checklist_flex(group_id, shift_type)
     adhoc_bubble = generate_today_adhoc_flex(group_id)
 
-    return build_work_carousel(checklist_bubble, adhoc_bubble)
+    # Chỉ nhóm C37e48216804398593d8c79fe3edacdc7 mới được gộp 2 thẻ
+    if group_id == MAIN_CHECKLIST_GROUP_ID:
+        if not shift_type:
+            tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
+            current_hour = datetime.now(tz_vietnam).hour
+            shift_type = 'sang' if current_hour < 15 else 'chieu'
+
+        checklist_bubble = generate_checklist_flex(group_id, shift_type)
+        return build_work_carousel(checklist_bubble, adhoc_bubble)
+
+    # Các nhóm khác: KHÔNG gộp checklist ca vào việc giao thêm
+    if adhoc_bubble:
+        return adhoc_bubble
+    if shift_type:
+        return generate_checklist_flex(group_id, shift_type)
+    return None
 
