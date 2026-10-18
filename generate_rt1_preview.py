@@ -1,5 +1,10 @@
 import sys, os, json, re
 
+if 'SUPABASE_KEY' not in os.environ:
+    os.environ['SUPABASE_KEY'] = 'sb_publishable_tb1cO9NPuNC1cdA-pt_NNQ_1n5I9IkU'
+if 'SUPABASE_URL' not in os.environ:
+    os.environ['SUPABASE_URL'] = 'https://uybcglehwheygxmzlwbq.supabase.co'
+
 sys.path.insert(0, os.path.dirname(__file__))
 from dmx_flex_messages import build_realtime_flex
 
@@ -18,9 +23,11 @@ def flex_to_html(node):
         w = "340px" if size == "mega" else "300px"
         h_html = flex_to_html(node.get("header"))
         b_html = flex_to_html(node.get("body"))
+        f_html = flex_to_html(node.get("footer"))
         return f'''<div class="flex-bubble-card" style="width: {w}; background: #ffffff; border-radius: 18px; overflow: hidden; box-shadow: 0 12px 30px rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.12); margin-bottom: 16px; flex-shrink: 0;">
             {h_html}
             {b_html}
+            {f_html}
         </div>'''
         
     if ntype == "box":
@@ -108,6 +115,12 @@ def flex_to_html(node):
         
     if ntype == "filler":
         return '<div style="flex: 1;"></div>'
+        
+    if ntype == "button":
+        action = node.get("action", {})
+        label = action.get("label", "Bấm xem")
+        btn_color = node.get("color", "#0284c7")
+        return f'<div style="padding: 4px 8px; margin-top: 6px;"><button style="width: 100%; background: {btn_color}; color: #ffffff; border: none; border-radius: 8px; padding: 10px 14px; font-weight: 700; font-size: 13px; cursor: pointer; box-shadow: 0 4px 10px rgba(2,132,199,0.3); display: flex; align-items: center; justify-content: center; gap: 6px;">{label}</button></div>'
         
     return ""
 

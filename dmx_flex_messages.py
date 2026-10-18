@@ -260,16 +260,18 @@ def make_table_row(vals, weights, aligns=None, colors=None, bold=False, bg_color
         colors = ["#0f172a"] * len(vals)
     contents = []
     for v, w, a, c in zip(vals, weights, aligns, colors):
-        contents.append({
+        item = {
             "type": "text",
             "text": str(v),
             "size": "xxs",
             "color": c,
-            "flex": w,
-            "align": a,
-            "weight": "bold" if bold else "regular",
-            "wrap": True
-        })
+            "flex": w
+        }
+        if a and a != "start":
+            item["align"] = a
+        if bold:
+            item["weight"] = "bold"
+        contents.append(item)
     box_dict = {
         "type": "box",
         "layout": "horizontal",
@@ -2649,21 +2651,6 @@ def build_realtime_flex(detail_limit=None):
                 if idx < len(parsed_nv_rt) - 1:
                     nv_card_contents.append({"type": "separator", "color": "#f1f5f9", "margin": "xs"})
 
-            # Nút bấm tương tác: Xem chi tiết ngành hàng thực bán của từng nhân viên
-            nv_card_contents.append({"type": "separator", "color": "#cbd5e1", "margin": "sm"})
-            nv_card_contents.append({
-                "type": "button",
-                "action": {
-                    "type": "message",
-                    "label": "👑 Xem Chi Tiết Doanh Thu NV",
-                    "text": "RTNV"
-                },
-                "style": "primary",
-                "color": "#0284c7",
-                "height": "sm",
-                "margin": "sm"
-            })
-
             body_contents_rt1.append({
                 "type": "box",
                 "layout": "vertical",
@@ -2686,30 +2673,13 @@ def build_realtime_flex(detail_limit=None):
     table_card_contents.append(make_table_header(headers, weights, aligns, bg_color="#0284c7"))
     table_card_contents.append({"type": "separator", "color": "#cbd5e1", "margin": "xs"})
     
-    for idx, b in enumerate(parsed_rt_bi[:6]):
+    for idx, b in enumerate(parsed_rt_bi):
         ty_trong_rt = (b["dt"] / rt_total * 100) if rt_total > 0 else 0.0
         vals = [idx+1, f"{b['name']} ({ty_trong_rt:.0f}%)", fmt_num(b["sl"]), fmt_num(b["dt"]), fmt_num(b["tg"]), f"{b['ht']*100:.0f}%"]
         colors = ["#64748b", "#0f172a", "#0f172a", "#ef4444" if b["dt"] < 0 else "#0284c7", "#475569", get_color_class(b["ht"])]
         table_card_contents.append(make_table_row(vals, weights, aligns, colors))
-        table_card_contents.append({
-            "type": "box",
-            "layout": "vertical",
-            "backgroundColor": "#e2e8f0",
-            "height": "3px",
-            "cornerRadius": "sm",
-            "margin": "xs",
-            "contents": [
-                {
-                    "type": "box",
-                    "layout": "vertical",
-                    "backgroundColor": get_color_class(b["ht"]),
-                    "height": "3px",
-                    "cornerRadius": "sm",
-                    "width": f"{min(100, max(2, round(b['ht'] * 100)))}%",
-                    "contents": [{"type": "filler"}]
-                }
-            ]
-        })
+        if idx < len(parsed_rt_bi) - 1:
+            table_card_contents.append({"type": "separator", "color": "#f1f5f9", "margin": "xs"})
         
     tot_sl = sum(x["sl"] for x in parsed_rt_bi)
     totalHTCol2 = rt_total / rt_tTarget if rt_tTarget > 0 else 0.0
@@ -2777,6 +2747,25 @@ def build_realtime_flex(detail_limit=None):
             "backgroundColor": "#ffffff",
             "paddingAll": "md",
             "contents": body_contents_rt1
+        },
+        "footer": {
+            "type": "box",
+            "layout": "vertical",
+            "backgroundColor": "#ffffff",
+            "paddingAll": "sm",
+            "contents": [
+                {
+                    "type": "button",
+                    "action": {
+                        "type": "message",
+                        "label": "👑 Xem Chi Tiết Doanh Thu NV",
+                        "text": "RTNV"
+                    },
+                    "style": "primary",
+                    "color": "#0284c7",
+                    "height": "sm"
+                }
+            ]
         }
     }
 
@@ -3616,7 +3605,30 @@ def build_custom_groups_flex(detail_limit=None):
                 disp_name = f"{last_name} - {u}" if last_name else u
                 staff_map[u] = {"id": u, "name": disp_name, "ratio": ratio, "hn": 0.0}
 
-        # Doanh thu thực hôm nay của từng nhân viên
+        # Xây dựng bảng tra cứu Hệ số K (KFactor) từ Data_Realtime_BI
+        k_factor_map = {}
+        for r in rt_bi_rows:
+            nh_bi = str(get_key_val(r, "Nhóm Ngành Hàng", "nhóm ngành hàng", "Ngành hàng", "salegroupmastername", default="")).strip().lower()
+            r_thuc = parse_number(get_key_val(r, "revenue_RT", default=0))
+            r_qd = parse_number(get_key_val(r, "revenue_KFactor_RT", "Doanh thu Quy đổi", default=0))
+            if r_thuc > 0 and r_qd > 0:
+                k_factor_map[nh_bi] = r_qd / r_thuc
+
+        def resolve_item_k_factor(nh_name):
+            c = str(nh_name).lower().strip()
+            for k_name, factor in k_factor_map.items():
+                if k_name in c or c in k_name:
+                    return factor
+            if any(w in c for w in ['lắp đặt', 'khung treo', 'giá đỡ']):
+                return k_factor_map.get('phụ kiện lắp đặt', 3.3699)
+            if any(w in c for w in ['trang trí', 'ốp lưng', 'dán', 'kính']):
+                return k_factor_map.get('phụ kiện trang trí', 3.3699)
+            if any(w in c for w in ['phụ kiện', 'tiện ích', 'sạc', 'cáp', 'tai nghe', 'loa', 'pin']):
+                return k_factor_map.get('phụ kiện tiện ích', 3.3700)
+            return 1.0
+
+        # Doanh thu hôm nay của từng nhân viên (đã quy đổi theo KFactor để khớp chuẩn với Target và Tổng nhóm)
+        is_unit_sl = str(grp.get("unit", "")).upper() == "SL"
         for r in rt_nv_detail:
             u = str(get_key_val(r, "Mã NV", "ma_nv", "user", default="")).strip().upper()
             sg = str(get_key_val(r, "STOREGROUPNAME", default=""))
@@ -3631,7 +3643,8 @@ def build_custom_groups_flex(detail_limit=None):
                 rev = parse_number(get_key_val(r, "Doanh Thu Thực", "Doanh Thu", "Doanh thu", "doanh_thu_thuc", default=0))
                 if abs(rev) >= 1000000:
                     rev /= 1000000.0
-                staff_map[u]["hn"] += rev
+                k_factor = 1.0 if is_unit_sl else resolve_item_k_factor(nh)
+                staff_map[u]["hn"] += (rev * k_factor)
 
         # Danh sách nhân viên và tính chỉ số
         staff_list = []
