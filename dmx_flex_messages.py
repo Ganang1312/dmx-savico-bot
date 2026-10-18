@@ -2017,78 +2017,78 @@ def pack_rt_messages(rt_bubbles, nv_bubbles, max_messages=LINE_MAX_MESSAGES):
 RT_DETAIL_FALLBACKS = (None, 8, 6, 4, 3, 2, 1, 0)
 
 
-def build_realtime_messages(max_messages=LINE_MAX_MESSAGES, detail_fallbacks=RT_DETAIL_FALLBACKS):
-    """Dựng báo cáo realtime đã đóng gói, CHỈ dùng tin nhắn miễn phí (≤ 5 message).
+def build_realtime_messages(max_messages=LINE_MAX_MESSAGES):
+    """Dựng báo cáo realtime RT1 tinh gọn (Carousel 2 Thẻ: Tổng Quan Siêu Thị & Thi Đua).
+    Đã tích hợp nút bấm '👑 Xem Chi Tiết Doanh Thu NV' để ẩn chi tiết vào nút, 
+    chỉ khi người dùng bấm vào mới kích hoạt gửi chi tiết.
+    """
+    bubbles = build_realtime_flex(detail_limit=0)
+    if not isinstance(bubbles, list):
+        bubbles = [bubbles]
+    if not bubbles:
+        return None, {"error": "Không có dữ liệu realtime"}
 
-    Chiến lược: thử bản ĐẦY ĐỦ trước (không mất số liệu); chỉ khi vẫn quá 5 message
-    mới tiết lưu dần số dòng chi tiết ngành hàng trong từng thẻ NV cho tới khi vừa.
-    Bản gọn nhất (0 dòng chi tiết) luôn vừa nên hàm này không bao giờ trả None
-    vì lý do dung lượng ở quy mô một siêu thị.
+    summary_bubbles = bubbles[:2]
+    if len(summary_bubbles) == 1:
+        msg_contents = summary_bubbles[0]
+    else:
+        msg_contents = {"type": "carousel", "contents": summary_bubbles}
+
+    return [{
+        "alt_text": "⚡ Báo Cáo Realtime Siêu Thị (RT1)",
+        "contents": msg_contents
+    }], {"rt_parts": 1, "nv_parts": 0, "mode": "summary_button"}
+
+
+def build_realtime_staff_detail_messages(max_messages=LINE_MAX_MESSAGES, detail_fallbacks=RT_DETAIL_FALLBACKS):
+    """Dựng bộ thẻ CHI TIẾT DOANH THU NHÂN VIÊN theo từng ngành hàng (👑 CHI TIẾT DTNV).
+    Được kích hoạt khi người dùng bấm nút '👑 Xem Chi Tiết Doanh Thu NV' trên thẻ RT1 
+    hoặc gõ lệnh RTNV / CTNV.
     """
     last_info = None
     for lim in detail_fallbacks:
         bubbles = build_realtime_flex(detail_limit=lim)
         if not isinstance(bubbles, list):
             bubbles = [bubbles]
-        if len(bubbles) < 2:
-            return [{"alt_text": "⚡ Báo Cáo Realtime Hôm Nay", "contents": bubbles[0]}], {"detail_limit": lim}
+        nv_bubbles = bubbles[2:]
+        if not nv_bubbles:
+            return None, {"error": "Hôm nay chưa có nhân viên nào phát sinh doanh thu"}
 
-        msgs, info = pack_rt_messages(bubbles[:2], bubbles[2:], max_messages=max_messages)
-        info["detail_limit"] = lim
+        nv_parts = greedy_carousels(nv_bubbles)
+        info = {
+            "nv_parts": len(nv_parts),
+            "nv_bytes": [json_size({"type": "carousel", "contents": p}) for p in nv_parts],
+            "nv_bubbles": len(nv_bubbles),
+            "detail_limit": lim
+        }
         last_info = info
-        if msgs:
-            return msgs, info
+        if len(nv_parts) <= max_messages:
+            messages = []
+            total_nv = len(nv_parts)
+            for i, part in enumerate(nv_parts):
+                tag = "" if total_nv == 1 else f" (P.{i+1}/{total_nv})"
+                messages.append({
+                    "alt_text": f"👑 CHI TIẾT DTNV{tag}",
+                    "contents": {"type": "carousel", "contents": part} if len(part) > 1 else part[0],
+                })
+            return messages, info
 
-    # Chốt hạ — chỉ chạy khi số nhân viên cực lớn (hàng trăm), vượt xa quy mô siêu thị.
-    # Cắt bớt thẻ NV cuối cho vừa số slot còn lại và ghi rõ đã lược bao nhiêu thẻ.
-    # TUYỆT ĐỐI không push để tránh tốn quota.
+    # Chốt hạ fallback
     bubbles = build_realtime_flex(detail_limit=detail_fallbacks[-1])
     if not isinstance(bubbles, list):
         bubbles = [bubbles]
-    rt_parts = greedy_carousels(bubbles[:2])
-    slots_left = max_messages - len(rt_parts)
     nv_bubbles = bubbles[2:]
-    if slots_left <= 0 or not nv_bubbles:
+    if not nv_bubbles:
         return None, last_info
 
-    keep = []
-    for b in nv_bubbles:
-        if len(greedy_carousels(keep + [b])) > slots_left:
-            break
-        keep.append(b)
-
-    if len(keep) == len(nv_bubbles):
-        bo_qua = 0
-    else:
-        # Phải chừa sẵn 1 chỗ cho dòng ghi chú "… và N nhân viên khác",
-        # nếu không chính dòng ghi chú đó lại làm vượt số slot.
-        dong_ghi_chu = {
-            "type": "bubble",
-            "size": "micro",
-            "body": {
-                "type": "box",
-                "layout": "vertical",
-                "paddingAll": "md",
-                "contents": [
-                    {"type": "text", "text": "… và 0 nhân viên khác",
-                     "size": "xs", "color": "#64748b", "align": "center", "wrap": True}
-                ]
-            }
-        }
-        keep = []
-        for b in nv_bubbles:
-            if len(greedy_carousels(keep + [b, dong_ghi_chu])) > slots_left:
-                break
-            keep.append(b)
-        bo_qua = len(nv_bubbles) - len(keep)
-        dong_ghi_chu["body"]["contents"][0]["text"] = f"… và {bo_qua} nhân viên khác"
-        keep.append(dong_ghi_chu)
-
-    msgs, info = pack_rt_messages(bubbles[:2], keep, max_messages=max_messages)
-    if info is not None:
-        info["detail_limit"] = detail_fallbacks[-1]
-        info["nv_bi_luoc"] = bo_qua
-    return msgs, info
+    nv_parts = greedy_carousels(nv_bubbles)
+    messages = []
+    for i, part in enumerate(nv_parts[:max_messages]):
+        messages.append({
+            "alt_text": f"👑 CHI TIẾT DTNV ({i+1}/{min(len(nv_parts), max_messages)})",
+            "contents": {"type": "carousel", "contents": part} if len(part) > 1 else part[0],
+        })
+    return messages, {"nv_parts": len(messages), "detail_limit": detail_fallbacks[-1]}
 
 
 def build_realtime_flex(detail_limit=None):
@@ -2490,9 +2490,70 @@ def build_realtime_flex(detail_limit=None):
     
     # Employee Revenue Table Container Card (Bảng Thứ Hạng Doanh Thu Nhân Viên - chèn TRƯỚC bảng chi tiết doanh thu hôm nay)
     data_rt_nv = data.get("Data_Realtime_NV", [])
-    parsed_nv_rt = []
+    data_rt_nv_detail = data.get("Data_Realtime_NV_NganhHang", [])
+
+    # Kiểm tra xem Data_Realtime_NV có bị lẫn số lũy kế cả tháng (Data_NV_BI) không
+    is_cum_data = False
     if data_rt_nv and isinstance(data_rt_nv, list) and len(data_rt_nv) > 0:
-        for row in data_rt_nv:
+        sample_first = data_rt_nv[0]
+        if sample_first.get("numday_cum") is not None or sample_first.get("cum_as_of_date_key") is not None:
+            is_cum_data = True
+        else:
+            # Kiểm tra nếu doanh thu nhân viên vượt quá xa tổng DT hôm nay của siêu thị
+            total_check_dt = sum(parse_number(get_key_val(r, "doanh thu quy đổi", "revenue_kfactor", "dt quy đổi", "Doanh thu Quy đổi", default=0)) for r in data_rt_nv[:5])
+            if abs(total_check_dt) >= 1000000:
+                total_check_dt /= 1000000.0
+            if rt_total > 0 and total_check_dt > (rt_total * 2.5):
+                is_cum_data = True
+
+    # Nếu Data_Realtime_NV bị dính số lũy kế hoặc rỗng, tự động tổng hợp số realtime thực bán từ Data_Realtime_NV_NganhHang
+    source_nv_rows = []
+    if (not data_rt_nv or is_cum_data) and data_rt_nv_detail and isinstance(data_rt_nv_detail, list):
+        detail_grouped = {}
+        for d_row in data_rt_nv_detail:
+            m_id = str(get_key_val(d_row, "Mã NV", "ma_nv", "user", default="")).strip()
+            store_group = str(get_key_val(d_row, "STOREGROUPNAME", default="")).strip()
+            if not m_id and store_group:
+                m_match = re.match(r"^(\d+)", store_group)
+                if m_match:
+                    m_id = m_match.group(1)
+            if not m_id or m_id.lower() == "online" or m_id == "18001060":
+                continue
+            s_name = str(get_key_val(d_row, "Tên Nhân Viên", "Tên NV", "ten_nv", default="")).strip()
+            if not s_name and store_group and " - " in store_group:
+                s_name = store_group.split(" - ", 1)[1].strip()
+            sl_val = parse_number(get_key_val(d_row, "Số Lượng", "so_luong", default=0))
+            raw_rev = parse_number(get_key_val(d_row, "Doanh Thu Thực", "Doanh Thu", "Doanh thu", "doanh_thu_thuc", default=0))
+            rev_val = raw_rev / 1000000.0 if abs(raw_rev) >= 1000000 else raw_rev
+
+            if m_id not in detail_grouped:
+                detail_grouped[m_id] = {"mã nv": m_id, "tên nv": s_name, "số lượng": 0, "doanh thu quy đổi": 0.0}
+            detail_grouped[m_id]["số lượng"] += sl_val
+            detail_grouped[m_id]["doanh thu quy đổi"] += rev_val
+            if not detail_grouped[m_id]["tên nv"] and s_name:
+                detail_grouped[m_id]["tên nv"] = s_name
+        source_nv_rows = list(detail_grouped.values())
+    elif not is_cum_data and data_rt_nv:
+        source_nv_rows = data_rt_nv
+    elif data_rt_nv_detail:
+        detail_grouped = {}
+        for d_row in data_rt_nv_detail:
+            m_id = str(get_key_val(d_row, "Mã NV", "ma_nv", "user", default="")).strip()
+            if not m_id or m_id.lower() == "online" or m_id == "18001060":
+                continue
+            s_name = str(get_key_val(d_row, "Tên Nhân Viên", "Tên NV", "ten_nv", default="")).strip()
+            sl_val = parse_number(get_key_val(d_row, "Số Lượng", "so_luong", default=0))
+            raw_rev = parse_number(get_key_val(d_row, "Doanh Thu Thực", "Doanh Thu", "Doanh thu", "doanh_thu_thuc", default=0))
+            rev_val = raw_rev / 1000000.0 if abs(raw_rev) >= 1000000 else raw_rev
+            if m_id not in detail_grouped:
+                detail_grouped[m_id] = {"mã nv": m_id, "tên nv": s_name, "số lượng": 0, "doanh thu quy đổi": 0.0}
+            detail_grouped[m_id]["số lượng"] += sl_val
+            detail_grouped[m_id]["doanh thu quy đổi"] += rev_val
+        source_nv_rows = list(detail_grouped.values())
+
+    parsed_nv_rt = []
+    if source_nv_rows and isinstance(source_nv_rows, list) and len(source_nv_rows) > 0:
+        for row in source_nv_rows:
             m_nv = str(get_key_val(row, "mã nv", "ma_nv", "user", "rowcode", default="")).strip()
             if not m_nv or m_nv.lower() == "online" or m_nv == "18001060":
                 continue
@@ -2587,6 +2648,21 @@ def build_realtime_flex(detail_limit=None):
                 nv_card_contents.append(make_table_row(row_vals, nv_weights, nv_aligns, row_colors, bold=(idx < 3)))
                 if idx < len(parsed_nv_rt) - 1:
                     nv_card_contents.append({"type": "separator", "color": "#f1f5f9", "margin": "xs"})
+
+            # Nút bấm tương tác: Xem chi tiết ngành hàng thực bán của từng nhân viên
+            nv_card_contents.append({"type": "separator", "color": "#cbd5e1", "margin": "sm"})
+            nv_card_contents.append({
+                "type": "button",
+                "action": {
+                    "type": "message",
+                    "label": "👑 Xem Chi Tiết Doanh Thu NV",
+                    "text": "RTNV"
+                },
+                "style": "primary",
+                "color": "#0284c7",
+                "height": "sm",
+                "margin": "sm"
+            })
 
             body_contents_rt1.append({
                 "type": "box",
@@ -3215,7 +3291,9 @@ def build_help_commands_flex():
     commands_data = [
         # --- BÁO CÁO DOANH THU & THI ĐUA ---
         {"cmd": "LK1", "desc": "Báo cáo Lũy kế Doanh thu & Ngành hàng thi đua tháng (Flex P.1 & P.2)", "color": "#1e40af"},
-        {"cmd": "RT1", "desc": "Báo cáo Realtime Doanh thu, Chi tiết NV & Ngành hàng thi đua ngày (Flex 3 Thẻ)", "color": "#0284c7"},
+        {"cmd": "RT1", "desc": "Báo cáo Realtime Doanh thu & Thứ hạng NV (tinh gọn, kèm nút bấm xem chi tiết)", "color": "#0284c7"},
+        {"cmd": "RTNV", "desc": "Xem chi tiết ngành hàng thực bán của từng nhân viên (kích hoạt từ nút RT1)", "color": "#0284c7"},
+        {"cmd": "RT2", "desc": "Báo cáo Realtime Theo dõi Nhóm Ngành Hàng Gộp (Phụ kiện, Bảo hiểm thợ...)", "color": "#0284c7"},
         {"cmd": "NV0", "desc": "Bảng Xếp Hạng Doanh Thu NV Pro + Carousel Top 8 NV (#1 - #8)", "color": "#0f766e"},
         {"cmd": "NV1", "desc": "Hiển thị tiếp danh sách Thẻ KPI các Nhân viên còn lại (#9 trở đi)", "color": "#0f766e"},
         {"cmd": "NV <mã>", "desc": "Xem riêng 1 Thẻ KPI Nhân viên (VD: nv 61169 hoặc nv Dương)", "color": "#d97706"},
@@ -3288,3 +3366,494 @@ def build_help_commands_flex():
         }
     }
     return bubble
+
+
+# =====================================================================
+# BÁO CÁO REALTIME THEO DÕI NHÓM NGÀNH HÀNG GỘP (LỆNH RT2)
+# =====================================================================
+
+CG_DETAIL_CAT_MAP = {
+    "pk_lap_dat": ["khung treo", "giá đỡ", "gia do", "giá treo", "chân đế", "chan de", "vật tư lắp đặt", "vat tu lap dat"],
+    "pk_tien_ich": ["sạc", "sac", "cáp", "cap", "dự phòng", "du phong", "pin", "thẻ nhớ", "the nho", "usb", "chuột", "chuot", "bàn phím", "ban phim", "tai nghe", "loa bluetooth", "loa vi tính", "balo", "túi chống sốc"],
+    "pk_trang_tri": ["ốp lưng", "op lung", "miếng dán", "mieng dan", "kính cường lực", "cuong luc", "dán màn hình", "dan man hinh"],
+    "pk_it": ["router", "wifi", "hub", "thiết bị mạng"],
+    "gia_dung": ["hút bụi", "nồi cơm", "nồi chiên", "quạt", "lọc nước", "bếp", "máy xay", "bàn ủi", "bàn là", "ấm siêu tốc", "lò vi sóng", "lò nướng", "bình thủy"],
+    "dien_lanh": ["máy lạnh", "điều hòa", "panasonic", "daikin"],
+    "may_giat": ["máy giặt", "máy sấy", "máy rửa chén", "rửa bát"]
+}
+
+def clean_custom_cat(name):
+    if not name:
+        return ""
+    s = str(name).lower().strip()
+    s = re.sub(r"^t\d{1,2}\s*-\s*", "", s, flags=re.IGNORECASE)
+    s = re.sub(r"^nnh\s+", "", s, flags=re.IGNORECASE)
+    s = re.sub(r"^thi\s*đua\s*", "", s, flags=re.IGNORECASE)
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
+
+def is_custom_cat_specific_match(row_name, target_cat):
+    if not row_name or not target_cat:
+        return False
+    r_clean = clean_custom_cat(row_name)
+    t_clean = clean_custom_cat(target_cat)
+    if r_clean == t_clean:
+        return True
+
+    is_pk_target = "phụ kiện" in t_clean or "pk" in t_clean
+    is_gd_target = "gia dụng" in t_clean or "gd" in t_clean
+    is_pk_row = "phụ kiện" in r_clean or "pk" in r_clean
+    is_gd_row = "gia dụng" in r_clean or "gd" in r_clean
+
+    if is_pk_target and is_gd_row and not is_pk_row:
+        return False
+    if is_gd_target and is_pk_row and not is_gd_target:
+        return False
+
+    if "trả chậm" not in t_clean and "credit" not in t_clean:
+        if re.search(r"trả chậm|credit|fecredit|homecredit|shinhan|samsung finance|ngân hàng|nạp\s*-\s*rút", r_clean, re.IGNORECASE):
+            return False
+
+    sub_words = [
+        "lắp đặt", "lap dat", "tiện ích", "tien ich", "trang trí", "trang tri",
+        "it - nhóm khác", "công nghệ", "cong nghe", "_ict", "ict", "_ce", "ce", "tổng", "tong"
+    ]
+    target_subs = [w for w in sub_words if w in t_clean]
+    row_subs = [w for w in sub_words if w in r_clean]
+
+    if target_subs:
+        has_same = any(w in r_clean for w in target_subs)
+        has_conflict = any(w not in target_subs for w in row_subs)
+        if has_same and not has_conflict:
+            return True
+        return False
+
+    if row_subs:
+        if t_clean in r_clean:
+            return True
+        return False
+
+    return (t_clean in r_clean) or (r_clean in t_clean)
+
+def is_custom_cat_matched(prog_name, selected_cats):
+    if not prog_name or not selected_cats or not isinstance(selected_cats, list):
+        return False
+    clean_prog = clean_custom_cat(prog_name)
+    is_tc = any("trả chậm" in clean_custom_cat(c) or "credit" in clean_custom_cat(c) for c in selected_cats)
+    if not is_tc:
+        if re.search(r"trả chậm|credit|fecredit|homecredit|shinhan|samsung finance|ngân hàng|nạp\s*-\s*rút", clean_prog, re.IGNORECASE):
+            return False
+
+    if any(is_custom_cat_specific_match(prog_name, cat) for cat in selected_cats):
+        return True
+
+    has_pk = any("phụ kiện" in clean_custom_cat(c) or "pk" in clean_custom_cat(c) or "lắp đặt" in clean_custom_cat(c) or "tiện ích" in clean_custom_cat(c) or "trang trí" in clean_custom_cat(c) for c in selected_cats)
+    if has_pk:
+        if "phụ kiện" in clean_prog or "pk" in clean_prog:
+            return True
+        has_lap_dat = any("lắp đặt" in clean_custom_cat(c) or "lap dat" in clean_custom_cat(c) for c in selected_cats)
+        if has_lap_dat and any(k in clean_prog for k in CG_DETAIL_CAT_MAP["pk_lap_dat"]):
+            return True
+        has_tien_ich = any("tiện ích" in clean_custom_cat(c) or "tien ich" in clean_custom_cat(c) for c in selected_cats)
+        if has_tien_ich and any(k in clean_prog for k in CG_DETAIL_CAT_MAP["pk_tien_ich"]):
+            return True
+        has_trang_tri = any("trang trí" in clean_custom_cat(c) or "trang tri" in clean_custom_cat(c) for c in selected_cats)
+        if has_trang_tri and any(k in clean_prog for k in CG_DETAIL_CAT_MAP["pk_trang_tri"]):
+            return True
+        all_pk = CG_DETAIL_CAT_MAP["pk_lap_dat"] + CG_DETAIL_CAT_MAP["pk_tien_ich"] + CG_DETAIL_CAT_MAP["pk_trang_tri"] + CG_DETAIL_CAT_MAP["pk_it"]
+        if any(k in clean_prog for k in all_pk):
+            return True
+
+    all_bh = all("bảo hiểm" in clean_custom_cat(c) or "thợ đmx" in clean_custom_cat(c) for c in selected_cats)
+    if all_bh and ("bảo hiểm" in clean_prog or "thợ đmx" in clean_prog):
+        return True
+
+    return False
+
+
+def build_custom_groups_flex(detail_limit=None):
+    """
+    Xây dựng danh sách Bubble Cards cho từng Nhóm Ngành Hàng Gộp (Lệnh RT2).
+    Mỗi nhóm là 1 Bubble chuẩn phong cách RT1, bảng 6 cột, nền trắng, không có đánh giá.
+    """
+    data = get_dashboard_data("Config_Custom_Groups,Data_Realtime_BI,Data_Realtime_ThiDua,Data_Realtime_NV_NganhHang,Data_BI,Data_ThiDua,Config_ThiDua")
+    custom_groups = data.get("Config_Custom_Groups", [])
+
+    # Nếu chưa có trong DB, nạp 2 nhóm chuẩn mặc định của siêu thị Savico
+    if not custom_groups or not isinstance(custom_groups, list):
+        custom_groups = [
+            {
+                "id": "group_pk",
+                "name": "Phụ kiện",
+                "unit": "DT",
+                "target": 1717,
+                "categories": ["Phụ kiện lắp đặt", "Phụ kiện tiện ích", "Phụ kiện trang trí"]
+            },
+            {
+                "id": "group_bh",
+                "name": "Bảo hiểm thợ",
+                "unit": "DT",
+                "target": 288,
+                "categories": ["T10 - BẢO HIỂM THỢ ĐMX_CE", "T10 - BẢO HIỂM THỢ ĐMX_ICT"]
+            }
+        ]
+
+    tz = pytz.timezone('Asia/Ho_Chi_Minh')
+    now = datetime.now(tz)
+    now_str = now.strftime("%H:%M")
+
+    current_day = now.day
+    days_in_month = (datetime(now.year, now.month + 1, 1) - datetime(now.year, now.month, 1)).days if now.month < 12 else 31
+    days_passed = days_in_month if current_day == 1 else current_day - 1
+    days_remaining = max(1, days_in_month - days_passed)
+    is_weekend = now.weekday() in [5, 6]
+
+    bi_rows = data.get("Data_BI", [])
+    rt_bi_rows = data.get("Data_Realtime_BI", [])
+    td_rows = data.get("Data_ThiDua", [])
+    rt_td_rows = data.get("Data_Realtime_ThiDua", [])
+    rt_nv_detail = data.get("Data_Realtime_NV_NganhHang", [])
+    config_rows = data.get("Config_ThiDua", [])
+
+    # Bảng màu chuẩn phong cách RT1:
+    # Nhóm 1: #0284c7 (Xanh dương RT1), Nhóm 2: #0f766e (Xanh ngọc / Teal RT1)
+    THEME_COLORS = ["#0284c7", "#0f766e", "#1d4ed8", "#0891b2"]
+    SUB_COLORS = ["#e0f2fe", "#ccfbf1", "#dbeafe", "#cffafe"]
+
+    bubbles = []
+
+    for idx, grp in enumerate(custom_groups):
+        theme_color = THEME_COLORS[idx % len(THEME_COLORS)]
+        sub_color = SUB_COLORS[idx % len(SUB_COLORS)]
+
+        grp_name = grp.get("name", f"Nhóm {idx+1}")
+        categories = grp.get("categories", [])
+        target_month = parse_number(grp.get("target", 0))
+
+        sub_cats = []
+        total_hn = 0.0
+        total_lk = 0.0
+
+        for cat in categories:
+            hn_val = 0.0
+            lk_val = 0.0
+
+            # a. Hôm nay từ Data_Realtime_BI
+            for r in rt_bi_rows:
+                nh = get_key_val(r, "Nhóm Ngành Hàng", "nhóm ngành hàng", "Ngành hàng", "salegroupmastername", default=None)
+                if nh and is_custom_cat_specific_match(nh, cat):
+                    hn_val += max(
+                        parse_number(get_key_val(r, "revenue_KFactor_RT")),
+                        parse_number(get_key_val(r, "revenue_RT")),
+                        parse_number(get_key_val(r, "Doanh thu Quy đổi", "Doanh thu"))
+                    )
+
+            # b. Hôm nay từ Data_Realtime_ThiDua
+            if hn_val == 0:
+                for r in rt_td_rows:
+                    nh = get_key_val(r, "maingroupname", "main group name", "nhóm ngành hàng", "programname", default=None)
+                    if nh and is_custom_cat_specific_match(nh, cat):
+                        hn_val += max(
+                            parse_number(get_key_val(r, "revenue_KFactor_RT")),
+                            parse_number(get_key_val(r, "revenue_RT")),
+                            parse_number(get_key_val(r, "doanh thu", "revenue", "value_compe"))
+                        )
+
+            # c. Hôm nay từ NV Detail
+            if hn_val == 0:
+                for r in rt_nv_detail:
+                    nh = str(get_key_val(r, "Ngành Hàng", "SALEGROUPNAME", "nganh_hang", default="")).strip()
+                    if nh and is_custom_cat_specific_match(nh, cat):
+                        raw_rev = parse_number(get_key_val(r, "Doanh Thu Thực", "Doanh Thu", "Doanh thu", "doanh_thu_thuc", default=0))
+                        if abs(raw_rev) >= 1000000:
+                            raw_rev /= 1000000.0
+                        hn_val += raw_rev
+
+            # d. Lũy kế từ Data_BI
+            for r in bi_rows:
+                nh = get_key_val(r, "Nhóm Ngành Hàng", "nhóm ngành hàng", "Ngành hàng", "salegroupmastername", default=None)
+                if nh and is_custom_cat_specific_match(nh, cat):
+                    lk_val += max(
+                        parse_number(get_key_val(r, "Doanh thu Quy đổi", "doanh thu quy đổi")),
+                        parse_number(get_key_val(r, "Doanh thu", "doanh thu"))
+                    )
+
+            # e. Lũy kế từ Data_ThiDua
+            if lk_val == 0:
+                for r in td_rows:
+                    nh = get_key_val(r, "maingroupname", "nhóm ngành hàng", "programname", default=None)
+                    if nh and is_custom_cat_specific_match(nh, cat):
+                        lk_val += max(
+                            parse_number(get_key_val(r, "doanh thu", "revenue")),
+                            parse_number(get_key_val(r, "thực hiện", "value_compe"))
+                        )
+
+            sub_cats.append({"name": cat, "hn": hn_val, "lk": lk_val})
+            total_hn += hn_val
+            total_lk += lk_val
+
+        # Tính MT ngày của nhóm theo logic chuẩn RT1
+        target_co_dinh = target_month / days_in_month if days_in_month > 0 else 0.0
+        target_bu_tru = max(0.0, (target_month - total_lk) / days_remaining) if days_remaining > 0 else 0.0
+        group_mt_day = target_co_dinh * 2 if is_weekend else max(target_co_dinh, target_bu_tru)
+        if group_mt_day <= 0 and target_month > 0:
+            group_mt_day = target_month / 30.0
+
+        group_con_lai = max(0.0, group_mt_day - total_hn)
+        group_tien_do = (total_hn / group_mt_day * 100.0) if group_mt_day > 0 else (100.0 if total_hn > 0 else 0.0)
+
+        # Phân bổ nhân viên từ Config_ThiDua
+        staff_map = {}
+        for r in config_rows:
+            u = str(get_key_val(r, "user", "User", "mã nv", default="")).strip().upper()
+            name = str(get_key_val(r, "họ và tên", "tên", "User-Họ và tên", default="")).strip()
+            pct = parse_number(get_key_val(r, "tỷ lệ %", "% chia", default=0))
+            ratio = pct if pct <= 1 else pct / 100.0
+            if u and u not in staff_map and u not in ["UNDEFINED", "NULL"]:
+                clean_name = name.split(" - ")[-1] if " - " in name else name
+                clean_name = clean_name.lstrip("0123456789 -").strip()
+                last_name = clean_name.split()[-1] if clean_name else ""
+                disp_name = f"{last_name} - {u}" if last_name else u
+                staff_map[u] = {"id": u, "name": disp_name, "ratio": ratio, "hn": 0.0}
+
+        # Doanh thu thực hôm nay của từng nhân viên
+        for r in rt_nv_detail:
+            u = str(get_key_val(r, "Mã NV", "ma_nv", "user", default="")).strip().upper()
+            sg = str(get_key_val(r, "STOREGROUPNAME", default=""))
+            if not u and sg:
+                m = re.match(r"^(\d+)", sg)
+                if m:
+                    u = m.group(1)
+            if not u or u in ["ONLINE", "18001060"] or u not in staff_map:
+                continue
+            nh = str(get_key_val(r, "Ngành Hàng", "SALEGROUPNAME", "nganh_hang", default="")).strip()
+            if is_custom_cat_matched(nh, categories):
+                rev = parse_number(get_key_val(r, "Doanh Thu Thực", "Doanh Thu", "Doanh thu", "doanh_thu_thuc", default=0))
+                if abs(rev) >= 1000000:
+                    rev /= 1000000.0
+                staff_map[u]["hn"] += rev
+
+        # Danh sách nhân viên và tính chỉ số
+        staff_list = []
+        tot_staff_mt = 0.0
+        tot_staff_hn = 0.0
+
+        for u, s in staff_map.items():
+            s_mt = group_mt_day * s["ratio"]
+            s_hn = s["hn"]
+            s_cl = s_mt - s_hn
+            s_pct = (s_hn / s_mt * 100.0) if s_mt > 0 else (100.0 if s_hn > 0 else 0.0)
+            tot_staff_mt += s_mt
+            tot_staff_hn += s_hn
+            staff_list.append({
+                "name": s["name"],
+                "mt": s_mt,
+                "hn": s_hn,
+                "cl": s_cl,
+                "pct": s_pct
+            })
+
+        # Sắp xếp nhân viên theo doanh thu thực hiện hôm nay giảm dần
+        staff_list.sort(key=lambda x: x["hn"], reverse=True)
+
+        tot_staff_cl = tot_staff_mt - tot_staff_hn
+        tot_staff_pct = (tot_staff_hn / tot_staff_mt * 100.0) if tot_staff_mt > 0 else (100.0 if tot_staff_hn > 0 else 0.0)
+
+        # XÂY DỰNG BUBBLE CARD (CHUẨN LINE FLEX V2)
+        # 1. Header Box
+        header_box = {
+            "type": "box",
+            "layout": "vertical",
+            "backgroundColor": theme_color,
+            "paddingAll": "md",
+            "contents": [
+                {"type": "text", "text": f"🎯 {grp_name.upper()}", "weight": "bold", "size": "md", "color": "#ffffff", "align": "center"},
+                {"type": "text", "text": f"Mục tiêu tháng: {fmt_num(target_month)} TR • Cập nhật: {now_str}", "size": "xxs", "color": sub_color, "align": "center", "margin": "xs"}
+            ]
+        }
+
+        # 2. Hộp Phân Ngành Gộp
+        sub_cat_boxes = []
+        for sc in sub_cats:
+            sub_cat_boxes.append({
+                "type": "box",
+                "layout": "horizontal",
+                "margin": "xs",
+                "contents": [
+                    {"type": "text", "text": f"• {sc['name']}:", "size": "xxs", "color": "#334155", "weight": "bold", "flex": 6, "wrap": True},
+                    {"type": "text", "text": f"HN: {sc['hn']:.2f}", "size": "xxs", "color": "#059669", "weight": "bold", "flex": 3, "align": "end"},
+                    {"type": "text", "text": f"| LK: {fmt_num(sc['lk'])}", "size": "xxs", "color": "#64748b", "flex": 3, "align": "end"}
+                ]
+            })
+
+        box_categories = {
+            "type": "box",
+            "layout": "vertical",
+            "backgroundColor": "#f8fafc",
+            "borderColor": "#e2e8f0",
+            "borderWidth": "1px",
+            "cornerRadius": "md",
+            "paddingAll": "sm",
+            "contents": [
+                {"type": "text", "text": "📦 GỘP CÁC PHÂN NGÀNH:", "size": "xxs", "color": "#64748b", "weight": "bold"},
+                {"type": "separator", "color": "#e2e8f0", "margin": "xs"},
+                *sub_cat_boxes
+            ]
+        }
+
+        # 3. Hộp KPI Tiến Độ
+        pct_width = min(100, max(2, round(group_tien_do)))
+        cl_text = "ĐÃ ĐẠT 🏆" if group_con_lai <= 0 and total_hn > 0 else f"{group_con_lai:.2f} TR"
+        cl_color = "#059669" if group_con_lai <= 0 and total_hn > 0 else "#dc2626"
+
+        box_kpi = {
+            "type": "box",
+            "layout": "vertical",
+            "backgroundColor": "#f8fafc",
+            "borderColor": "#bae6fd" if theme_color == "#0284c7" else "#99f6e4",
+            "borderWidth": "1px",
+            "cornerRadius": "md",
+            "paddingAll": "sm",
+            "contents": [
+                {
+                    "type": "box",
+                    "layout": "horizontal",
+                    "contents": [
+                        {"type": "text", "text": "⏱ MT NGÀY:", "size": "xxs", "color": "#475569", "weight": "bold", "flex": 4},
+                        {"type": "text", "text": f"{group_mt_day:.2f} TR", "size": "xxs", "color": theme_color, "weight": "bold", "flex": 3},
+                        {"type": "text", "text": "⚡ THỰC HIỆN:", "size": "xxs", "color": "#475569", "weight": "bold", "flex": 5, "align": "end"},
+                        {"type": "text", "text": f"{total_hn:.2f} TR", "size": "xxs", "color": "#059669", "weight": "bold", "flex": 4, "align": "end"}
+                    ]
+                },
+                {
+                    "type": "box",
+                    "layout": "horizontal",
+                    "margin": "xs",
+                    "contents": [
+                        {"type": "text", "text": "⏳ CÒN:", "size": "xxs", "color": "#475569", "weight": "bold", "flex": 3},
+                        {"type": "text", "text": cl_text, "size": "xxs", "color": cl_color, "weight": "bold", "flex": 4},
+                        {"type": "text", "text": "TIẾN ĐỘ:", "size": "xxs", "color": "#475569", "weight": "bold", "flex": 5, "align": "end"},
+                        {"type": "text", "text": f"{group_tien_do:.1f}%", "size": "xxs", "color": get_color_class(group_tien_do / 100.0), "weight": "bold", "flex": 4, "align": "end"}
+                    ]
+                },
+                {
+                    "type": "box",
+                    "layout": "vertical",
+                    "backgroundColor": "#e2e8f0",
+                    "height": "6px",
+                    "cornerRadius": "md",
+                    "margin": "xs",
+                    "contents": [
+                        {
+                            "type": "box",
+                            "layout": "vertical",
+                            "backgroundColor": "#10b981" if group_tien_do >= 100 else theme_color,
+                            "height": "6px",
+                            "cornerRadius": "md",
+                            "width": f"{pct_width}%",
+                            "contents": [{"type": "filler"}]
+                        }
+                    ]
+                }
+            ]
+        }
+
+        # 4. Bảng Nhân Viên (6 Cột, BỎ ĐÁNH GIÁ, NỀN TRẮNG HOÀN TOÀN)
+        table_weights = [1, 4, 2, 2, 2, 2]
+        table_aligns = ["center", "start", "end", "end", "end", "end"]
+        
+        table_rows_contents = [
+            {"type": "text", "text": "🏆 THỨ HẠNG DOANH THU NHÂN VIÊN", "size": "xxs", "color": theme_color, "weight": "bold", "margin": "xs"},
+            make_table_header(["#", "NV", "MT", "HN", "CÒN", "%"], table_weights, table_aligns, bg_color=theme_color),
+            {"type": "separator", "color": "#cbd5e1", "margin": "xs"}
+        ]
+
+        rank_icons = ["🥇", "🥈", "🥉"]
+        for idx_s, s in enumerate(staff_list):
+            rank_str = rank_icons[idx_s] if idx_s < 3 else f"{idx_s+1}."
+            cl_str = "Đạt" if s["cl"] <= 0 and s["mt"] > 0 else f"{max(0, s['cl']):.1f}"
+            cl_col = "#059669" if s["cl"] <= 0 and s["mt"] > 0 else "#ef4444"
+
+            row_vals = [
+                rank_str,
+                s["name"],
+                f"{s['mt']:.1f}",
+                f"{s['hn']:.2f}",
+                cl_str,
+                f"{s['pct']:.0f}%"
+            ]
+            row_colors = [
+                "#d97706" if idx_s < 3 else "#64748b",
+                "#0f172a",
+                "#64748b",
+                "#059669" if s["hn"] > 0 else "#64748b",
+                cl_col,
+                get_color_class(s["pct"] / 100.0)
+            ]
+            table_rows_contents.append(make_table_row(row_vals, table_weights, table_aligns, row_colors, bold=(idx_s < 3)))
+            if idx_s < len(staff_list) - 1:
+                table_rows_contents.append({"type": "separator", "color": "#f1f5f9", "margin": "xs"})
+
+        # Dòng TỔNG footer của bảng
+        table_rows_contents.append({"type": "separator", "color": "#cbd5e1", "margin": "xs"})
+        tot_cl_str = "Đạt" if tot_staff_cl <= 0 and tot_staff_mt > 0 else f"{max(0, tot_staff_cl):.1f}"
+        tot_vals = ["⭐", "TỔNG", f"{tot_staff_mt:.1f}", f"{tot_staff_hn:.2f}", tot_cl_str, f"{tot_staff_pct:.0f}%"]
+        tot_colors = ["#d97706", "#0f172a", "#475569", "#059669", "#059669" if tot_staff_cl <= 0 else "#ef4444", get_color_class(tot_staff_pct / 100.0)]
+        table_rows_contents.append(make_table_row(tot_vals, table_weights, table_aligns, tot_colors, bold=True, bg_color="#f8fafc"))
+
+        box_table = {
+            "type": "box",
+            "layout": "vertical",
+            "backgroundColor": "#ffffff",  # NỀN TRẮNG CHUẨN ĐẸP THEO YÊU CẦU!
+            "borderColor": "#e2e8f0",
+            "borderWidth": "1px",
+            "cornerRadius": "md",
+            "paddingAll": "sm",
+            "contents": table_rows_contents
+        }
+
+        bubble = {
+            "type": "bubble",
+            "size": "mega",
+            "header": header_box,
+            "body": {
+                "type": "box",
+                "layout": "vertical",
+                "backgroundColor": "#ffffff",
+                "paddingAll": "sm",
+                "spacing": "sm",
+                "contents": [
+                    box_categories,
+                    box_kpi,
+                    box_table
+                ]
+            }
+        }
+        bubbles.append(bubble)
+
+    return bubbles
+
+
+def build_custom_groups_messages(max_messages=LINE_MAX_MESSAGES):
+    """
+    Đóng gói danh sách Bubble Cards thành tin nhắn Flex Message Carousel gửi cho LINE Bot.
+    """
+    try:
+        bubbles = build_custom_groups_flex()
+        if not bubbles:
+            return None, {"error": "Không có nhóm cấu hình"}
+
+        carousel_contents = {
+            "type": "carousel",
+            "contents": bubbles
+        }
+
+        msgs = [{
+            "alt_text": "🎯 Theo Dõi Nhóm Ngành Hàng Gộp (RT2)",
+            "contents": carousel_contents
+        }]
+        return msgs, {"group_count": len(bubbles)}
+    except Exception as e:
+        print(f"Lỗi build_custom_groups_messages: {e}")
+        return None, {"error": str(e)}
+

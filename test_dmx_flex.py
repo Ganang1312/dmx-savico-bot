@@ -126,6 +126,43 @@ class TestDmxFlexMessages(unittest.TestCase):
         self.assertIn("LK / TG", staff_card_str)
 
     @patch("dmx_flex_messages.get_dashboard_data")
+    def test_nhanvien_phai_dung_khop_mo_nhu_html(self, mock_get_data):
+        """Anh Dương báo 25/09/2026: thẻ NV hiện 22 nhóm thay vì 23.
+
+        Nguyên nhân: bot khớp CHÍNH XÁC tên ngành với Config_ThiDua, trong khi
+        baocao_nhanvien.html dùng findTDConfig (khớp mờ, bỏ hậu tố "tháng N").
+        Ca thật: Config ghi "Nhóm Thi Đua 2 tháng 9", dữ liệu ghi "Nhóm Thi Đua 2"
+        -> khớp thô trượt -> mất nhóm -> điểm thi đua lệch.
+
+        Test này khoá: hễ còn khớp thô thì báo đỏ ngay.
+        """
+        mock_data = dict(self.mock_data)
+        # 23 nhóm trong dữ liệu, nhưng config ghi kèm hậu tố "tháng 9" cho 1 nhóm
+        mock_data["Data_ThiDua"] = [
+            {"maingroupname": f"Nhóm Thi Đua {i}", "target": 500.0, "doanh thu": 60.0 + i, "số lượng": 10}
+            for i in range(1, 24)
+        ]
+        mock_data["Config_ThiDua"] = [
+            {"ngành hàng": f"Nhóm Thi Đua {i}", "phân loại": 1.0}
+            for i in range(1, 23)
+        ] + [
+            {"ngành hàng": "Nhóm Thi Đua 23 tháng 9", "phân loại": 1.0},
+        ] + [
+            {"Họ và tên": f"Nhân viên {i}", "% chia": 10.0}
+            for i in range(1, 6)
+        ]
+        mock_get_data.return_value = mock_data
+
+        flex = build_nhanvien_flex()
+        flex_str = str(flex)
+
+        # Phải nhận ĐỦ 23 nhóm, không phải 22
+        self.assertIn("23 Nhóm", flex_str,
+                      "Thẻ nhân viên phải hiện '/ 23 Nhóm' — đang khớp thô nên mất 1 nhóm")
+        self.assertNotIn("/ 22 Nhóm", flex_str,
+                         "Còn hiện '/ 22 Nhóm' — chưa dùng khớp mờ find_td_config")
+
+    @patch("dmx_flex_messages.get_dashboard_data")
     def test_rt1_hides_zero_revenue_staff(self, mock_get_data):
         mock_data_staff = dict(self.mock_data)
         mock_data_staff["Config_ThiDua"] = [

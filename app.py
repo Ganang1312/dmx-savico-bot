@@ -38,6 +38,8 @@ from vesinh_handler import generate_vesinh_flex, update_vesinh_status, get_curre
 from dmx_data_provider import trigger_adhoc_scrape, check_scrape_status
 from dmx_flex_messages import (build_luyke_flex, build_nhanvien_flex,
                                build_help_commands_flex, build_realtime_messages,
+                               build_realtime_staff_detail_messages,
+                               build_custom_groups_messages,
                                LINE_MAX_MESSAGES)
 from coupon_handler import (
     build_category_menu_flex, build_product_list_flex,
@@ -1354,6 +1356,61 @@ def handle_message(event):
         except Exception as e:
             # KHÔNG push dự phòng (tốn quota) — chỉ ghi log để còn truy vết.
             print(f"Lỗi gửi Flex RT1 (không push dự phòng): {e}")
+        return
+
+    if user_msg_upper in ['RTNV', 'RT NV', 'CTNV', 'CHITIETNV', 'RT1NV', 'RT1_DETAIL']:
+        # Báo cáo chi tiết ngành hàng thực bán của từng nhân viên (kích hoạt từ nút bấm trên RT1)
+        try:
+            nv_messages, nv_info = build_realtime_staff_detail_messages(max_messages=LINE_MAX_MESSAGES)
+        except Exception as e:
+            print(f"Lỗi khởi tạo chi tiết nhân viên realtime: {e}")
+            try:
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"Lỗi tạo chi tiết nhân viên: {str(e)}"))
+            except Exception as pe:
+                print(f"Lỗi gửi reply dự phòng: {pe}")
+            return
+
+        try:
+            if not nv_messages:
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(
+                    text="⚠️ Hôm nay chưa có nhân viên nào phát sinh doanh thu ngành hàng."
+                ))
+                return
+
+            reply_msgs = [FlexSendMessage(alt_text=m["alt_text"], contents=m["contents"])
+                          for m in nv_messages]
+            line_bot_api.reply_message(event.reply_token, reply_msgs[:LINE_MAX_MESSAGES])
+            print(f"RTNV: gửi {len(reply_msgs)} message chi tiết nhân viên | info: {nv_info}")
+        except Exception as e:
+            print(f"Lỗi gửi Flex RTNV: {e}")
+        return
+
+    if user_msg_upper in ['RT2', 'NHOM', 'NHOM2'] or user_msg_upper.startswith(('RT2 ', 'NHOM ')):
+        # Báo cáo Realtime nhóm ngành gộp (Phụ kiện, Bảo hiểm thợ...) gửi dạng Carousel Flex Message
+        try:
+            cg_messages, cg_info = build_custom_groups_messages(max_messages=LINE_MAX_MESSAGES)
+        except Exception as e:
+            print(f"Lỗi khởi tạo báo cáo nhóm gộp: {e}")
+            try:
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"Lỗi tạo báo cáo nhóm gộp RT2: {str(e)}"))
+            except Exception as pe:
+                print(f"Lỗi gửi reply dự phòng: {pe}")
+            return
+
+        try:
+            if not cg_messages:
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(
+                    text="⚠️ Không tìm thấy cấu hình nhóm ngành hàng gộp hoặc dữ liệu trống.\n"
+                         "Vui lòng kiểm tra tab Config_Custom_Groups trên dashboard."
+                ))
+                return
+
+            reply_msgs = [FlexSendMessage(alt_text=m["alt_text"], contents=m["contents"])
+                          for m in cg_messages]
+            line_bot_api.reply_message(event.reply_token, reply_msgs[:LINE_MAX_MESSAGES])
+            print(f"RT2: gửi {len(reply_msgs)} tin nhắn nhóm gộp | info: {cg_info}")
+        except Exception as e:
+            print(f"Lỗi gửi Flex RT2 (không push dự phòng): {e}")
         return
 
     if user_msg_upper in ['RT', 'CAO'] or user_msg_upper.startswith(('RT ', 'CAO ')):
