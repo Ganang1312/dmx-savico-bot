@@ -404,46 +404,76 @@ def handle_postback(event):
     # 2. Hoàn thành Task công việc (Checklist Công việc)
     if action == 'complete_task':
         task_id = data.get('task_id')
-        shift_type = data.get('shift')
+        shift_type = data.get('shift', 'sang')
         target_status = data.get('target_status', 'complete')
-        group_id = event.source.group_id
-        user_id = event.source.user_id
+        
+        # Lấy group_id an toàn (hỗ trợ cả khi bấm trong nhóm, phòng chat hoặc chat 1-1)
+        group_id = data.get('group_id') or getattr(event.source, 'group_id', None) or os.environ.get('EMPLOYEE_GROUP_ID') or MAIN_CHECKLIST_GROUP_ID
+        user_id = getattr(event.source, 'user_id', None)
 
         try:
-            profile = line_bot_api.get_group_member_profile(group_id, user_id)
-            user_name = profile.display_name
+            user_name = "Nhân viên"
+            if user_id:
+                try:
+                    if getattr(event.source, 'group_id', None):
+                        profile = line_bot_api.get_group_member_profile(event.source.group_id, user_id)
+                    else:
+                        profile = line_bot_api.get_profile(user_id)
+                    if profile and profile.display_name:
+                        user_name = profile.display_name
+                except Exception as e_prof:
+                    print(f"Không thể lấy profile người bấm checklist: {e_prof}")
             
             sheet = get_spreadsheet().worksheet(WORKSHEET_TRACKER_NAME)
             tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
             today_str = datetime.now(tz_vietnam).strftime('%Y-%m-%d')
+            time_str = datetime.now(tz_vietnam).strftime('%H:%M')
+            new_user = f"{user_name} lúc {time_str}" if target_status == 'complete' else ''
             
             all_records = sheet.get_all_records()
             row_to_update = -1
             target_record = None
             
+            # 1. Tìm dòng khớp cả group_id, date và task_id
             for i, record in enumerate(all_records):
-                if (str(record.get('group_id')) == group_id and
-                    record.get('date') == today_str and
-                    record.get('task_id') == task_id):
+                if (record.get('date') == today_str and
+                    record.get('task_id') == task_id and
+                    (not group_id or str(record.get('group_id')) == str(group_id))):
                     row_to_update = i + 2 
                     target_record = record
                     break
             
+            # 2. Fallback nếu group_id khác (ví dụ bấm từ group khác nhưng task cùng ngày)
+            if row_to_update == -1:
+                for i, record in enumerate(all_records):
+                    if record.get('date') == today_str and record.get('task_id') == task_id:
+                        row_to_update = i + 2
+                        target_record = record
+                        group_id = str(record.get('group_id'))
+                        break
+
             if row_to_update != -1:
                 current_status = target_record.get('status', 'incomplete') if target_record else 'incomplete'
                 if current_status == target_status:
-                    print(f"Task {task_id} đã ở trạng thái {target_status} từ trước. Bỏ qua.")
-                    return
-                
-                tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
-                time_str = datetime.now(tz_vietnam).strftime('%H:%M')
-                new_user = f"{user_name} lúc {time_str}" if target_status == 'complete' else ''
-                range_to_update = f'F{row_to_update}:G{row_to_update}'
-                sheet.update(range_name=range_to_update, values=[[target_status, new_user]])
-                
-                if target_record:
-                    target_record['status'] = target_status
-                    target_record['user_name'] = new_user
+                    print(f"Task {task_id} đã ở trạng thái {target_status} từ trước.")
+                else:
+                    range_to_update = f'F{row_to_update}:G{row_to_update}'
+                    sheet.update(range_name=range_to_update, values=[[target_status, new_user]])
+                    if target_record:
+                        target_record['status'] = target_status
+                        target_record['user_name'] = new_user
+            else:
+                # 3. Tự động thêm dòng mới vào sheet nếu hôm nay chưa khởi tạo task này
+                task_name_val = task_id
+                task_time_val = ''
+                for t in TASKS.get(shift_type, []):
+                    if t['id'] == task_id:
+                        task_name_val = t['name']
+                        task_time_val = t['time']
+                        break
+                new_row = [str(group_id or ''), today_str, task_id, task_name_val, task_time_val, target_status, new_user]
+                sheet.append_row(new_row, value_input_option='USER_ENTERED')
+                print(f"Đã tự động khởi tạo và cập nhật task {task_id} vào sheet.")
             
             if shift_type == 'vs':
                 updated_flex_content = generate_checklist_flex(group_id, 'vs', all_records_prefetched=all_records)
@@ -462,6 +492,13 @@ def handle_postback(event):
 
         except Exception as e:
             print(f"Lỗi nghiêm trọng khi xử lý postback hoàn thành công việc: {e}")
+            try:
+                line_bot_api.reply_message(
+                    event.reply_token,
+                    TextSendMessage(text=f"⚠️ Lỗi cập nhật công việc: {e}")
+                )
+            except:
+                pass
         return
 
     # 2.5. Hoàn thành công việc phát sinh (Adhoc task)
@@ -470,16 +507,21 @@ def handle_postback(event):
         assignee = data.get('assignee')
         target_status = data.get('target_status', 'complete')
         shift_type = data.get('shift')
-        group_id = getattr(event.source, 'group_id', None)
-        user_id = event.source.user_id
+        group_id = getattr(event.source, 'group_id', None) or os.environ.get('EMPLOYEE_GROUP_ID') or MAIN_CHECKLIST_GROUP_ID
+        user_id = getattr(event.source, 'user_id', None)
 
         try:
             user_name = assignee or "Nhân viên"
-            try:
-                profile = line_bot_api.get_group_member_profile(group_id, user_id)
-                user_name = profile.display_name
-            except Exception:
-                pass
+            if user_id:
+                try:
+                    if getattr(event.source, 'group_id', None):
+                        profile = line_bot_api.get_group_member_profile(event.source.group_id, user_id)
+                    else:
+                        profile = line_bot_api.get_profile(user_id)
+                    if profile and profile.display_name:
+                        user_name = profile.display_name
+                except Exception:
+                    pass
             
             success, resolved_assignee, task_group_hash = update_adhoc_task_status(group_id, task_id, target_status, user_name)
             

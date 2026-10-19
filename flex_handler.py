@@ -255,7 +255,7 @@ def generate_checklist_flex(group_id, shift_type, all_records_prefetched=None):
                     "action": {
                         "type": "postback",
                         "label": button_label,
-                        "data": f"action=complete_task&task_id={task['id']}&shift={shift_type}&target_status={target_status_param}"
+                        "data": f"action=complete_task&task_id={task['id']}&shift={shift_type}&target_status={target_status_param}&group_id={group_id}"
                     },
                     "style": "primary",
                     "color": button_color,
@@ -673,7 +673,7 @@ def update_adhoc_task_status(group_id, task_id, target_status, completed_by):
     Cập nhật trạng thái của adhoc task theo đúng group_id và task_id.
     """
     sheet = get_or_create_adhoc_worksheet()
-    if not sheet or not group_id or not task_id:
+    if not sheet or not task_id:
         return False, None, None
     
     try:
@@ -690,7 +690,7 @@ def update_adhoc_task_status(group_id, task_id, target_status, completed_by):
         i_comp_at = cols['completed_at']
 
         time_str = datetime.now(pytz.timezone('Asia/Ho_Chi_Minh')).strftime('%H:%M')
-        target_gid = str(group_id).strip()
+        target_gid = str(group_id).strip() if group_id else ''
 
         row_idx = -1
         assignee = None
@@ -702,7 +702,7 @@ def update_adhoc_task_status(group_id, task_id, target_status, completed_by):
             r_gid = str(row[i_gid]).strip()
             r_tid = str(row[i_tid]).strip()
 
-            if r_gid == target_gid and r_tid == str(task_id).strip():
+            if (not target_gid or r_gid == target_gid) and r_tid == str(task_id).strip():
                 row_idx = i
                 assignee = str(row[i_assignee]).strip() if len(row) > i_assignee else ''
                 if str(task_id).startswith('all_') or str(task_id).startswith('multi_'):
