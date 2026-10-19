@@ -1109,7 +1109,9 @@ def generate_today_adhoc_flex(group_id):
                         status = a.get('status', 'incomplete')
                         is_comp = (status == 'complete')
                         text_dec = "line-through" if is_comp else "none"
-                        text_col = "#888888" if is_comp else "#1565C0"
+                        text_col = "#94a3b8" if is_comp else "#0f172a"
+                        text_weight = "regular" if is_comp else "bold"
+                        text_size = "xs" if is_comp else "sm"
                         btn_col = "#CCCCCC" if is_comp else "#00B33C"
                         btn_lbl = "✓ Xong" if is_comp else "Hoàn tất"
                         target_status_param = "incomplete" if is_comp else "complete"
@@ -1124,9 +1126,10 @@ def generate_today_adhoc_flex(group_id):
                             "contents": [
                                 {
                                     "type": "text",
-                                    "text": f"👤 Giao cho: {assignee}",
+                                    "text": f"👤 {assignee}",
                                     "color": text_col,
-                                    "size": "xs",
+                                    "size": text_size,
+                                    "weight": text_weight,
                                     "decoration": text_dec,
                                     "flex": 1,
                                     "wrap": True
@@ -1210,7 +1213,9 @@ def generate_today_adhoc_flex(group_id):
                     status = a.get('status', 'incomplete')
                     is_comp = (status == 'complete')
                     text_dec = "line-through" if is_comp else "none"
-                    text_col = "#888888" if is_comp else "#1565C0"
+                    text_col = "#94a3b8" if is_comp else "#0f172a"
+                    text_weight = "regular" if is_comp else "bold"
+                    text_size = "xs" if is_comp else "sm"
                     btn_col = "#CCCCCC" if is_comp else "#00B33C"
                     btn_lbl = "✓ Xong" if is_comp else "Hoàn tất"
                     target_status_param = "incomplete" if is_comp else "complete"
@@ -1225,9 +1230,10 @@ def generate_today_adhoc_flex(group_id):
                         "contents": [
                             {
                                 "type": "text",
-                                "text": f"👤 Giao cho: {assignee}",
+                                "text": f"👤 {assignee}",
                                 "color": text_col,
-                                "size": "xs",
+                                "size": text_size,
+                                "weight": text_weight,
                                 "decoration": text_dec,
                                 "flex": 1,
                                 "wrap": True

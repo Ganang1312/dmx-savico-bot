@@ -133,41 +133,97 @@ def fmt_val_td(val, is_sl=False):
 def shorten_name(name):
     if not name:
         return ""
+    import re
     s = str(name).replace("NNH ", "").strip()
+    
+    # Danh sách chuẩn hóa & viết tắt tên ngành hàng thi đua
+    # Nguyên tắc: Cái nào quá dài thì viết tắt nhưng vẫn đảm bảo đọc hiểu 100%,
+    # phân biệt rõ ràng giữa các nhóm cùng chủng loại (Realme / Vivo / Tablet, ICT / CE, v.v.)
     replacements = [
-        ("Điện Gia Dụng", "Đ.Gia Dụng"),
-        ("Điện gia dụng", "Đ.Gia Dụng"),
-        ("Điện Lạnh", "Đ.Lạnh"),
-        ("Điện lạnh", "Đ.Lạnh"),
-        ("Điện Tử", "Đ.Tử"),
-        ("Điện tử", "Đ.Tử"),
-        ("Điện Thoại", "Đ.Thoại"),
-        ("Điện thoại", "Đ.Thoại"),
+        # Trả chậm
+        ("TRẢ CHẬM FECREDIT, SHINHAN, SAMSUNG FINANCE+", "TC FE, Shinhan, SS+"),
+        ("TRẢ CHẬM FECREDIT, SHINHAN, SAMSUNG FINANCE", "TC FE, Shinhan, SS+"),
+        ("TRẢ CHẬM HOMECREDIT", "TC HomeCredit"),
+        ("TRẢ CHẬM ĐIỆN MÁY VÀ GIA DỤNG", "TC Điện Máy & GD"),
+        ("TRẢ CHẬM ĐIỆN MÁY", "TC Điện Máy"),
+        ("TRẢ CHẬM", "TC"),
+        ("Trả Chậm", "TC"),
+        
+        # Bảo hiểm
+        ("BẢO HIỂM THỢ ĐMX_ICT", "BH Thợ ICT"),
+        ("BẢO HIỂM THỢ ĐMX_CE", "BH Thợ CE"),
+        ("BẢO HIỂM THỢ ĐMX", "BH Thợ ĐMX"),
+        ("Bảo Hiểm Tổng", "BH Tổng"),
+        ("Bảo hiểm tổng", "BH Tổng"),
+        ("BẢO HIỂM", "BH"),
+        ("Bảo hiểm", "BH"),
+        
+        # Điện thoại & Apple
+        ("IPHONE 18 series, iPhone Duo", "iPhone 18, Duo"),
+        ("IPHONE 18 series", "iPhone 18"),
+        ("ĐIỆN THOẠI REALME", "ĐT realme"),
+        ("ĐIỆN THOẠI VIVO", "ĐT Vivo"),
+        ("ĐIỆN THOẠI & TABLET ANDROID", "ĐT & Tablet"),
+        ("ĐIỆN THOẠI & PHỤ KIỆN", "ĐT & PK"),
+        ("ĐIỆN THOẠI", "ĐT"),
+        ("Điện thoại", "ĐT"),
+        ("Điện Thoại", "ĐT"),
+        
+        # Điện máy & Điện lạnh
+        ("TỦ LẠNH, TỦ ĐÔNG, TỦ MÁT", "Tủ Lạnh, Đông, Mát"),
+        ("TỦ LẠNH, TỦ MÁT", "Tủ Lạnh, Mát"),
+        ("TỦ LẠNH, TỦ ĐỒ", "Tủ Lạnh/Đông"),
+        ("MÁY SẤY & MÁY RỬA CHÉN", "Sấy & Rửa Chén"),
+        ("MÁY NƯỚC NÓNG FERROLI", "Nước Nóng Ferroli"),
+        ("MÁY LỌC KHÔNG KHÍ", "Lọc K.Khí"),
+        ("MÁY LỌC NƯỚC", "Lọc Nước"),
+        ("MÁY GIẶT", "Máy Giặt"),
+        ("Máy giặt", "Máy Giặt"),
+        ("ĐIỆN TỬ TCL", "Điện Tử TCL"),
+        ("Điện Gia Dụng", "Gia Dụng"),
+        ("Điện gia dụng", "Gia Dụng"),
+        
+        # Gia dụng & Khác
+        ("NỒI CƠM &  NỒI CHIÊN", "Nồi Cơm & Chiên"),
+        ("NỒI CƠM & NỒI CHIÊN", "Nồi Cơm & Chiên"),
+        ("GIA DỤNG SUNHOUSE", "GD Sunhouse"),
+        ("Hút bụi - 20 Tỉnh", "Hút Bụi 20 Tỉnh"),
+        ("Hút bụi", "Hút Bụi"),
+        ("HÚT BỤI", "Hút Bụi"),
+        ("SẠC DỰ PHÒNG", "Sạc Dự Phòng"),
+        ("DOANH THU ĐỒNG HỒ", "Đồng Hồ"),
+        ("ĐỒNG HỒ", "Đồng Hồ"),
+        
+        # Phụ kiện & IT & Viễn thông
+        ("PHỤ KIỆN IT - NHÓM KHÁC", "PK IT & Khác"),
+        ("PHỤ KIỆN CÔNG NGHỆ", "PK Công Nghệ"),
+        ("PHỤ KIỆN", "PK"),
+        ("Phụ kiện", "PK"),
+        ("Phụ Kiện", "PK"),
+        ("TABLET ANDROID VÀ MÁY ĐỌC SÁCH", "Tablet & Đọc Sách"),
+        ("MỞ THẺ TÍN DỤNG TPBANK EVO VÀ VPBANK MWG", "Mở Thẻ TPB, VPB"),
+        ("NẠP - RÚT TIỀN TÀI KHOẢN NGÂN HÀNG", "Nạp Rút Tiền NH"),
+        ("NẠP RÚT TIỀN TẬN NƠI", "Nạp Rút Tiền"),
+        ("SIM MOBIFONE/SIM DMX", "SIM Mobi/DMX"),
+        ("SIM TỔNG", "SIM Tổng"),
         ("Thiết Bị Gia Đình", "TB Gia Đình"),
         ("Thiết bị gia đình", "TB Gia Đình"),
         ("Thiết Bị", "TB"),
         ("Thiết bị", "TB"),
-        ("Phụ Kiện", "P.Kiện"),
-        ("Phụ kiện", "P.Kiện"),
         ("Chăm Sóc Cá Nhân", "CS Cá Nhân"),
         ("Chăm sóc cá nhân", "CS Cá Nhân"),
-        ("Viễn Thông", "V.Thông"),
-        ("Viễn thông", "V.Thông"),
-        ("Nhóm Thi Đua", "T.Đua"),
-        ("Nhóm thi đua", "T.Đua"),
-        ("NẠP RÚT TIỀN TẬN NƠI", "Nạp Rút Tiền"),
-        ("TRẢ CHẬM HOMECREDIT", "TC HomeCredit"),
-        ("TRẢ CHẬM ĐIỆN MÁY", "TC Điện Máy"),
-        ("TRẢ CHẬM", "Trả Chậm"),
-        ("MÁY LỌC KHÔNG KHÍ", "Lọc K.Khí"),
-        ("MÁY LỌC NƯỚC", "Lọc Nước"),
-        ("ĐIỆN THOẠI & PHỤ KIỆN", "Đ.Thoại & PK"),
-        ("TỦ LẠNH, TỦ ĐỒ", "Tủ Lạnh/Đông"),
-        ("DOANH THU ĐỒNG HỒ", "Đồng Hồ"),
+        ("Nhóm Thi Đua", "Thi Đua"),
+        ("Nhóm thi đua", "Thi Đua"),
+        ("VÍ TRẢ SAU", "Ví Trả Sau"),
+        ("Vay tiền mặt", "Vay Tiền Mặt"),
     ]
     for old, new in replacements:
-        s = s.replace(old, new)
-        
+        if old.lower() in s.lower():
+            pattern = re.compile(re.escape(old), re.IGNORECASE)
+            s = pattern.sub(new, s)
+            
+    # Rút gọn khoảng trắng thừa
+    s = re.sub(r'\s+', ' ', s).strip()
     return s
 
 def shorten_staff_name(name):
@@ -253,13 +309,17 @@ def make_table_header(cols, weights, aligns=None, bg_color="#0284c7"):
         "contents": contents
     }
 
-def make_table_row(vals, weights, aligns=None, colors=None, bold=False, bg_color=None):
+def make_table_row(vals, weights, aligns=None, colors=None, bold=False, bg_color=None, wraps=None):
     if not aligns:
         aligns = ["start"] * len(vals)
     if not colors:
         colors = ["#0f172a"] * len(vals)
+    if not wraps:
+        wraps = [False] * len(vals)
+    elif isinstance(wraps, bool):
+        wraps = [wraps] * len(vals)
     contents = []
-    for v, w, a, c in zip(vals, weights, aligns, colors):
+    for v, w, a, c, wr in zip(vals, weights, aligns, colors, wraps):
         item = {
             "type": "text",
             "text": str(v),
@@ -271,6 +331,8 @@ def make_table_row(vals, weights, aligns=None, colors=None, bold=False, bg_color
             item["align"] = a
         if bold:
             item["weight"] = "bold"
+        if wr:
+            item["wrap"] = True
         contents.append(item)
     box_dict = {
         "type": "box",
@@ -900,8 +962,9 @@ def build_luyke_flex():
 
     # Bảng Thi Đua Lũy Kế P.2 (Chia 2 khu: Dự kiến về đích & Chưa về đích - Chuẩn Ảnh 1 mới)
     headers_p2 = ["#", "NH", "MT", "Đạt", "%HT", "%DK"]
-    weights_p2 = [1, 4, 2, 3, 2, 2]
+    weights_p2 = [1, 5, 2, 3, 2, 2]
     aligns_p2 = ["center", "start", "center", "center", "center", "center"]
+    wraps_p2 = [False, True, False, False, False, False]
 
     body_contents_p2 = []
 
@@ -930,7 +993,7 @@ def build_luyke_flex():
             name_color = "#dc2626" if t.get("phan_loai") == 2.0 else "#0f172a"
             vals = [str(idx), display_name, mt_str, act_tg_str, ht_str, dk_str]
             colors = ["#64748b", name_color, "#16a34a" if mt_str == "🏆" else "#0284c7", "#0f172a", get_color_class(t["ht"]), get_color_class(t["ht_dk"])]
-            done_table.append(make_table_row(vals, weights_p2, aligns_p2, colors))
+            done_table.append(make_table_row(vals, weights_p2, aligns_p2, colors, wraps=wraps_p2))
 
         body_contents_p2.append({
             "type": "box",
@@ -961,7 +1024,7 @@ def build_luyke_flex():
             name_color = "#dc2626" if t.get("phan_loai") == 2.0 else "#0f172a"
             vals = [str(idx), display_name, mt_str, act_tg_str, ht_str, dk_str]
             colors = ["#64748b", name_color, "#16a34a" if mt_str == "🏆" else "#0284c7", "#0f172a", get_color_class(t["ht"]), get_color_class(t["ht_dk"])]
-            pending_table.append(make_table_row(vals, weights_p2, aligns_p2, colors))
+            pending_table.append(make_table_row(vals, weights_p2, aligns_p2, colors, wraps=wraps_p2))
 
         body_contents_p2.append({
             "type": "box",
@@ -2771,8 +2834,9 @@ def build_realtime_flex(detail_limit=None):
 
     # Bảng Thi Đua Realtime P.2 (Chia 2 khu: Về đích ngày & Chưa về đích ngày - Chuẩn Ảnh 2 mới)
     headers_rt2 = ["#", "NH", "Đạt", "Còn", "MT", "%HT"]
-    weights_rt2 = [1, 4, 2, 2, 2, 2]
+    weights_rt2 = [1, 5, 2, 2, 2, 2]
     aligns_rt2 = ["center", "start", "center", "center", "center", "center"]
+    wraps_rt2 = [False, True, False, False, False, False]
 
     body_contents_rt2 = []
 
@@ -2795,7 +2859,7 @@ def build_realtime_flex(detail_limit=None):
             colors = ["#64748b", name_color, "#0284c7", "#16a34a" if cl_str == "🏆" else "#dc2626", "#475569", get_color_class(t["ht"])]
             if idx > 1:
                 done_table_rt.append({"type": "separator", "color": "#e2e8f0", "margin": "xs"})
-            done_table_rt.append(make_table_row(vals, weights_rt2, aligns_rt2, colors))
+            done_table_rt.append(make_table_row(vals, weights_rt2, aligns_rt2, colors, wraps=wraps_rt2))
 
         body_contents_rt2.append({
             "type": "box",
@@ -2828,7 +2892,7 @@ def build_realtime_flex(detail_limit=None):
             colors = ["#64748b", name_color, "#0284c7", "#16a34a" if cl_str == "🏆" else "#dc2626", "#475569", get_color_class(t["ht"])]
             if idx > len(td_done) + 1:
                 pending_table_rt.append({"type": "separator", "color": "#f1f5f9", "margin": "xs"})
-            pending_table_rt.append(make_table_row(vals, weights_rt2, aligns_rt2, colors))
+            pending_table_rt.append(make_table_row(vals, weights_rt2, aligns_rt2, colors, wraps=wraps_rt2))
 
         body_contents_rt2.append({
             "type": "box",
