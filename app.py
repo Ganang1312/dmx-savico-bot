@@ -25,6 +25,7 @@ from config import CLIENT, SHEET_NAME, WORKSHEET_NAME_USERS, WORKSHEET_NAME, WOR
 from schedule_handler import send_daily_schedule
 from config import MAIN_CHECKLIST_GROUP_ID
 from flex_handler import (
+    TASKS,
     initialize_daily_tasks, generate_checklist_flex, get_tasks_status_from_sheet,
     add_adhoc_tasks, generate_adhoc_flex, update_adhoc_task_status,
     add_all_adhoc_tasks, generate_all_adhoc_flex, register_group_member,
