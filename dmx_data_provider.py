@@ -1,8 +1,16 @@
 import os
+import sys
 import requests
 import json
 from datetime import datetime
 import pytz
+
+if hasattr(sys.stdout, 'reconfigure'):
+    try:
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+    except Exception:
+        pass
 
 # Đọc từ biến môi trường — KHÔNG hardcode khoá trong mã nguồn.
 # Đặt trên Render: SUPABASE_URL và SUPABASE_KEY.
