@@ -2826,29 +2826,48 @@ def build_realtime_flex(detail_limit=None):
                 "contents": nv_card_contents
             })
 
-    # Revenue Table Container Card (Bảng Chi Tiết Doanh Thu Hôm Nay - Tối ưu weights và bật wrap tránh che tên ngành hàng)
+    # Revenue Table Container Card (Bảng Chi Tiết Doanh Thu Hôm Nay - Tự động ẩn cột Target và %HT nếu không có dữ liệu Target)
+    has_bi_target = any(b.get("tg", 0) > 0 for b in parsed_rt_bi)
+
     table_card_contents = [
         {"type": "text", "text": "⚡ CHI TIẾT DOANH THU HÔM NAY", "size": "xxs", "color": "#0284c7", "weight": "bold", "margin": "xs"}
     ]
-    headers = ["STT", "Ngành hàng", "SL", "DTQĐ", "Target", "%HT"]
-    weights = [1, 5, 1, 2, 2, 2]
-    aligns = ["start", "start", "center", "center", "center", "end"]
-    wraps_bi = [False, True, False, False, False, False]
+    if has_bi_target:
+        headers = ["STT", "Ngành hàng", "SL", "DTQĐ", "Target", "%HT"]
+        weights = [1, 5, 1, 2, 2, 2]
+        aligns = ["start", "start", "center", "center", "center", "end"]
+        wraps_bi = [False, True, False, False, False, False]
+    else:
+        headers = ["STT", "Ngành hàng", "SL", "DTQĐ"]
+        weights = [1, 6, 1, 2]
+        aligns = ["start", "start", "center", "end"]
+        wraps_bi = [False, True, False, False]
+
     table_card_contents.append(make_table_header(headers, weights, aligns, bg_color="#0284c7"))
     table_card_contents.append({"type": "separator", "color": "#cbd5e1", "margin": "xs"})
 
     for idx, b in enumerate(parsed_rt_bi):
         ty_trong_rt = (b["dt"] / rt_total * 100) if rt_total > 0 else 0.0
-        vals = [idx+1, f"{b['name']} ({ty_trong_rt:.0f}%)", fmt_num(b["sl"]), fmt_num(b["dt"]), fmt_num(b["tg"]), f"{b['ht']*100:.0f}%"]
-        colors = ["#64748b", "#0f172a", "#0f172a", "#ef4444" if b["dt"] < 0 else "#0284c7", "#475569", get_color_class(b["ht"])]
+        if has_bi_target:
+            vals = [idx+1, f"{b['name']} ({ty_trong_rt:.0f}%)", fmt_num(b["sl"]), fmt_num(b["dt"]), fmt_num(b["tg"]), f"{b['ht']*100:.0f}%"]
+            colors = ["#64748b", "#0f172a", "#0f172a", "#ef4444" if b["dt"] < 0 else "#0284c7", "#475569", get_color_class(b["ht"])]
+        else:
+            vals = [idx+1, f"{b['name']} ({ty_trong_rt:.0f}%)", fmt_num(b["sl"]), fmt_num(b["dt"])]
+            colors = ["#64748b", "#0f172a", "#0f172a", "#ef4444" if b["dt"] < 0 else "#0284c7"]
+
         table_card_contents.append(make_table_row(vals, weights, aligns, colors, wraps=wraps_bi))
         if idx < len(parsed_rt_bi) - 1:
             table_card_contents.append({"type": "separator", "color": "#f1f5f9", "margin": "xs"})
 
     tot_sl = sum(x["sl"] for x in parsed_rt_bi)
     totalHTCol2 = rt_total / rt_tTarget if rt_tTarget > 0 else 0.0
-    tot_vals = ["⭐", "TỔNG CỘNG", fmt_num(tot_sl), fmt_num(rt_total), fmt_num(rt_tTarget), f"{totalHTCol2*100:.0f}%"]
-    tot_colors = ["#ffffff", "#ffffff", "#ffffff", "#ffffff", "#ffffff", "#ffffff"]
+    if has_bi_target:
+        tot_vals = ["⭐", "TỔNG CỘNG", fmt_num(tot_sl), fmt_num(rt_total), fmt_num(rt_tTarget), f"{totalHTCol2*100:.0f}%"]
+        tot_colors = ["#ffffff", "#ffffff", "#ffffff", "#ffffff", "#ffffff", "#ffffff"]
+    else:
+        tot_vals = ["⭐", "TỔNG CỘNG", fmt_num(tot_sl), fmt_num(rt_total)]
+        tot_colors = ["#ffffff", "#ffffff", "#ffffff", "#ffffff"]
+
     table_card_contents.append(make_table_row(tot_vals, weights, aligns, tot_colors, bold=True, bg_color="#f59e0b", wraps=wraps_bi))
 
     body_contents_rt1.append({
