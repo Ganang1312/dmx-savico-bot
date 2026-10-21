@@ -2248,7 +2248,7 @@ def build_realtime_flex(detail_limit=None):
         
         if dtqd != 0 or sl != 0:
             parsed_rt_bi.append({
-                "name": shorten_name(nganh),
+                "name": str(nganh).strip(),
                 "sl": int(sl),
                 "dt": dtqd,
                 "tg": targetDay,
@@ -2557,24 +2557,77 @@ def build_realtime_flex(detail_limit=None):
     data_rt_nv = data.get("Data_Realtime_NV", [])
     data_rt_nv_detail = data.get("Data_Realtime_NV_NganhHang", [])
 
-    # Kiểm tra xem Data_Realtime_NV có bị lẫn số lũy kế cả tháng (Data_NV_BI) không
-    is_cum_data = False
-    if data_rt_nv and isinstance(data_rt_nv, list) and len(data_rt_nv) > 0:
-        sample_first = data_rt_nv[0]
-        if sample_first.get("numday_cum") is not None or sample_first.get("cum_as_of_date_key") is not None:
-            is_cum_data = True
-        else:
-            # Kiểm tra nếu doanh thu nhân viên vượt quá xa tổng DT hôm nay của siêu thị
-            total_check_dt = sum(parse_number(get_key_val(r, "doanh thu quy đổi", "revenue_kfactor", "dt quy đổi", "Doanh thu Quy đổi", default=0)) for r in data_rt_nv[:5])
-            if abs(total_check_dt) >= 1000000:
-                total_check_dt /= 1000000.0
-            if rt_total > 0 and total_check_dt > (rt_total * 2.5):
-                is_cum_data = True
+    # Chuẩn bị bản đồ hệ số quy đổi K-Factor từ Data_Realtime_BI (Đồng bộ chuẩn xác 100% với giao diện web baocao_realtime.js)
+    bi_kfactor_map = {}
+    total_bi_thuc_calc = 0.0
+    total_bi_qd_calc = 0.0
+    for r in rt_rows:
+        nh_raw = get_key_val(r, "nhóm ngành hàng", "ngành hàng", "salegroupmastername", "groupname", default="")
+        nh_lower = str(nh_raw).lower().strip()
+        dt_thuc_row = parse_number(get_key_val(r, "doanh thu", "revenue", "revenue_off", "doanh thu thực", default=0))
+        dt_qd_row = parse_number(get_key_val(r, "revenue_KFactor_RT", "revenue_RT", "doanh thu quy đổi", "doanh thu quy doi", "doanh thu qđ", "dtqd", default=0))
+        if nh_lower in ["tổng cộng", "total"] or nh_lower.startswith("tổng"):
+            total_bi_thuc_calc = dt_thuc_row
+            total_bi_qd_calc = dt_qd_row
+            continue
+        clean_key = re.sub(r"^nnh\s+", "", nh_lower).strip()
+        factor = (dt_qd_row / dt_thuc_row) if dt_thuc_row > 0 else 1.0
+        bi_kfactor_map[nh_lower] = factor
+        bi_kfactor_map[clean_key] = factor
 
-    # Nếu Data_Realtime_NV bị dính số lũy kế hoặc rỗng, tự động tổng hợp số realtime thực bán từ Data_Realtime_NV_NganhHang
-    source_nv_rows = []
-    if (not data_rt_nv or is_cum_data) and data_rt_nv_detail and isinstance(data_rt_nv_detail, list):
-        detail_grouped = {}
+    default_kfactor = (total_bi_qd_calc / total_bi_thuc_calc) if total_bi_thuc_calc > 0 else 1.35
+
+    def resolve_staff_kfactor(cat_name):
+        if not cat_name:
+            return default_kfactor
+        c = str(cat_name).lower().strip()
+        c = re.sub(r"^nnh\s+", "", c).strip()
+        if c in bi_kfactor_map:
+            return bi_kfactor_map[c]
+
+        if re.search(r"tivi|loa|dàn máy|soundbar|amply", c):
+            if 'điện tử' in bi_kfactor_map: return bi_kfactor_map['điện tử']
+        if re.search(r"máy giặt|máy sấy|rửa chén", c):
+            if 'máy giặt, sấy' in bi_kfactor_map: return bi_kfactor_map['máy giặt, sấy']
+        if re.search(r"tủ lạnh|tủ đông|tủ mát", c):
+            if 'tủ lạnh, đông, mát' in bi_kfactor_map: return bi_kfactor_map['tủ lạnh, đông, mát']
+        if re.search(r"máy lạnh|nước nóng|điều hòa", c):
+            if 'máy lạnh, nước nóng' in bi_kfactor_map: return bi_kfactor_map['máy lạnh, nước nóng']
+        if re.search(r"apple|phụ kiện tiện ích", c):
+            if 'phụ kiện tiện ích' in bi_kfactor_map: return bi_kfactor_map['phụ kiện tiện ích']
+        if re.search(r"trang trí", c):
+            if 'phụ kiện trang trí' in bi_kfactor_map: return bi_kfactor_map['phụ kiện trang trí']
+        if re.search(r"khung treo|giá đỡ", c):
+            if 'phụ kiện lắp đặt' in bi_kfactor_map: return bi_kfactor_map['phụ kiện lắp đặt']
+        if re.search(r"gia dụng lắp đặt", c):
+            if 'gia dụng lắp đặt' in bi_kfactor_map: return bi_kfactor_map['gia dụng lắp đặt']
+        if re.search(r"điện gia dụng", c):
+            if 'điện gia dụng' in bi_kfactor_map: return bi_kfactor_map['điện gia dụng']
+        if re.search(r"laptop", c):
+            if 'laptop' in bi_kfactor_map: return bi_kfactor_map['laptop']
+        if re.search(r"điện thoại", c):
+            if 'điện thoại' in bi_kfactor_map: return bi_kfactor_map['điện thoại']
+        if re.search(r"tablet", c):
+            if 'tablet' in bi_kfactor_map: return bi_kfactor_map['tablet']
+        if re.search(r"wearable|đồng hồ", c):
+            if 'wearable' in bi_kfactor_map: return bi_kfactor_map['wearable']
+        if re.search(r"it\b|chuột|bàn phím", c):
+            if 'it' in bi_kfactor_map: return bi_kfactor_map['it']
+        if re.search(r"software", c):
+            if 'software' in bi_kfactor_map: return bi_kfactor_map['software']
+        if re.search(r"bảo hành|bảo dưỡng", c) or c == 'n/a':
+            if 'dịch vụ bảo hành, bảo dưỡng điện máy xanh' in bi_kfactor_map: return bi_kfactor_map['dịch vụ bảo hành, bảo dưỡng điện máy xanh']
+        if re.search(r"dịch vụ", c):
+            if 'dịch vụ' in bi_kfactor_map: return bi_kfactor_map['dịch vụ']
+
+        for k, v in bi_kfactor_map.items():
+            if k in c or c in k:
+                return v
+        return default_kfactor
+
+    # Gom nhóm chi tiết thực bán theo nhân viên từ Data_Realtime_NV_NganhHang
+    staff_realtime_agg = {}
+    if data_rt_nv_detail and isinstance(data_rt_nv_detail, list):
         for d_row in data_rt_nv_detail:
             m_id = str(get_key_val(d_row, "Mã NV", "ma_nv", "user", default="")).strip()
             store_group = str(get_key_val(d_row, "STOREGROUPNAME", default="")).strip()
@@ -2590,31 +2643,45 @@ def build_realtime_flex(detail_limit=None):
             sl_val = parse_number(get_key_val(d_row, "Số Lượng", "so_luong", default=0))
             raw_rev = parse_number(get_key_val(d_row, "Doanh Thu Thực", "Doanh Thu", "Doanh thu", "doanh_thu_thuc", default=0))
             rev_val = raw_rev / 1000000.0 if abs(raw_rev) >= 1000000 else raw_rev
+            nganh_hang = str(get_key_val(d_row, "Ngành Hàng", "SALEGROUPNAME", "nganh_hang", default="")).strip()
+            k_fact = resolve_staff_kfactor(nganh_hang)
+            rev_qd = rev_val * k_fact
 
-            if m_id not in detail_grouped:
-                detail_grouped[m_id] = {"mã nv": m_id, "tên nv": s_name, "số lượng": 0, "doanh thu quy đổi": 0.0}
-            detail_grouped[m_id]["số lượng"] += sl_val
-            detail_grouped[m_id]["doanh thu quy đổi"] += rev_val
-            if not detail_grouped[m_id]["tên nv"] and s_name:
-                detail_grouped[m_id]["tên nv"] = s_name
-        source_nv_rows = list(detail_grouped.values())
+            if m_id not in staff_realtime_agg:
+                staff_realtime_agg[m_id] = {
+                    "mã nv": m_id,
+                    "tên nv": s_name,
+                    "số lượng": 0,
+                    "doanh thu thực": 0.0,
+                    "doanh thu quy đổi": 0.0
+                }
+            if not staff_realtime_agg[m_id]["tên nv"] and s_name:
+                staff_realtime_agg[m_id]["tên nv"] = s_name
+            staff_realtime_agg[m_id]["số lượng"] += sl_val
+            staff_realtime_agg[m_id]["doanh thu thực"] += rev_val
+            staff_realtime_agg[m_id]["doanh thu quy đổi"] += rev_qd
+
+    # Ưu tiên số 1: Lấy chuẩn xác từ chi tiết từng đơn hàng realtime trong ngày (Fail-safe chốt chặn an toàn)
+    has_rt_detail = len(staff_realtime_agg) > 0
+
+    # Kiểm tra xem Data_Realtime_NV có bị lẫn số lũy kế cả tháng (Data_NV_BI) không
+    is_cum_data = False
+    if data_rt_nv and isinstance(data_rt_nv, list) and len(data_rt_nv) > 0:
+        sample_first = data_rt_nv[0]
+        if sample_first.get("numday_cum") is not None or sample_first.get("cum_as_of_date_key") is not None:
+            is_cum_data = True
+        else:
+            total_check_dt = sum(parse_number(get_key_val(r, "doanh thu quy đổi", "revenue_kfactor", "dt quy đổi", "Doanh thu Quy đổi", default=0)) for r in data_rt_nv[:5])
+            if abs(total_check_dt) >= 1000000:
+                total_check_dt /= 1000000.0
+            if rt_total > 0 and total_check_dt > (rt_total * 2.5):
+                is_cum_data = True
+
+    source_nv_rows = []
+    if has_rt_detail:
+        source_nv_rows = list(staff_realtime_agg.values())
     elif not is_cum_data and data_rt_nv:
         source_nv_rows = data_rt_nv
-    elif data_rt_nv_detail:
-        detail_grouped = {}
-        for d_row in data_rt_nv_detail:
-            m_id = str(get_key_val(d_row, "Mã NV", "ma_nv", "user", default="")).strip()
-            if not m_id or m_id.lower() == "online" or m_id == "18001060":
-                continue
-            s_name = str(get_key_val(d_row, "Tên Nhân Viên", "Tên NV", "ten_nv", default="")).strip()
-            sl_val = parse_number(get_key_val(d_row, "Số Lượng", "so_luong", default=0))
-            raw_rev = parse_number(get_key_val(d_row, "Doanh Thu Thực", "Doanh Thu", "Doanh thu", "doanh_thu_thuc", default=0))
-            rev_val = raw_rev / 1000000.0 if abs(raw_rev) >= 1000000 else raw_rev
-            if m_id not in detail_grouped:
-                detail_grouped[m_id] = {"mã nv": m_id, "tên nv": s_name, "số lượng": 0, "doanh thu quy đổi": 0.0}
-            detail_grouped[m_id]["số lượng"] += sl_val
-            detail_grouped[m_id]["doanh thu quy đổi"] += rev_val
-        source_nv_rows = list(detail_grouped.values())
 
     parsed_nv_rt = []
     if source_nv_rows and isinstance(source_nv_rows, list) and len(source_nv_rows) > 0:
@@ -2623,18 +2690,27 @@ def build_realtime_flex(detail_limit=None):
             if not m_nv or m_nv.lower() == "online" or m_nv == "18001060":
                 continue
             t_nv = get_key_val(row, "tên nhân viên", "tên nv", "ten_nv", "rowname", "employeeName", default="") or ""
-            
+
             raw_dt = parse_number(get_key_val(row, "doanh thu quy đổi", "revenue_kfactor", "dt quy đổi", "Doanh thu Quy đổi", default=0))
             if abs(raw_dt) >= 1000000:
                 dt_nv = raw_dt / 1000000.0
             else:
                 dt_nv = raw_dt
-                
+
+            raw_thuc = parse_number(get_key_val(row, "doanh thu thực", "doanh thu", "revenue", default=0))
+            if abs(raw_thuc) >= 1000000:
+                dt_thuc_nv = raw_thuc / 1000000.0
+            else:
+                dt_thuc_nv = raw_thuc
+            if dt_thuc_nv <= 0:
+                dt_thuc_nv = dt_nv
+
             sl_nv = parse_number(get_key_val(row, "số lượng", "soluong", "quantity", "quantity_RT", default=0))
-            
-            # Lệnh RT1: Chỉ ẩn những nhân viên hoàn toàn không phát sinh số (bằng 0), doanh thu âm (do trả hàng) vẫn hiển thị
+
+            # Lệnh RT1: Ẩn những nhân viên hoàn toàn không phát sinh số (bằng 0), doanh thu âm (do trả hàng) vẫn hiển thị
             if dt_nv == 0 and sl_nv == 0:
                 continue
+
             # Chỉ hiển thị nhân viên được khai báo ở tab config, ẩn nhân viên khác
             ratio = 0.0
             if 'user_map' in locals() and user_map:
@@ -2644,28 +2720,29 @@ def build_realtime_flex(detail_limit=None):
                     ratio = user_map[m_nv.upper()]
                 else:
                     continue
-            
+
             target_nv = target_today * ratio
-            
+
             clean_name = t_nv.strip()
             if " - " in clean_name:
                 clean_name = clean_name.split(" - ", 1)[1].strip()
             clean_name = clean_name.lstrip("0123456789 -").strip()
             last_name = clean_name.split()[-1] if clean_name else ""
             disp_name = f"{last_name} - {m_nv}" if last_name else (f"{clean_name} - {m_nv}" if clean_name else m_nv)
-            
+
             ht_nv = (dt_nv / target_nv) if target_nv > 0 else (1.0 if dt_nv > 0 else 0.0)
-            
+
             parsed_nv_rt.append({
                 "ma_nv": m_nv,
                 "clean_name_lower": clean_name.lower().strip() if clean_name else "",
-                "name": disp_name, 
-                "sl": sl_nv, 
-                "dt": dt_nv, 
-                "target": target_nv, 
+                "name": disp_name,
+                "sl": sl_nv,
+                "dt": dt_nv,
+                "dt_thuc": dt_thuc_nv,
+                "target": target_nv,
                 "ht": ht_nv
             })
-        
+
         parsed_nv_rt.sort(key=lambda x: x["dt"], reverse=True)
 
         if parsed_nv_rt:
@@ -2681,13 +2758,10 @@ def build_realtime_flex(detail_limit=None):
             rank_icons = ["🥇", "🥈", "🥉"]
             for idx, item in enumerate(parsed_nv_rt):
                 rank_str = rank_icons[idx] if idx < 3 else f"{idx+1}."
-                
+
                 sl_str = fmt_num(item["sl"])
-                if abs(item['dt']) < 1.0 and item['dt'] != 0:
-                    dt_tr_str = f"{item['dt']:.1f}"
-                else:
-                    dt_tr_str = f"{item['dt']:.0f}"
-                tg_tr_str = f"{item['target']:.0f}"
+                dt_tr_str = f"{item['dt']:.1f}".rstrip('0').rstrip('.') if item['dt'] == int(item['dt']) else f"{item['dt']:.1f}"
+                tg_tr_str = f"{item['target']:.1f}".rstrip('0').rstrip('.') if item['target'] == int(item['target']) else f"{item['target']:.1f}"
 
                 # Còn lại
                 con_lai = item['target'] - item['dt']
@@ -2695,24 +2769,50 @@ def build_realtime_flex(detail_limit=None):
                     con_lai_str = "Đạt"
                     con_color = "#059669"
                 else:
-                    con_lai_str = f"{max(0, con_lai):.0f}"
+                    val_cl = max(0, con_lai)
+                    con_lai_str = f"{val_cl:.1f}".rstrip('0').rstrip('.') if val_cl == int(val_cl) else f"{val_cl:.1f}"
                     con_color = "#ef4444"
 
-                ht_str = f"{item['ht']*100:.0f}%"
+                ht_str = f"{item['ht']*100:.1f}%".rstrip('0').rstrip('.') if (item['ht']*100) == int(item['ht']*100) else f"{item['ht']*100:.1f}%"
 
                 row_vals = [rank_str, item["name"], sl_str, dt_tr_str, tg_tr_str, con_lai_str, ht_str]
                 row_colors = [
-                    "#d97706" if idx < 3 else "#64748b", 
-                    "#0f172a", 
-                    "#475569", 
-                    "#ef4444" if item["dt"] < 0 else "#059669", 
-                    "#475569", 
-                    con_color, 
+                    "#d97706" if idx < 3 else "#64748b",
+                    "#0f172a",
+                    "#475569",
+                    "#ef4444" if item["dt"] < 0 else "#059669",
+                    "#475569",
+                    con_color,
                     get_color_class(item["ht"])
                 ]
                 nv_card_contents.append(make_table_row(row_vals, nv_weights, nv_aligns, row_colors, bold=(idx < 3)))
                 if idx < len(parsed_nv_rt) - 1:
                     nv_card_contents.append({"type": "separator", "color": "#f1f5f9", "margin": "xs"})
+
+            # Thêm dòng TỔNG ở cuối bảng Thứ Hạng Doanh Thu Nhân Viên (Đồng bộ chuẩn Ảnh 2)
+            tot_nv_sl = sum(it["sl"] for it in parsed_nv_rt)
+            tot_nv_dt = sum(it["dt"] for it in parsed_nv_rt)
+            tot_nv_tg = sum(it["target"] for it in parsed_nv_rt)
+            tot_nv_cl = max(0, tot_nv_tg - tot_nv_dt)
+            tot_nv_ht = (tot_nv_dt / tot_nv_tg) if tot_nv_tg > 0 else 0.0
+
+            tot_dt_str = f"{tot_nv_dt:.1f}".rstrip('0').rstrip('.') if tot_nv_dt == int(tot_nv_dt) else f"{tot_nv_dt:.1f}"
+            tot_tg_str = f"{tot_nv_tg:.1f}".rstrip('0').rstrip('.') if tot_nv_tg == int(tot_nv_tg) else f"{tot_nv_tg:.1f}"
+            tot_cl_str = "Đạt" if tot_nv_dt >= tot_nv_tg else (f"{tot_nv_cl:.1f}".rstrip('0').rstrip('.') if tot_nv_cl == int(tot_nv_cl) else f"{tot_nv_cl:.1f}")
+            tot_ht_str = f"{tot_nv_ht*100:.1f}%".rstrip('0').rstrip('.') if (tot_nv_ht*100) == int(tot_nv_ht*100) else f"{tot_nv_ht*100:.1f}%"
+
+            nv_card_contents.append({"type": "separator", "color": "#cbd5e1", "margin": "xs"})
+            tot_nv_row_vals = ["⭐", "TỔNG", fmt_num(tot_nv_sl), tot_dt_str, tot_tg_str, tot_cl_str, tot_ht_str]
+            tot_nv_row_colors = [
+                "#d97706",
+                "#0f172a",
+                "#0f172a",
+                "#0284c7",
+                "#475569",
+                "#059669" if tot_nv_dt >= tot_nv_tg else "#ef4444",
+                get_color_class(tot_nv_ht)
+            ]
+            nv_card_contents.append(make_table_row(tot_nv_row_vals, nv_weights, nv_aligns, tot_nv_row_colors, bold=True, bg_color="#f8fafc"))
 
             body_contents_rt1.append({
                 "type": "box",
@@ -2726,29 +2826,30 @@ def build_realtime_flex(detail_limit=None):
                 "contents": nv_card_contents
             })
 
-    # Revenue Table Container Card
+    # Revenue Table Container Card (Bảng Chi Tiết Doanh Thu Hôm Nay - Tối ưu weights và bật wrap tránh che tên ngành hàng)
     table_card_contents = [
         {"type": "text", "text": "⚡ CHI TIẾT DOANH THU HÔM NAY", "size": "xxs", "color": "#0284c7", "weight": "bold", "margin": "xs"}
     ]
     headers = ["STT", "Ngành hàng", "SL", "DTQĐ", "Target", "%HT"]
-    weights = [1, 3, 1, 2, 2, 2]
+    weights = [1, 5, 1, 2, 2, 2]
     aligns = ["start", "start", "center", "center", "center", "end"]
+    wraps_bi = [False, True, False, False, False, False]
     table_card_contents.append(make_table_header(headers, weights, aligns, bg_color="#0284c7"))
     table_card_contents.append({"type": "separator", "color": "#cbd5e1", "margin": "xs"})
-    
+
     for idx, b in enumerate(parsed_rt_bi):
         ty_trong_rt = (b["dt"] / rt_total * 100) if rt_total > 0 else 0.0
         vals = [idx+1, f"{b['name']} ({ty_trong_rt:.0f}%)", fmt_num(b["sl"]), fmt_num(b["dt"]), fmt_num(b["tg"]), f"{b['ht']*100:.0f}%"]
         colors = ["#64748b", "#0f172a", "#0f172a", "#ef4444" if b["dt"] < 0 else "#0284c7", "#475569", get_color_class(b["ht"])]
-        table_card_contents.append(make_table_row(vals, weights, aligns, colors))
+        table_card_contents.append(make_table_row(vals, weights, aligns, colors, wraps=wraps_bi))
         if idx < len(parsed_rt_bi) - 1:
             table_card_contents.append({"type": "separator", "color": "#f1f5f9", "margin": "xs"})
-        
+
     tot_sl = sum(x["sl"] for x in parsed_rt_bi)
     totalHTCol2 = rt_total / rt_tTarget if rt_tTarget > 0 else 0.0
     tot_vals = ["⭐", "TỔNG CỘNG", fmt_num(tot_sl), fmt_num(rt_total), fmt_num(rt_tTarget), f"{totalHTCol2*100:.0f}%"]
     tot_colors = ["#ffffff", "#ffffff", "#ffffff", "#ffffff", "#ffffff", "#ffffff"]
-    table_card_contents.append(make_table_row(tot_vals, weights, aligns, tot_colors, bold=True, bg_color="#f59e0b"))
+    table_card_contents.append(make_table_row(tot_vals, weights, aligns, tot_colors, bold=True, bg_color="#f59e0b", wraps=wraps_bi))
 
     body_contents_rt1.append({
         "type": "box",
