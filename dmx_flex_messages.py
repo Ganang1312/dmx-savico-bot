@@ -2386,7 +2386,7 @@ def build_realtime_flex(detail_limit=None):
     overview_contents = [
         {
             "type": "text",
-            "text": f"🔥 Với DT hôm nay đạt 🚀 {fmt_num(rt_total)} TR, LK siêu thị đạt 💰 {fmt_num(tongDTHienTai)} TR. DK hết tháng về đích 🎯 {fmt_num(duKienThang)} TR ({ptDuKienThang:.1f}%).",
+            "text": f"🔥 Với DT hôm nay đạt 🚀 {fmt_num(rt_total)} TR, LK siêu thị đạt 💰 {fmt_num(tongDTHienTai)} TR. DK hết tháng về đích 🎯 {fmt_num(duKienThang)} TR ({round(ptDuKienThang)}%).",
             "size": "xxs",
             "color": "#1e40af",
             "weight": "bold",
@@ -2768,8 +2768,8 @@ def build_realtime_flex(detail_limit=None):
                 rank_str = rank_icons[idx] if idx < 3 else f"{idx+1}."
 
                 sl_str = fmt_num(item["sl"])
-                dt_tr_str = f"{item['dt']:.1f}".rstrip('0').rstrip('.') if item['dt'] == int(item['dt']) else f"{item['dt']:.1f}"
-                tg_tr_str = f"{item['target']:.1f}".rstrip('0').rstrip('.') if item['target'] == int(item['target']) else f"{item['target']:.1f}"
+                dt_tr_str = fmt_num(item["dt"])
+                tg_tr_str = fmt_num(item["target"])
 
                 # Còn lại
                 con_lai = item['target'] - item['dt']
@@ -2778,10 +2778,10 @@ def build_realtime_flex(detail_limit=None):
                     con_color = "#059669"
                 else:
                     val_cl = max(0, con_lai)
-                    con_lai_str = f"{val_cl:.1f}".rstrip('0').rstrip('.') if val_cl == int(val_cl) else f"{val_cl:.1f}"
+                    con_lai_str = fmt_num(val_cl)
                     con_color = "#ef4444"
 
-                ht_str = f"{item['ht']*100:.1f}%".rstrip('0').rstrip('.') if (item['ht']*100) == int(item['ht']*100) else f"{item['ht']*100:.1f}%"
+                ht_str = f"{round(item['ht']*100)}%"
 
                 row_vals = [rank_str, item["name"], sl_str, dt_tr_str, tg_tr_str, con_lai_str, ht_str]
                 row_colors = [
@@ -2804,10 +2804,10 @@ def build_realtime_flex(detail_limit=None):
             tot_nv_cl = max(0, tot_nv_tg - tot_nv_dt)
             tot_nv_ht = (tot_nv_dt / tot_nv_tg) if tot_nv_tg > 0 else 0.0
 
-            tot_dt_str = f"{tot_nv_dt:.1f}".rstrip('0').rstrip('.') if tot_nv_dt == int(tot_nv_dt) else f"{tot_nv_dt:.1f}"
-            tot_tg_str = f"{tot_nv_tg:.1f}".rstrip('0').rstrip('.') if tot_nv_tg == int(tot_nv_tg) else f"{tot_nv_tg:.1f}"
-            tot_cl_str = "Đạt" if tot_nv_dt >= tot_nv_tg else (f"{tot_nv_cl:.1f}".rstrip('0').rstrip('.') if tot_nv_cl == int(tot_nv_cl) else f"{tot_nv_cl:.1f}")
-            tot_ht_str = f"{tot_nv_ht*100:.1f}%".rstrip('0').rstrip('.') if (tot_nv_ht*100) == int(tot_nv_ht*100) else f"{tot_nv_ht*100:.1f}%"
+            tot_dt_str = fmt_num(tot_nv_dt)
+            tot_tg_str = fmt_num(tot_nv_tg)
+            tot_cl_str = "Đạt" if tot_nv_dt >= tot_nv_tg else fmt_num(tot_nv_cl)
+            tot_ht_str = f"{round(tot_nv_ht*100)}%"
 
             nv_card_contents.append({"type": "separator", "color": "#cbd5e1", "margin": "xs"})
             tot_nv_row_vals = ["⭐", "TỔNG", fmt_num(tot_nv_sl), tot_dt_str, tot_tg_str, tot_cl_str, tot_ht_str]
@@ -3156,12 +3156,12 @@ def build_realtime_flex(detail_limit=None):
                 con_lai_text = "Chưa có MT"
                 con_color = "#94a3b8"
             else:
-                con_lai_text = f"Còn: {max(0, con_lai):.1f} Tr".replace(".", ",")
+                con_lai_text = f"Còn: {fmt_num(max(0, con_lai))} Tr"
                 con_color = "#ef4444"
 
-            dt_str = f"{item['dt']:.1f}".replace(".", ",")
-            tg_str = f"{item['target']:.1f}".replace(".", ",")
-            ht_pct_str = f"{item['ht']*100:.1f}%".replace(".", ",")
+            dt_str = fmt_num(item['dt'])
+            tg_str = fmt_num(item['target'])
+            ht_pct_str = f"{round(item['ht']*100)}%"
             ht_color = "#16a34a" if item["ht"] >= 1.0 else ("#ef4444" if item["ht"] < 0 else "#ea580c")
 
             # Chi tiết ngành hàng của nhân viên này
@@ -3978,16 +3978,16 @@ def build_custom_groups_flex(detail_limit=None):
         rank_icons = ["🥇", "🥈", "🥉"]
         for idx_s, s in enumerate(staff_list):
             rank_str = rank_icons[idx_s] if idx_s < 3 else f"{idx_s+1}."
-            cl_str = "Đạt" if s["cl"] <= 0 and s["mt"] > 0 else f"{max(0, s['cl']):.1f}"
+            cl_str = "Đạt" if s["cl"] <= 0 and s["mt"] > 0 else fmt_num(max(0, s['cl']))
             cl_col = "#059669" if s["cl"] <= 0 and s["mt"] > 0 else "#ef4444"
 
             row_vals = [
                 rank_str,
                 s["name"],
-                f"{s['mt']:.1f}",
-                f"{s['hn']:.2f}",
+                fmt_num(s['mt']),
+                fmt_num(s['hn']),
                 cl_str,
-                f"{s['pct']:.0f}%"
+                f"{round(s['pct'])}%"
             ]
             row_colors = [
                 "#d97706" if idx_s < 3 else "#64748b",
@@ -4003,8 +4003,8 @@ def build_custom_groups_flex(detail_limit=None):
 
         # Dòng TỔNG footer của bảng
         table_rows_contents.append({"type": "separator", "color": "#cbd5e1", "margin": "xs"})
-        tot_cl_str = "Đạt" if tot_staff_cl <= 0 and tot_staff_mt > 0 else f"{max(0, tot_staff_cl):.1f}"
-        tot_vals = ["⭐", "TỔNG", f"{tot_staff_mt:.1f}", f"{tot_staff_hn:.2f}", tot_cl_str, f"{tot_staff_pct:.0f}%"]
+        tot_cl_str = "Đạt" if tot_staff_cl <= 0 and tot_staff_mt > 0 else fmt_num(max(0, tot_staff_cl))
+        tot_vals = ["⭐", "TỔNG", fmt_num(tot_staff_mt), fmt_num(tot_staff_hn), tot_cl_str, f"{round(tot_staff_pct)}%"]
         tot_colors = ["#d97706", "#0f172a", "#475569", "#059669", "#059669" if tot_staff_cl <= 0 else "#ef4444", get_color_class(tot_staff_pct / 100.0)]
         table_rows_contents.append(make_table_row(tot_vals, table_weights, table_aligns, tot_colors, bold=True, bg_color="#f8fafc"))
 
