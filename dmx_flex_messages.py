@@ -2083,9 +2083,9 @@ RT_DETAIL_FALLBACKS = (None, 8, 6, 4, 3, 2, 1, 0)
 
 
 def build_realtime_messages(max_messages=LINE_MAX_MESSAGES):
-    """Dựng báo cáo realtime RT1 tinh gọn (Carousel 2 Thẻ: Tổng Quan Siêu Thị & Thi Đua).
-    Đã tích hợp nút bấm '👑 Xem Chi Tiết Doanh Thu NV' để ẩn chi tiết vào nút, 
-    chỉ khi người dùng bấm vào mới kích hoạt gửi chi tiết.
+    """Dựng báo cáo realtime RT1 tinh gọn tích hợp (Carousel 4 Thẻ: Tổng Quan Siêu Thị, Thi Đua & 2 Nhóm Ngành Hàng Gộp).
+    Đã tích hợp bảng nhóm gộp ở RT2 vào RT1 thành 4 thẻ trong cùng 1 carousel lướt ngang.
+    Đã tích hợp nút bấm '👑 Xem Chi Tiết Doanh Thu NV' trên Thẻ 1 để xem chi tiết theo nhân viên.
     """
     bubbles = build_realtime_flex(detail_limit=0)
     if not isinstance(bubbles, list):
@@ -2094,15 +2094,35 @@ def build_realtime_messages(max_messages=LINE_MAX_MESSAGES):
         return None, {"error": "Không có dữ liệu realtime"}
 
     summary_bubbles = bubbles[:2]
-    if len(summary_bubbles) == 1:
-        msg_contents = summary_bubbles[0]
-    else:
-        msg_contents = {"type": "carousel", "contents": summary_bubbles}
 
-    return [{
-        "alt_text": "⚡ Báo Cáo Realtime Siêu Thị (RT1)",
-        "contents": msg_contents
-    }], {"rt_parts": 1, "nv_parts": 0, "mode": "summary_button"}
+    # Tích hợp các thẻ Nhóm Ngành Hàng Gộp (trước đây ở lệnh RT2) vào lệnh RT1
+    try:
+        cg_bubbles = build_custom_groups_flex()
+        if cg_bubbles and isinstance(cg_bubbles, list):
+            summary_bubbles.extend(cg_bubbles)
+    except Exception as e:
+        print(f"Lỗi tích hợp nhóm gộp RT2 vào RT1: {e}")
+
+    # Đóng gói an toàn bằng greedy_carousels (đảm bảo <= 50KB mỗi Carousel và <= 12 thẻ)
+    parts = greedy_carousels(summary_bubbles, max_items=LINE_MAX_MESSAGES, max_bytes=FLEX_CAROUSEL_MAX)
+    if not parts:
+        parts = [summary_bubbles]
+
+    messages = []
+    total_parts = len(parts)
+    for i, p in enumerate(parts):
+        tag = "" if total_parts == 1 else f" ({i+1}/{total_parts})"
+        msg_contents = p[0] if len(p) == 1 else {"type": "carousel", "contents": p}
+        messages.append({
+            "alt_text": f"⚡ Báo Cáo Realtime Siêu Thị & Nhóm Gộp (RT1){tag}",
+            "contents": msg_contents
+        })
+
+    return messages, {
+        "rt_parts": len(parts),
+        "total_bubbles": len(summary_bubbles),
+        "mode": "rt1_with_custom_groups_4_cards"
+    }
 
 
 def build_realtime_staff_detail_messages(max_messages=LINE_MAX_MESSAGES, detail_fallbacks=RT_DETAIL_FALLBACKS):
@@ -3474,9 +3494,8 @@ def build_help_commands_flex():
     commands_data = [
         # --- BÁO CÁO DOANH THU & THI ĐUA ---
         {"cmd": "LK1", "desc": "Báo cáo Lũy kế Doanh thu & Ngành hàng thi đua tháng (Flex P.1 & P.2)", "color": "#1e40af"},
-        {"cmd": "RT1", "desc": "Báo cáo Realtime Doanh thu & Thứ hạng NV (tinh gọn, kèm nút bấm xem chi tiết)", "color": "#0284c7"},
+        {"cmd": "RT1", "desc": "Báo cáo Realtime 4 Thẻ: Doanh thu Siêu thị, Thi đua & Nhóm ngành gộp (Phụ kiện, Bảo hiểm...)", "color": "#0284c7"},
         {"cmd": "RTNV", "desc": "Xem chi tiết ngành hàng thực bán của từng nhân viên (kích hoạt từ nút RT1)", "color": "#0284c7"},
-        {"cmd": "RT2", "desc": "Báo cáo Realtime Theo dõi Nhóm Ngành Hàng Gộp (Phụ kiện, Bảo hiểm thợ...)", "color": "#0284c7"},
         {"cmd": "NV0", "desc": "Bảng Xếp Hạng Doanh Thu NV Pro + Carousel Top 8 NV (#1 - #8)", "color": "#0f766e"},
         {"cmd": "NV1", "desc": "Hiển thị tiếp danh sách Thẻ KPI các Nhân viên còn lại (#9 trở đi)", "color": "#0f766e"},
         {"cmd": "NV <mã>", "desc": "Xem riêng 1 Thẻ KPI Nhân viên (VD: nv 61169 hoặc nv Dương)", "color": "#d97706"},
@@ -3966,6 +3985,9 @@ def build_custom_groups_flex(detail_limit=None):
         }
 
         # 4. Bảng Nhân Viên (6 Cột, BỎ ĐÁNH GIÁ, NỀN TRẮNG HOÀN TOÀN)
+        # Chuẩn logic RT1: Ẩn nhân viên hoàn toàn không phát sinh số hôm nay (hn == 0) để bảng tinh gọn và không vượt giới hạn dung lượng LINE
+        active_staff_list = [s for s in staff_list if s["hn"] != 0]
+
         table_weights = [1, 4, 2, 2, 2, 2]
         table_aligns = ["center", "start", "end", "end", "end", "end"]
         
@@ -3975,31 +3997,41 @@ def build_custom_groups_flex(detail_limit=None):
             {"type": "separator", "color": "#cbd5e1", "margin": "xs"}
         ]
 
-        rank_icons = ["🥇", "🥈", "🥉"]
-        for idx_s, s in enumerate(staff_list):
-            rank_str = rank_icons[idx_s] if idx_s < 3 else f"{idx_s+1}."
-            cl_str = "Đạt" if s["cl"] <= 0 and s["mt"] > 0 else fmt_num(max(0, s['cl']))
-            cl_col = "#059669" if s["cl"] <= 0 and s["mt"] > 0 else "#ef4444"
+        if active_staff_list:
+            rank_icons = ["🥇", "🥈", "🥉"]
+            for idx_s, s in enumerate(active_staff_list):
+                rank_str = rank_icons[idx_s] if idx_s < 3 else f"{idx_s+1}."
+                cl_str = "Đạt" if s["cl"] <= 0 and s["mt"] > 0 else fmt_num(max(0, s['cl']))
+                cl_col = "#059669" if s["cl"] <= 0 and s["mt"] > 0 else "#ef4444"
 
-            row_vals = [
-                rank_str,
-                s["name"],
-                fmt_num(s['mt']),
-                fmt_num(s['hn']),
-                cl_str,
-                f"{round(s['pct'])}%"
-            ]
-            row_colors = [
-                "#d97706" if idx_s < 3 else "#64748b",
-                "#0f172a",
-                "#64748b",
-                "#059669" if s["hn"] > 0 else "#64748b",
-                cl_col,
-                get_color_class(s["pct"] / 100.0)
-            ]
-            table_rows_contents.append(make_table_row(row_vals, table_weights, table_aligns, row_colors, bold=(idx_s < 3)))
-            if idx_s < len(staff_list) - 1:
-                table_rows_contents.append({"type": "separator", "color": "#f1f5f9", "margin": "xs"})
+                row_vals = [
+                    rank_str,
+                    s["name"],
+                    fmt_num(s['mt']),
+                    fmt_num(s['hn']),
+                    cl_str,
+                    f"{round(s['pct'])}%"
+                ]
+                row_colors = [
+                    "#d97706" if idx_s < 3 else "#64748b",
+                    "#0f172a",
+                    "#64748b",
+                    "#059669" if s["hn"] > 0 else "#64748b",
+                    cl_col,
+                    get_color_class(s["pct"] / 100.0)
+                ]
+                table_rows_contents.append(make_table_row(row_vals, table_weights, table_aligns, row_colors, bold=(idx_s < 3)))
+                if idx_s < len(active_staff_list) - 1:
+                    table_rows_contents.append({"type": "separator", "color": "#f1f5f9", "margin": "xs"})
+        else:
+            table_rows_contents.append({
+                "type": "text",
+                "text": "💤 Chưa có nhân viên phát sinh số hôm nay",
+                "size": "xxs",
+                "color": "#94a3b8",
+                "align": "center",
+                "margin": "sm"
+            })
 
         # Dòng TỔNG footer của bảng
         table_rows_contents.append({"type": "separator", "color": "#cbd5e1", "margin": "xs"})
