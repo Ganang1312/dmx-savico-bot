@@ -25,12 +25,13 @@ TASKS = {
         {'id': 'chieu_8', 'icon': '📸', 'name': 'Up hình máy cũ / trưng bày', 'time': '21:30'},
     ],
     'vs': [
-        {'id': 'vs_1', 'icon': '📸', 'name': '1. Cụm 14285', 'time': '10:00'},
+        {'id': 'vs_1', 'icon': '📸', 'name': '1. 396 NVC', 'time': '10:00'},
         {'id': 'vs_2', 'icon': '📸', 'name': '2. Cụm 5468', 'time': '10:00'},
         {'id': 'vs_3', 'icon': '📸', 'name': '3. Ngọc Lâm', 'time': '10:00'},
         {'id': 'vs_4', 'icon': '📸', 'name': '4. Ngọc Trì', 'time': '10:00'},
         {'id': 'vs_5', 'icon': '📸', 'name': '5. Ngô Gia Tự', 'time': '10:00'},
         {'id': 'vs_6', 'icon': '📸', 'name': '6. Savico', 'time': '10:00'},
+        {'id': 'vs_6', 'icon': '📸', 'name': '7. Ngọc Thụy', 'time': '10:00'},
     ]
 }
 
