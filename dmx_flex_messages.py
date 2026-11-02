@@ -117,17 +117,12 @@ def determine_is_sl(comp_type, nganh_clean, sl=0.0, dt=0.0, tg=0.0, config_obj=N
 def fmt_val_td(val, is_sl=False):
     """
     Format giá trị Thực hiện / Target cho bảng thi đua:
-    - Nếu là SL: hiển thị số nguyên
-    - Nếu là DT: nếu có số lẻ và < 100 thì giữ tối đa 2 chữ số thập phân (ví dụ 2.45, 19.5),
-      nếu là số nguyên hoặc >= 100 thì làm tròn định dạng hàng nghìn
+    Làm tròn số nguyên toàn bộ (không để số thập phân) để hiển thị gọn gàng trên mobile,
+    tránh bị dính chữ / tràn cột.
     """
     if val is None or val == '':
         return "0"
     num = parse_number(val)
-    if is_sl:
-        return f"{int(round(num)):,}"
-    if abs(num) < 100 and (num != int(num)):
-        return f"{num:.2f}".rstrip('0').rstrip('.')
     return f"{int(round(num)):,}"
 
 def shorten_name(name):
@@ -135,6 +130,8 @@ def shorten_name(name):
         return ""
     import re
     s = str(name).replace("NNH ", "").strip()
+    # Rút gọn tiền tố tháng như "T11 - ", "T10 - ", "T09- " để tên ngành hàng gọn gàng không bị chèn ép trên mobile
+    s = re.sub(r'^[Tt]\d{1,2}\s*-\s*', '', s)
     
     # Danh sách chuẩn hóa & viết tắt tên ngành hàng thi đua
     # Nguyên tắc: Cái nào quá dài thì viết tắt nhưng vẫn đảm bảo đọc hiểu 100%,
@@ -466,27 +463,49 @@ def build_luyke_flex():
         tTC += dtTC
         tDTGoc += dtGoc
 
-        raw_ck_val = get_key_val(b, "rev_kft_riserate_lastmonth", "+/- dtck", "+/- so với ck", "+/- dtck tháng (qđ)", "% tt", default=None)
-        dt_ck = 0.0
+        # Đầy đủ tất cả các trường tăng trưởng cùng kỳ / tháng trước từ sheet Data_BI
+        raw_ck_val = get_key_val(
+            b,
+            "+/- dtck tháng (qđ)", "+/- dtck tháng (qd)", "+/- dtck", "+/- dtck tháng",
+            "rev_kft_riserate_lastmonth", "tang_giam_ck", "+/- cùng kỳ", "+/- so với ck",
+            "+/- ck", "% tt", "%tt", "tăng trưởng", "tang truong", "tăng trưởng cùng kỳ",
+            default=None
+        )
+        dt_ck = parse_number(get_key_val(
+            b,
+            "DT Năm ngoái", "doanh thu năm ngoái", "dt năm ngoái", "năm ngoái", "nam ngoai",
+            "doanh thu nam ngoai", "dt nam ngoai", "doanh thu năm ngoái (cùng kỳ)",
+            "doanh thu nam ngoai (cung ky)", "cùng kỳ", "cung ky", "tháng trước", "dt tháng trước",
+            default=0.0
+        ))
+        tb3m = parse_number(get_key_val(
+            b,
+            "tb 3 tháng (qđ)", "tb 3 tháng (qd)", "tb 3 tháng", "avg3month_kfactor", "avg3month", "tb3thang",
+            default=0.0
+        ))
+
         tang_giam_ck = 0.0
         if raw_ck_val is not None and str(raw_ck_val).strip() != "":
             tang_giam_ck = parse_growth_rate(raw_ck_val)
-            if (1 + tang_giam_ck / 100.0) != 0:
+            if dt > 0 and (1 + tang_giam_ck / 100.0) != 0 and tang_giam_ck != 0:
                 dt_ck = dt / (1 + tang_giam_ck / 100.0)
-        else:
-            dt_ck = parse_number(get_key_val(b, "DT Năm ngoái", "doanh thu năm ngoái", "dt năm ngoái", "năm ngoái", "nam ngoai", "doanh thu nam ngoai", "dt nam ngoai", "doanh thu năm ngoái (cùng kỳ)", "doanh thu nam ngoai (cung ky)", "cùng kỳ", "cung ky", "tháng trước", "dt tháng trước", default=0.0))
-            if dt_ck > 0:
-                tang_giam_ck = ((dt - dt_ck) / dt_ck) * 100.0
+        elif dt_ck > 0:
+            tang_giam_ck = ((dt - dt_ck) / dt_ck) * 100.0
+        elif tb3m > 0 and dt > 0:
+            dt_ck = tb3m
+            tang_giam_ck = ((dt - tb3m) / tb3m) * 100.0
 
-        tDT_CK_total += dt_ck
+        if dt_ck > 0:
+            tDT_CK_total += dt_ck
 
         diff_ck = 0.0
         if dt_ck > 0:
             diff_ck = dt - dt_ck
         elif tang_giam_ck != 0:
             diff_ck = dt * (tang_giam_ck / 100.0)
-        else:
+        elif tg > 0 and dt > 0:
             diff_ck = dt - tg
+            tang_giam_ck = ((dt - tg) / tg) * 100.0
 
         if dt > 0 or sl > 0:
             parsed_bi.append({
@@ -603,9 +622,15 @@ def build_luyke_flex():
         con_lai = max(0.0, tg - actual)
         mt_ngay_val = (con_lai / days_remaining) if days_remaining > 0 else 0.0
         if not is_sl:
-            mt_ngay_str = f"{mt_ngay_val:.1f} Tr" if mt_ngay_val > 0 else "0 Tr"
+            mt_round = int(round(mt_ngay_val))
+            if mt_round == 0 and mt_ngay_val > 0:
+                mt_round = 1
+            mt_ngay_str = f"{mt_round} Tr" if mt_ngay_val > 0 else "0 Tr"
         else:
-            mt_ngay_str = f"{int(round(mt_ngay_val))} SP" if mt_ngay_val >= 1 else (f"{mt_ngay_val:.1f} SP" if mt_ngay_val > 0 else "0 SP")
+            mt_round = int(round(mt_ngay_val))
+            if mt_round == 0 and mt_ngay_val > 0:
+                mt_round = 1
+            mt_ngay_str = f"{mt_round} SP" if mt_ngay_val > 0 else "0 SP"
 
         parsed_td.append({
             "name": shorten_name(nganh),
@@ -826,35 +851,37 @@ def build_luyke_flex():
     top_growth = sorted([x for x in parsed_bi if x.get("diff_ck", 0.0) > 0], key=lambda x: x.get("diff_ck", 0.0), reverse=True)[:6]
     top_decline = sorted([x for x in parsed_bi if x.get("diff_ck", 0.0) < 0], key=lambda x: x.get("diff_ck", 0.0))[:6]
 
-    # Section 1: Top Tăng Trưởng Mạnh (Tối đa 6 ngành)
-    growth_card_contents.append({
-        "type": "box",
-        "layout": "horizontal",
-        "backgroundColor": "#f0fdf4",
-        "paddingAll": "xs",
-        "cornerRadius": "xs",
-        "margin": "xs",
-        "contents": [
-            {"type": "text", "text": f"🚀 TOP TĂNG TRƯỞNG DẪN ĐẦU ({len(top_growth)})", "size": "xxs", "color": "#15803d", "weight": "bold"}
-        ]
-    })
-    growth_card_contents.append(make_table_header(headers2, weights2, aligns2, bg_color="#15803d"))
+    # Section 1: Top Tăng Trưởng Mạnh (Chỉ hiện khi có ngành tăng trưởng > 0)
+    if top_growth:
+        growth_card_contents.append({
+            "type": "box",
+            "layout": "horizontal",
+            "backgroundColor": "#f0fdf4",
+            "paddingAll": "xs",
+            "cornerRadius": "xs",
+            "margin": "xs",
+            "contents": [
+                {"type": "text", "text": f"🚀 TOP TĂNG TRƯỞNG DẪN ĐẦU ({len(top_growth)})", "size": "xxs", "color": "#15803d", "weight": "bold"}
+            ]
+        })
+        growth_card_contents.append(make_table_header(headers2, weights2, aligns2, bg_color="#15803d"))
 
-    for idx, b in enumerate(top_growth):
-        ty_trong = (b["dt"] / tDT * 100) if tDT > 0 else 0.0
-        diff_ck = b.get("diff_ck", 0.0)
-        pct_ck = b.get("tang_giam_ck", 0.0)
-        sign_str = "+" if diff_ck >= 0 else ""
-        pct_sign_str = "+" if pct_ck >= 0 else ""
-        diff_fmt = fmt_val_td(diff_ck, is_sl=False)
-        growth_text = f"▲ {pct_sign_str}{pct_ck:.1f}% ({sign_str}{diff_fmt} Tr)"
-        row2_vals = [idx + 1, b['name'], f"{ty_trong:.0f}%", growth_text]
-        row2_colors = ["#64748b", "#0f172a", "#0284c7", "#16a34a"]
-        growth_card_contents.append(make_table_row(row2_vals, weights2, aligns2, row2_colors))
+        for idx, b in enumerate(top_growth):
+            ty_trong = (b["dt"] / tDT * 100) if tDT > 0 else 0.0
+            diff_ck = b.get("diff_ck", 0.0)
+            pct_ck = b.get("tang_giam_ck", 0.0)
+            sign_str = "+" if diff_ck >= 0 else ""
+            pct_sign_str = "+" if pct_ck >= 0 else ""
+            diff_fmt = fmt_val_td(diff_ck, is_sl=False)
+            growth_text = f"▲ {pct_sign_str}{pct_ck:.1f}% ({sign_str}{diff_fmt} Tr)"
+            row2_vals = [idx + 1, b['name'], f"{ty_trong:.0f}%", growth_text]
+            row2_colors = ["#64748b", "#0f172a", "#0284c7", "#16a34a"]
+            growth_card_contents.append(make_table_row(row2_vals, weights2, aligns2, row2_colors))
 
     # Section 2: Top Giảm So Với Cùng Kỳ (Tối đa 6 ngành)
     if top_decline:
-        growth_card_contents.append({"type": "separator", "color": "#fecaca", "margin": "sm"})
+        if top_growth:
+            growth_card_contents.append({"type": "separator", "color": "#fecaca", "margin": "sm"})
         growth_card_contents.append({
             "type": "box",
             "layout": "horizontal",
@@ -878,8 +905,34 @@ def build_luyke_flex():
             row2_colors = ["#64748b", "#0f172a", "#0284c7", "#dc2626"]
             growth_card_contents.append(make_table_row(row2_vals, weights2, aligns2, row2_colors))
 
+    # Section 3: Trường hợp đầu tháng hoặc chưa có chênh lệch cùng kỳ (cả 2 top đều trống)
+    # Hiển thị Top ngành hàng theo tỷ trọng doanh thu để luôn có dữ liệu đầy đủ, không bị bảng trống
+    if not top_growth and not top_decline:
+        top_by_share = sorted(parsed_bi, key=lambda x: x["dt"], reverse=True)[:6]
+        headers_share = ["STT", "Ngành hàng", "Tỷ trọng", "Doanh thu (QĐ)"]
+        weights_share = [1, 4, 2, 4]
+        aligns_share = ["start", "start", "center", "end"]
+        growth_card_contents.append({
+            "type": "box",
+            "layout": "horizontal",
+            "backgroundColor": "#f0fdf4",
+            "paddingAll": "xs",
+            "cornerRadius": "xs",
+            "margin": "xs",
+            "contents": [
+                {"type": "text", "text": f"📊 TOP TỶ TRỌNG DOANH THU ({len(top_by_share)})", "size": "xxs", "color": "#15803d", "weight": "bold"}
+            ]
+        })
+        growth_card_contents.append(make_table_header(headers_share, weights_share, aligns_share, bg_color="#0f766e"))
+        for idx, b in enumerate(top_by_share):
+            ty_trong = (b["dt"] / tDT * 100) if tDT > 0 else 0.0
+            dt_str = f"{fmt_num(b['dt'])} Tr"
+            row2_vals = [idx + 1, b['name'], f"{ty_trong:.0f}%", dt_str]
+            row2_colors = ["#64748b", "#0f172a", "#0284c7", "#0f766e"]
+            growth_card_contents.append(make_table_row(row2_vals, weights_share, aligns_share, row2_colors))
+
     tDT_CK = tDT_CK_total if tDT_CK_total > 0 else sum(b.get("dt_ck", 0.0) for b in parsed_bi)
-    if tDT_CK > 0:
+    if tDT_CK > 0 and (tDT != tDT_CK):
         diff_total_ck = tDT - tDT_CK
         pct_total_ck = (diff_total_ck / tDT_CK * 100)
         sign_str = "+" if diff_total_ck >= 0 else ""
@@ -889,7 +942,8 @@ def build_luyke_flex():
             total_growth_str = f"▲ {pct_sign_str}{pct_total_ck:.1f}% ({sign_str}{total_diff_fmt} Tr)"
         else:
             total_growth_str = f"▼ {pct_total_ck:.1f}% (-{total_diff_fmt} Tr)"
-    else:
+        tot2_vals = ["⭐", "TỔNG CỘNG", "100%", total_growth_str]
+    elif tTG > 0 and tDT != tTG:
         diff_total_tg = tDT - tTG
         pct_total_tg = (diff_total_tg / tTG * 100) if tTG > 0 else 0.0
         sign_str = "+" if diff_total_tg >= 0 else ""
@@ -899,8 +953,10 @@ def build_luyke_flex():
             total_growth_str = f"▲ {pct_sign_str}{pct_total_tg:.1f}% ({sign_str}{total_diff_fmt} Tr)"
         else:
             total_growth_str = f"▼ {pct_total_tg:.1f}% (-{total_diff_fmt} Tr)"
+        tot2_vals = ["⭐", "TỔNG CỘNG", "100%", total_growth_str]
+    else:
+        tot2_vals = ["⭐", "TỔNG CỘNG", "100%", f"{fmt_num(tDT)} Tr"]
 
-    tot2_vals = ["⭐", "TỔNG CỘNG", "100%", total_growth_str]
     tot2_colors = ["#ffffff", "#ffffff", "#ffffff", "#ffffff"]
     growth_card_contents.append(make_table_row(tot2_vals, weights2, aligns2, tot2_colors, bold=True, bg_color="#0d9488"))
 
