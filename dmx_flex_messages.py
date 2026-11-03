@@ -458,15 +458,17 @@ def make_table_header(cols, weights, aligns=None, bg_color="#0284c7"):
         aligns = ["start"] * len(cols)
     contents = []
     for c, w, a in zip(cols, weights, aligns):
-        contents.append({
+        cell = {
             "type": "text",
             "text": c,
             "weight": "bold",
             "size": "xxs",
             "color": "#ffffff",
-            "flex": w,
-            "align": a
-        })
+            "flex": w
+        }
+        if a and a != "start":
+            cell["align"] = a
+        contents.append(cell)
     return {
         "type": "box",
         "layout": "horizontal",
@@ -497,9 +499,10 @@ def make_table_row(vals, weights, aligns=None, colors=None, bold=False, bg_color
             "type": "text",
             "text": str(v),
             "size": "xxs",
-            "color": c,
             "flex": w
         }
+        if c and c not in ("#0f172a", "#111111"):
+            item["color"] = c
         if a and a != "start":
             item["align"] = a
         if bold:
@@ -2246,9 +2249,11 @@ FLEX_CAROUSEL_MAX_ITEMS = 12
 
 
 def json_size(obj):
-    """Kích thước thật (byte UTF-8) của object khi serialize sang JSON."""
+    """Kích thước thật (byte UTF-8) của object khi serialize sang JSON (tính cả escape ASCII của SDK)."""
     try:
-        return len(json.dumps(obj, ensure_ascii=False).encode("utf-8"))
+        s_utf8 = len(json.dumps(obj, ensure_ascii=False).encode("utf-8"))
+        s_ascii = len(json.dumps(obj, ensure_ascii=True).encode("utf-8"))
+        return max(s_utf8, s_ascii)
     except Exception:
         return 0
 
@@ -3139,192 +3144,84 @@ def build_realtime_flex(detail_limit=None):
                     bar_pct = 6
                 bar_pct = max(6, min(100, bar_pct))
 
-                if idx < 3:
-                    rank_node = {
-                        "type": "text",
-                        "text": rank_icons[idx],
-                        "size": "sm",
-                        "flex": 0,
-                        "align": "center"
-                    }
-                else:
-                    rank_node = {
-                        "type": "box",
-                        "layout": "vertical",
-                        "width": "18px",
-                        "height": "18px",
-                        "backgroundColor": "#e0f2fe",
-                        "cornerRadius": "sm",
-                        "justifyContent": "center",
-                        "alignItems": "center",
-                        "flex": 0,
-                        "contents": [
-                            {"type": "text", "text": str(idx + 1), "size": "xxs", "weight": "bold", "color": "#0284c7", "align": "center"}
-                        ]
-                    }
+                rank_prefix = rank_icons[idx] if idx < 3 else f"{idx + 1}."
+                disp_short_name = f"{rank_prefix} {short_name_str}"
 
                 avatar_node = {
                     "type": "box",
                     "layout": "vertical",
-                    "width": "22px",
-                    "height": "22px",
+                    "width": "18px",
+                    "height": "18px",
                     "backgroundColor": avatar_col,
-                    "cornerRadius": "11px",
-                    "justifyContent": "center",
-                    "alignItems": "center",
-                    "margin": "xs",
-                    "flex": 0,
+                    "cornerRadius": "9px",
                     "contents": [
                         {"type": "text", "text": first_char, "size": "xxs", "weight": "bold", "color": "#ffffff", "align": "center"}
                     ]
                 }
 
                 name_col_contents = [
-                    {
-                        "type": "text",
-                        "text": disp_short_name,
-                        "size": "xxs",
-                        "weight": "bold",
-                        "color": "#0f172a",
-                        "maxLines": 1
-                    }
+                    {"type": "text", "text": disp_short_name, "size": "xxs", "weight": "bold"}
                 ]
                 if item.get("ma_nv"):
-                    name_col_contents.append({
-                        "type": "text",
-                        "text": str(item["ma_nv"]),
-                        "size": "xxs",
-                        "color": "#64748b",
-                        "maxLines": 1
-                    })
+                    name_col_contents.append({"type": "text", "text": str(item["ma_nv"]), "size": "xxs", "color": "#64748b"})
 
                 staff_row_box = {
                     "type": "box",
                     "layout": "horizontal",
                     "alignItems": "center",
                     "backgroundColor": "#ffffff",
-                    "borderColor": card_border_col,
-                    "borderWidth": "1px",
                     "cornerRadius": "md",
                     "paddingAll": "xs",
                     "margin": "xs",
                     "contents": [
+                        avatar_node,
                         {
                             "type": "box",
-                            "layout": "horizontal",
-                            "alignItems": "center",
-                            "width": "96px",
-                            "flex": 0,
-                            "contents": [
-                                rank_node,
-                                avatar_node,
-                                {
-                                    "type": "box",
-                                    "layout": "vertical",
-                                    "flex": 1,
-                                    "paddingStart": "xs",
-                                    "contents": name_col_contents
-                                }
-                            ]
+                            "layout": "vertical",
+                            "width": "62px",
+                            "margin": "xs",
+                            "contents": name_col_contents
                         },
                         {
                             "type": "box",
                             "layout": "vertical",
                             "flex": 1,
-                            "paddingStart": "xs",
+                            "margin": "xs",
                             "contents": [
                                 {
                                     "type": "box",
                                     "layout": "horizontal",
-                                    "alignItems": "center",
                                     "contents": [
-                                        {
-                                            "type": "text",
-                                            "size": "xxs",
-                                            "flex": 4,
-                                            "maxLines": 1,
-                                            "contents": [
-                                                {"type": "span", "text": f"🎯 {dt_tr_str}", "weight": "bold", "color": "#e11d48" if is_neg else "#0284c7"},
-                                                {"type": "span", "text": f"/{tg_tr_str}tr", "color": "#64748b"}
-                                            ]
-                                        },
-                                        {
-                                            "type": "text",
-                                            "text": f"⏳ {con_lai_str}",
-                                            "size": "xxs",
-                                            "weight": "bold",
-                                            "color": con_color,
-                                            "flex": 3,
-                                            "align": "center",
-                                            "maxLines": 1
-                                        },
-                                        {
-                                            "type": "text",
-                                            "text": f"🔥 {ht_str}",
-                                            "size": "xxs",
-                                            "weight": "bold",
-                                            "color": ht_color,
-                                            "flex": 3,
-                                            "align": "end",
-                                            "maxLines": 1
-                                        }
+                                        {"type": "text", "text": f"🎯{dt_tr_str}/{tg_tr_str}tr", "size": "xxs", "weight": "bold", "color": "#e11d48" if is_neg else "#0284c7", "flex": 5},
+                                        {"type": "text", "text": f"⏳{con_lai_str} 🔥{ht_str}", "size": "xxs", "weight": "bold", "color": ht_color, "flex": 6, "align": "end"}
                                     ]
                                 },
                                 {
                                     "type": "box",
-                                    "layout": "horizontal",
-                                    "alignItems": "center",
+                                    "layout": "vertical",
+                                    "height": "6px",
+                                    "backgroundColor": "#e2e8f0",
+                                    "cornerRadius": "3px",
                                     "margin": "xs",
                                     "contents": [
                                         {
                                             "type": "box",
-                                            "layout": "horizontal",
-                                            "flex": 1,
-                                            "height": "6px",
-                                            "backgroundColor": "#e2e8f0",
-                                            "cornerRadius": "3px",
-                                            "contents": [
-                                                {
-                                                    "type": "box",
-                                                    "layout": "vertical",
-                                                    "width": f"{bar_pct}%",
-                                                    "height": "6px",
-                                                    "backgroundColor": bar_col,
-                                                    "cornerRadius": "3px",
-                                                    "contents": [{"type": "filler"}]
-                                                }
-                                            ]
-                                        },
-                                        {
-                                            "type": "box",
                                             "layout": "vertical",
-                                            "flex": 0,
-                                            "margin": "xs",
-                                            "backgroundColor": "#f8fafc",
-                                            "borderColor": "#e2e8f0",
-                                            "borderWidth": "1px",
-                                            "cornerRadius": "sm",
-                                            "paddingStart": "4px",
-                                            "paddingEnd": "4px",
-                                            "paddingTop": "1px",
-                                            "paddingBottom": "1px",
-                                            "contents": [
-                                                {
-                                                    "type": "text",
-                                                    "text": f"{dt_tr_str}Tr",
-                                                    "size": "xxs",
-                                                    "weight": "bold",
-                                                    "color": pill_text_col,
-                                                    "align": "end"
-                                                }
-                                            ]
+                                            "width": f"{bar_pct}%",
+                                            "height": "6px",
+                                            "backgroundColor": bar_col,
+                                            "contents": [{"type": "filler"}]
                                         }
                                     ]
                                 }
                             ]
-                        }
+                        },
+                        {"type": "text", "text": f"{dt_tr_str}Tr", "size": "xxs", "weight": "bold", "color": pill_text_col, "flex": 0, "margin": "xs"}
                     ]
                 }
+                if idx < 3:
+                    staff_row_box["borderColor"] = card_border_col
+                    staff_row_box["borderWidth"] = "1px"
                 nv_card_contents.append(staff_row_box)
 
             # Dòng TỔNG ST ở cuối biểu đồ (Đồng bộ chuẩn Ảnh 2)
@@ -3350,114 +3247,49 @@ def build_realtime_flex(detail_limit=None):
                     {
                         "type": "box",
                         "layout": "vertical",
-                        "width": "86px",
-                        "flex": 0,
+                        "width": "74px",
                         "backgroundColor": "#0284c7",
                         "cornerRadius": "sm",
-                        "paddingTop": "4px",
-                        "paddingBottom": "4px",
-                        "paddingStart": "4px",
-                        "paddingEnd": "4px",
-                        "justifyContent": "center",
-                        "alignItems": "center",
+                        "paddingAll": "xs",
                         "contents": [
-                            {"type": "text", "text": "⭐ TỔNG ST", "size": "xxs", "weight": "bold", "color": "#ffffff", "align": "center", "maxLines": 1}
+                            {"type": "text", "text": "⭐ TỔNG ST", "size": "xxs", "weight": "bold", "color": "#ffffff", "align": "center"}
                         ]
                     },
                     {
                         "type": "box",
                         "layout": "vertical",
                         "flex": 1,
-                        "paddingStart": "sm",
+                        "margin": "xs",
                         "contents": [
                             {
                                 "type": "box",
                                 "layout": "horizontal",
-                                "alignItems": "center",
                                 "contents": [
-                                    {
-                                        "type": "text",
-                                        "size": "xxs",
-                                        "flex": 4,
-                                        "maxLines": 1,
-                                        "contents": [
-                                            {"type": "span", "text": f"🎯 {tot_dt_str}", "weight": "bold", "color": "#0284c7"},
-                                            {"type": "span", "text": f"/{tot_tg_str}tr", "color": "#64748b"}
-                                        ]
-                                    },
-                                    {
-                                        "type": "text",
-                                        "text": f"⏳ {tot_cl_str}",
-                                        "size": "xxs",
-                                        "weight": "bold",
-                                        "color": tot_cl_col,
-                                        "flex": 3,
-                                        "align": "center",
-                                        "maxLines": 1
-                                    },
-                                    {
-                                        "type": "text",
-                                        "text": f"🔥 {tot_ht_str}",
-                                        "size": "xxs",
-                                        "weight": "bold",
-                                        "color": tot_ht_col,
-                                        "flex": 3,
-                                        "align": "end",
-                                        "maxLines": 1
-                                    }
+                                    {"type": "text", "text": f"🎯{tot_dt_str}/{tot_tg_str}tr", "size": "xxs", "weight": "bold", "color": "#0284c7", "flex": 5},
+                                    {"type": "text", "text": f"⏳{tot_cl_str} 🔥{tot_ht_str}", "size": "xxs", "weight": "bold", "color": tot_ht_col, "flex": 6, "align": "end"}
                                 ]
                             },
                             {
                                 "type": "box",
-                                "layout": "horizontal",
-                                "alignItems": "center",
+                                "layout": "vertical",
+                                "height": "6px",
+                                "backgroundColor": "#dbeafe",
+                                "cornerRadius": "3px",
                                 "margin": "xs",
                                 "contents": [
                                     {
                                         "type": "box",
-                                        "layout": "horizontal",
-                                        "flex": 1,
-                                        "height": "6px",
-                                        "backgroundColor": "#dbeafe",
-                                        "cornerRadius": "3px",
-                                        "contents": [
-                                            {
-                                                "type": "box",
-                                                "layout": "vertical",
-                                                "width": f"{tot_bar_pct}%",
-                                                "height": "6px",
-                                                "backgroundColor": "#10b981",
-                                                "cornerRadius": "3px",
-                                                "contents": [{"type": "filler"}]
-                                            }
-                                        ]
-                                    },
-                                    {
-                                        "type": "box",
                                         "layout": "vertical",
-                                        "flex": 0,
-                                        "margin": "xs",
-                                        "backgroundColor": "#0284c7",
-                                        "cornerRadius": "sm",
-                                        "paddingStart": "6px",
-                                        "paddingEnd": "6px",
-                                        "paddingTop": "1px",
-                                        "paddingBottom": "1px",
-                                        "contents": [
-                                            {
-                                                "type": "text",
-                                                "text": f"{tot_dt_str}Tr",
-                                                "size": "xxs",
-                                                "weight": "bold",
-                                                "color": "#ffffff",
-                                                "align": "end"
-                                            }
-                                        ]
+                                        "width": f"{tot_bar_pct}%",
+                                        "height": "6px",
+                                        "backgroundColor": "#10b981",
+                                        "contents": [{"type": "filler"}]
                                     }
                                 ]
                             }
                         ]
-                    }
+                    },
+                    {"type": "text", "text": f"{tot_dt_str}Tr", "size": "xxs", "weight": "bold", "color": "#0284c7", "flex": 0, "margin": "xs"}
                 ]
             })
 
@@ -3475,37 +3307,16 @@ def build_realtime_flex(detail_limit=None):
 
     # Revenue Table Container Card (Bảng Chi Tiết Doanh Thu Hôm Nay - Có thêm cột DT Thực trước DTQĐ, căn số liệu nằm giữa cột)
     has_bi_target = any(b.get("tg", 0) > 0 for b in parsed_rt_bi)
-
-    table_card_contents = [
-        {"type": "text", "text": "⚡ CHI TIẾT DOANH THU HÔM NAY", "size": "xxs", "color": "#0284c7", "weight": "bold", "margin": "xs"}
-    ]
     if has_bi_target:
         headers = ["STT", "Ngành hàng", "SL", "DT Thực", "DTQĐ", "Target", "%HT"]
         weights = [1, 4, 1, 2, 2, 2, 2]
-        aligns = ["center", "start", "center", "center", "center", "center", "center"]
+        aligns = ["start", "start", "center", "center", "center", "center", "center"]
         wraps_bi = [False, True, False, False, False, False, False]
     else:
         headers = ["STT", "Ngành hàng", "SL", "DT Thực", "DTQĐ"]
         weights = [1, 5, 1, 2, 2]
-        aligns = ["center", "start", "center", "center", "center"]
+        aligns = ["start", "start", "center", "center", "center"]
         wraps_bi = [False, True, False, False, False]
-
-    table_card_contents.append(make_table_header(headers, weights, aligns, bg_color="#0284c7"))
-    table_card_contents.append({"type": "separator", "color": "#cbd5e1", "margin": "xs"})
-
-    for idx, b in enumerate(parsed_rt_bi):
-        ty_trong_rt = (b["dt"] / rt_total * 100) if rt_total > 0 else 0.0
-        dt_thuc_item = b.get("dt_thuc", b["dt"])
-        if has_bi_target:
-            vals = [idx+1, f"{b['name']} ({ty_trong_rt:.0f}%)", fmt_num(b["sl"]), fmt_num(dt_thuc_item), fmt_num(b["dt"]), fmt_num(b["tg"]), f"{b['ht']*100:.0f}%"]
-            colors = ["#64748b", "#0f172a", "#0f172a", "#475569", "#ef4444" if b["dt"] < 0 else "#0284c7", "#475569", get_color_class(b["ht"])]
-        else:
-            vals = [idx+1, f"{b['name']} ({ty_trong_rt:.0f}%)", fmt_num(b["sl"]), fmt_num(dt_thuc_item), fmt_num(b["dt"])]
-            colors = ["#64748b", "#0f172a", "#0f172a", "#475569", "#ef4444" if b["dt"] < 0 else "#0284c7"]
-
-        table_card_contents.append(make_table_row(vals, weights, aligns, colors, wraps=wraps_bi))
-        if idx < len(parsed_rt_bi) - 1:
-            table_card_contents.append({"type": "separator", "color": "#f1f5f9", "margin": "xs"})
 
     tot_sl = sum(x["sl"] for x in parsed_rt_bi)
     tot_thuc = sum(x.get("dt_thuc", x["dt"]) for x in parsed_rt_bi)
@@ -3517,19 +3328,62 @@ def build_realtime_flex(detail_limit=None):
         tot_vals = ["⭐", "TỔNG CỘNG", fmt_num(tot_sl), fmt_num(tot_thuc), fmt_num(rt_total)]
         tot_colors = ["#ffffff", "#ffffff", "#ffffff", "#ffffff", "#ffffff"]
 
-    table_card_contents.append(make_table_row(tot_vals, weights, aligns, tot_colors, bold=True, bg_color="#f59e0b", wraps=wraps_bi))
+    def _build_cat_table_box(max_cat_rows=None):
+        t_contents = [
+            {"type": "text", "text": "⚡ CHI TIẾT DOANH THU HÔM NAY", "size": "xxs", "color": "#0284c7", "weight": "bold", "margin": "xs"},
+            make_table_header(headers, weights, aligns, bg_color="#0284c7"),
+            {"type": "separator", "color": "#cbd5e1", "margin": "xs"}
+        ]
+        if max_cat_rows is not None and len(parsed_rt_bi) > max_cat_rows and max_cat_rows >= 2:
+            shown_cats = parsed_rt_bi[:max_cat_rows - 1]
+            rest_cats = parsed_rt_bi[max_cat_rows - 1:]
+        else:
+            shown_cats = parsed_rt_bi
+            rest_cats = []
 
-    body_contents_rt1.append({
-        "type": "box",
-        "layout": "vertical",
-        "backgroundColor": "#ffffff",
-        "borderColor": "#e2e8f0",
-        "borderWidth": "1px",
-        "cornerRadius": "md",
-        "paddingAll": "sm",
-        "margin": "md",
-        "contents": table_card_contents
-    })
+        for idx, b in enumerate(shown_cats):
+            ty_trong_rt = (b["dt"] / rt_total * 100) if rt_total > 0 else 0.0
+            dt_thuc_item = b.get("dt_thuc", b["dt"])
+            if has_bi_target:
+                vals = [idx+1, f"{b['name']} ({ty_trong_rt:.0f}%)", fmt_num(b["sl"]), fmt_num(dt_thuc_item), fmt_num(b["dt"]), fmt_num(b["tg"]), f"{b['ht']*100:.0f}%"]
+                colors = ["#64748b", "#0f172a", "#0f172a", "#0f172a", "#ef4444" if b["dt"] < 0 else "#0284c7", "#0f172a", get_color_class(b["ht"])]
+            else:
+                vals = [idx+1, f"{b['name']} ({ty_trong_rt:.0f}%)", fmt_num(b["sl"]), fmt_num(dt_thuc_item), fmt_num(b["dt"])]
+                colors = ["#64748b", "#0f172a", "#0f172a", "#0f172a", "#ef4444" if b["dt"] < 0 else "#0284c7"]
+            t_contents.append(make_table_row(vals, weights, aligns, colors, wraps=wraps_bi))
+
+        if rest_cats:
+            r_sl = sum(x["sl"] for x in rest_cats)
+            r_thuc = sum(x.get("dt_thuc", x["dt"]) for x in rest_cats)
+            r_dt = sum(x["dt"] for x in rest_cats)
+            r_tg = sum(x.get("tg", 0) for x in rest_cats)
+            r_ht = (r_dt / r_tg) if r_tg > 0 else 0.0
+            r_share = (r_dt / rt_total * 100) if rt_total > 0 else 0.0
+            r_idx = len(shown_cats) + 1
+            r_name = f"Khác ({len(rest_cats)} NH) ({r_share:.0f}%)"
+            if has_bi_target:
+                vals = [r_idx, r_name, fmt_num(r_sl), fmt_num(r_thuc), fmt_num(r_dt), fmt_num(r_tg), f"{r_ht*100:.0f}%"]
+                colors = ["#64748b", "#0f172a", "#0f172a", "#0f172a", "#ef4444" if r_dt < 0 else "#0284c7", "#0f172a", get_color_class(r_ht)]
+            else:
+                vals = [r_idx, r_name, fmt_num(r_sl), fmt_num(r_thuc), fmt_num(r_dt)]
+                colors = ["#64748b", "#0f172a", "#0f172a", "#0f172a", "#ef4444" if r_dt < 0 else "#0284c7"]
+            t_contents.append(make_table_row(vals, weights, aligns, colors, wraps=wraps_bi))
+
+        t_contents.append(make_table_row(tot_vals, weights, aligns, tot_colors, bold=True, bg_color="#f59e0b", wraps=wraps_bi))
+        return {
+            "type": "box",
+            "layout": "vertical",
+            "backgroundColor": "#ffffff",
+            "borderColor": "#e2e8f0",
+            "borderWidth": "1px",
+            "cornerRadius": "md",
+            "paddingAll": "sm",
+            "margin": "md",
+            "contents": t_contents
+        }
+
+    cat_table_box_idx = len(body_contents_rt1)
+    body_contents_rt1.append(_build_cat_table_box(None))
 
     # Insight Box (Nhận xét dưới cùng Phần 1)
     rem_hours = max(0.5, 13.0 - elapsed_hours)
@@ -3600,6 +3454,13 @@ def build_realtime_flex(detail_limit=None):
             ]
         }
     }
+
+    # Chốt chặn dung lượng Bubble 1 <= 29,000 bytes (trần cứng của LINE cho 1 bubble là 30KB)
+    if json_size(flex_bubble_rt1) > 29000 and len(parsed_rt_bi) > 3:
+        for limit_rows in range(len(parsed_rt_bi) - 1, 2, -1):
+            body_contents_rt1[cat_table_box_idx] = _build_cat_table_box(limit_rows)
+            if json_size(flex_bubble_rt1) <= 29000:
+                break
 
     # Bảng Thi Đua Realtime P.2 (Chia 2 khu: Về đích ngày & Chưa về đích ngày - Chuẩn Ảnh 2 mới)
     headers_rt2 = ["#", "NH", "Đạt", "Còn", "MT", "%HT"]
