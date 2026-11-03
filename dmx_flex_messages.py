@@ -1,8 +1,179 @@
+import os
+import sys
 import json
 import pytz
 import re
+import requests
 from datetime import datetime
-from dmx_data_provider import get_dashboard_data, get_locked_target_config, get_staff_history_base
+
+if hasattr(sys.stdout, 'reconfigure'):
+    try:
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+    except Exception:
+        pass
+
+# ============================================================================
+# TRUY VẤN DỮ LIỆU SUPABASE (GỘP TỪ dmx_data_provider.py)
+# ============================================================================
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://uybcglehwheygxmzlwbq.supabase.co")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
+
+if not SUPABASE_KEY:
+    raise ValueError(
+        "Lỗi: Biến môi trường SUPABASE_KEY chưa được thiết lập. "
+        "Đặt khoá đọc Supabase trong biến môi trường, không ghi vào mã nguồn."
+    )
+
+
+def _auth_headers(extra=None):
+    """Header xác thực Supabase dùng chung, tránh lặp lại ở từng hàm."""
+    headers = {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Cache-Control": "no-cache",
+    }
+    if extra:
+        headers.update(extra)
+    return headers
+
+
+def get_dashboard_data(sheets_str):
+    """Truy vấn trực tiếp Supabase REST API để lấy dữ liệu mới nhất."""
+    sheet_names = [s.strip() for s in sheets_str.split(',') if s.strip()]
+    sheet_names_str = ",".join(f'"{s}"' for s in sheet_names)
+    url = f"{SUPABASE_URL}/rest/v1/sheet_data?sheet_name=in.({sheet_names_str})"
+    headers = _auth_headers()
+    result = {name: [] for name in sheet_names}
+    try:
+        res = requests.get(url, headers=headers, timeout=12)
+        if res.status_code == 200:
+            rows = res.json()
+            for row in rows:
+                s_name = row.get("sheet_name")
+                if s_name in result:
+                    result[s_name] = row.get("data", [])
+    except Exception as e:
+        print(f"Lỗi truy vấn dữ liệu trực tiếp từ Supabase: {e}")
+    return result
+
+
+def _get_active_area_id():
+    env_area = os.environ.get("AREA_ID")
+    if env_area and str(env_area).strip():
+        return str(env_area).strip()
+    return None
+
+
+def get_locked_target_config():
+    """Lấy cấu hình Target khoá cho THÁNG hiện tại."""
+    tz = pytz.timezone('Asia/Ho_Chi_Minh')
+    now = datetime.now(tz)
+    month_str = now.strftime("%Y-%m")
+    headers = _auth_headers()
+
+    def doc_ban_khoa(url, mo_ta):
+        try:
+            res = requests.get(url, headers=headers, timeout=8)
+            if res.status_code == 200:
+                rows = res.json()
+                if rows:
+                    data = rows[0].get("data", {})
+                    if isinstance(data, dict) and data.get("is_locked"):
+                        print(f"Target_Lock: dùng {rows[0].get('sheet_name')} ({mo_ta}).")
+                        return data
+        except Exception as e:
+            print(f"Lỗi truy vấn Target_Lock ({mo_ta}): {e}")
+        return None
+
+    area_id = _get_active_area_id()
+    if area_id:
+        url_area = (f"{SUPABASE_URL}/rest/v1/sheet_data"
+                    f"?sheet_name=ilike.Target_Lock_{area_id}_{month_str}%25"
+                    f"&order=updated_at.desc&limit=1")
+        cfg = doc_ban_khoa(url_area, f"đúng area {area_id}")
+        if cfg:
+            return cfg
+
+    url = (f"{SUPABASE_URL}/rest/v1/sheet_data"
+           f"?sheet_name=like.Target_Lock_%25_{month_str}%25&order=updated_at.desc&limit=1")
+    return doc_ban_khoa(url, "bản khoá mới nhất của tháng")
+
+
+def get_staff_history_base():
+    """Lấy dữ liệu lịch sử mốc so sánh (base) để tính target hybrid và thi đua."""
+    headers = _auth_headers()
+    tz = pytz.timezone('Asia/Ho_Chi_Minh')
+    today_ymd = datetime.now(tz).strftime("%Y-%m-%d")
+    try:
+        url_dates = f"{SUPABASE_URL}/rest/v1/history_db?select=date&order=date.desc"
+        res = requests.get(url_dates, headers=headers, timeout=6)
+        if res.status_code != 200:
+            return {}, None
+        all_dates = []
+        for r in res.json():
+            d = r.get("date")
+            if d and d not in all_dates:
+                all_dates.append(d)
+        if not all_dates:
+            return {}, None
+        start_idx = 1 if (len(all_dates) > 1 and all_dates[0] == today_ymd) else 0
+        for candidate_date in all_dates[start_idx:]:
+            url_check = f"{SUPABASE_URL}/rest/v1/history_db?date=eq.{candidate_date}&sheet_name=in.(Data_NV_BI,Data_NV_ThiDua)&select=sheet_name,data"
+            res_c = requests.get(url_check, headers=headers, timeout=6)
+            if res_c.status_code == 200:
+                h_sheets = {item["sheet_name"]: item["data"] for item in res_c.json()}
+                has_bi = bool(h_sheets.get("Data_NV_BI") and len(h_sheets["Data_NV_BI"]) > 0)
+                has_td = bool(h_sheets.get("Data_NV_ThiDua") and len(h_sheets["Data_NV_ThiDua"]) > 0)
+                if has_bi and has_td:
+                    return h_sheets, candidate_date
+    except Exception as e:
+        print(f"Lỗi lấy dữ liệu lịch sử HCR: {e}")
+    return {}, None
+
+
+def trigger_adhoc_scrape(scrape_type):
+    """Gửi tín hiệu cào dữ liệu mới lên Supabase để Chrome Extension phát hiện."""
+    now_utc = datetime.now(pytz.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    try:
+        url = f"{SUPABASE_URL}/rest/v1/sheet_data"
+        headers = _auth_headers({
+            "Content-Type": "application/json",
+            "Prefer": "resolution=merge-duplicates",
+        })
+        payload = {
+            "sheet_name": "scrape_signals",
+            "data": {
+                "status": "pending",
+                "type": scrape_type,
+                "requested_at": now_utc
+            },
+            "updated_at": now_utc
+        }
+        res = requests.post(url, headers=headers, json=payload, timeout=10)
+        if res.status_code in [200, 201]:
+            return True, now_utc
+    except Exception as e:
+        print(f"Error posting scrape signal: {e}")
+    return False, now_utc
+
+
+def check_scrape_status():
+    """Kiểm tra chi tiết trạng thái cào (gồm status, requested_at, type)."""
+    try:
+        import time
+        timestamp = int(time.time() * 1000)
+        url = f"{SUPABASE_URL}/rest/v1/sheet_data?sheet_name=in.(scrape_signals,cb_{timestamp})&select=data"
+        headers = _auth_headers({"Pragma": "no-cache"})
+        res = requests.get(url, headers=headers, timeout=10)
+        if res.status_code == 200:
+            rows = res.json()
+            if rows and len(rows) > 0:
+                return rows[0].get("data", {})
+    except Exception as e:
+        print(f"Error checking scrape status: {e}")
+    return {}
+
 
 def parse_number(val):
     if val is None or val == '':
@@ -317,6 +488,11 @@ def make_table_row(vals, weights, aligns=None, colors=None, bold=False, bg_color
         wraps = [wraps] * len(vals)
     contents = []
     for v, w, a, c, wr in zip(vals, weights, aligns, colors, wraps):
+        if isinstance(v, dict) and "type" in v:
+            item = dict(v)
+            item["flex"] = w
+            contents.append(item)
+            continue
         item = {
             "type": "text",
             "text": str(v),
@@ -334,6 +510,7 @@ def make_table_row(vals, weights, aligns=None, colors=None, bold=False, bg_color
     box_dict = {
         "type": "box",
         "layout": "horizontal",
+        "alignItems": "center",
         "margin": "xs",
         "contents": contents
     }
@@ -2330,8 +2507,11 @@ def build_realtime_flex(detail_limit=None):
         rt_tTarget += targetDay
         
         if dtqd != 0 or sl != 0:
+            raw_nganh_str = str(nganh).strip()
+            clean_nganh_str = re.sub(r"^nnh\s+", "", raw_nganh_str, flags=re.IGNORECASE).strip()
             parsed_rt_bi.append({
-                "name": str(nganh).strip(),
+                "raw_name": raw_nganh_str,
+                "name": clean_nganh_str,
                 "sl": int(sl),
                 "dt_thuc": dt_thuc,
                 "dt": dtqd,
@@ -2356,7 +2536,10 @@ def build_realtime_flex(detail_limit=None):
     is_rt_on_track = htChung >= time_ratio
     status_badge_text = "🟢 Vượt nhịp độ" if is_rt_on_track else "🔴 Chậm nhịp độ"
 
-    bi_map = {x["name"].lower().strip(): x["dt"] for x in parsed_rt_bi}
+    bi_map = {}
+    for x in parsed_rt_bi:
+        bi_map[x["name"].lower().strip()] = x["dt"]
+        bi_map[x["raw_name"].lower().strip()] = x["dt"]
     
     config_map = {}
     for c in config_rows:
@@ -2812,12 +2995,14 @@ def build_realtime_flex(detail_limit=None):
                 clean_name = clean_name.split(" - ", 1)[1].strip()
             clean_name = clean_name.lstrip("0123456789 -").strip()
             last_name = clean_name.split()[-1] if clean_name else ""
+            short_nv_name = last_name if last_name else (clean_name if clean_name else m_nv)
             disp_name = f"{last_name} - {m_nv}" if last_name else (f"{clean_name} - {m_nv}" if clean_name else m_nv)
 
             ht_nv = (dt_nv / target_nv) if target_nv > 0 else (1.0 if dt_nv > 0 else 0.0)
 
             parsed_nv_rt.append({
                 "ma_nv": m_nv,
+                "short_name": short_nv_name,
                 "clean_name_lower": clean_name.lower().strip() if clean_name else "",
                 "name": disp_name,
                 "sl": sl_nv,
@@ -2859,7 +3044,31 @@ def build_realtime_flex(detail_limit=None):
 
                 ht_str = f"{round(item['ht']*100)}%"
 
-                row_vals = [rank_str, item["name"], sl_str, dt_tr_str, tg_tr_str, con_lai_str, ht_str]
+                nv_cell = {
+                    "type": "box",
+                    "layout": "vertical",
+                    "contents": [
+                        {
+                            "type": "text",
+                            "text": str(item.get("short_name") or item["name"]),
+                            "size": "xxs",
+                            "color": "#0f172a",
+                            "weight": "bold" if idx < 3 else "regular",
+                            "maxLines": 1
+                        },
+                        *(
+                            [{
+                                "type": "text",
+                                "text": str(item["ma_nv"]),
+                                "size": "xxs",
+                                "color": "#64748b",
+                                "maxLines": 1
+                            }] if item.get("ma_nv") else []
+                        )
+                    ]
+                }
+
+                row_vals = [rank_str, nv_cell, sl_str, dt_tr_str, tg_tr_str, con_lai_str, ht_str]
                 row_colors = [
                     "#d97706" if idx < 3 else "#64748b",
                     "#0f172a",
@@ -3194,6 +3403,7 @@ def build_realtime_flex(detail_limit=None):
                     m_id = m_match.group(1)
             s_name = str(get_key_val(row, "Tên Nhân Viên", "Tên NV", "ten_nv", default="")).strip()
             nganh_hang = str(get_key_val(row, "Ngành Hàng", "SALEGROUPNAME", "nganh_hang", default="")).strip()
+            nganh_hang = re.sub(r"^nnh\s+", "", nganh_hang, flags=re.IGNORECASE).strip()
             sl_detail = parse_number(get_key_val(row, "Số Lượng", "so_luong", default=0))
             raw_dt_thuc = parse_number(get_key_val(row, "Doanh Thu Thực", "Doanh Thu", "Doanh thu", "doanh_thu_thuc", default=0))
             dt_thuc = raw_dt_thuc / 1000000.0 if abs(raw_dt_thuc) >= 1000000 else raw_dt_thuc
@@ -3564,7 +3774,7 @@ def build_help_commands_flex():
         # --- GIAO VIỆC & HỆ THỐNG ---
         {"cmd": "việc", "desc": "Giao việc — mỗi việc 1 dòng bắt đầu bằng dấu gạch, dấu @ đặt đâu cũng được. Dòng đầu CHỈ CẦN chữ việc, không bắt buộc tag. VD:\nviệc\n- Giá Tivi @tuấn @linh\n- giá tủ lạnh @linh\nMuốn giao cho CẢ NHÓM thì ghi tag ở dòng đầu: việc @all\nGõ nhanh 1 dòng: việc @Khánh: dọn kho", "color": "#8b5cf6"},
         {"cmd": "@all @nv @pg @st", "desc": "Đích giao việc: @all = ĐỦ cả siêu thị (PG+NV+QL+TC, hiện 25 người, không lọc theo lịch hôm nay) · @nv = nhân viên · @pg = PG · @st = NV+QL+TC. Nhóm lấy từ sheet schedules cột E/F/G. Gọi đích danh (@tuan, @156494) thì ghi nguyên văn, không cần có trong sheet.", "color": "#7c3aed"},
-        {"cmd": "hủy việc", "desc": "Hủy nhóm việc vừa giao trong hôm nay (hoặc bấm nút 🗑 Hủy nhóm việc trên thẻ việc)", "color": "#dc2626"},
+        {"cmd": "hủy việc", "desc": "Hủy nhóm việc vừa giao trong hôm nay", "color": "#dc2626"},
         {"cmd": "id", "desc": "Tra cứu Mã User ID cá nhân & Group ID nhóm chat", "color": "#64748b"},
         {"cmd": "#lenh", "desc": "Hiển thị Bảng Hướng Dẫn Danh Sách Tất Cả Cú Pháp Lệnh Hỗ Trợ", "color": "#0f172a"}
     ]
@@ -3737,24 +3947,15 @@ def build_custom_groups_flex(detail_limit=None):
     data = get_dashboard_data("Config_Custom_Groups,Data_Realtime_BI,Data_Realtime_ThiDua,Data_Realtime_NV_NganhHang,Data_BI,Data_ThiDua,Config_ThiDua")
     custom_groups = data.get("Config_Custom_Groups", [])
 
-    # Nếu chưa có trong DB, nạp 2 nhóm chuẩn mặc định của siêu thị Savico
+    # Đồng bộ 100% với báo cáo chính: nếu đã huỷ/xoá nhóm ngành hàng gộp trên báo cáo chính thì tin nhắn Flex cũng huỷ theo
     if not custom_groups or not isinstance(custom_groups, list):
-        custom_groups = [
-            {
-                "id": "group_pk",
-                "name": "Phụ kiện",
-                "unit": "DT",
-                "target": 1717,
-                "categories": ["Phụ kiện lắp đặt", "Phụ kiện tiện ích", "Phụ kiện trang trí"]
-            },
-            {
-                "id": "group_bh",
-                "name": "Bảo hiểm thợ",
-                "unit": "DT",
-                "target": 288,
-                "categories": ["T10 - BẢO HIỂM THỢ ĐMX_CE", "T10 - BẢO HIỂM THỢ ĐMX_ICT"]
-            }
-        ]
+        return []
+    custom_groups = [
+        g for g in custom_groups
+        if isinstance(g, dict) and str(g.get("name", "")).strip() and g.get("categories")
+    ]
+    if not custom_groups:
+        return []
 
     tz = pytz.timezone('Asia/Ho_Chi_Minh')
     now = datetime.now(tz)
@@ -3871,8 +4072,9 @@ def build_custom_groups_flex(detail_limit=None):
                 clean_name = name.split(" - ")[-1] if " - " in name else name
                 clean_name = clean_name.lstrip("0123456789 -").strip()
                 last_name = clean_name.split()[-1] if clean_name else ""
+                short_nv = last_name if last_name else (clean_name if clean_name else u)
                 disp_name = f"{last_name} - {u}" if last_name else u
-                staff_map[u] = {"id": u, "name": disp_name, "ratio": ratio, "hn": 0.0}
+                staff_map[u] = {"id": u, "short_name": short_nv, "name": disp_name, "ratio": ratio, "hn": 0.0}
 
         # Xây dựng bảng tra cứu Hệ số K (KFactor) từ Data_Realtime_BI
         k_factor_map = {}
@@ -3928,6 +4130,8 @@ def build_custom_groups_flex(detail_limit=None):
             tot_staff_mt += s_mt
             tot_staff_hn += s_hn
             staff_list.append({
+                "id": s["id"],
+                "short_name": s["short_name"],
                 "name": s["name"],
                 "mt": s_mt,
                 "hn": s_hn,
@@ -4060,9 +4264,33 @@ def build_custom_groups_flex(detail_limit=None):
                 cl_str = "Đạt" if s["cl"] <= 0 and s["mt"] > 0 else fmt_num(max(0, s['cl']))
                 cl_col = "#059669" if s["cl"] <= 0 and s["mt"] > 0 else "#ef4444"
 
+                nv_cell_cg = {
+                    "type": "box",
+                    "layout": "vertical",
+                    "contents": [
+                        {
+                            "type": "text",
+                            "text": str(s.get("short_name") or s["name"]),
+                            "size": "xxs",
+                            "color": "#0f172a",
+                            "weight": "bold" if idx_s < 3 else "regular",
+                            "maxLines": 1
+                        },
+                        *(
+                            [{
+                                "type": "text",
+                                "text": str(s["id"]),
+                                "size": "xxs",
+                                "color": "#64748b",
+                                "maxLines": 1
+                            }] if s.get("id") else []
+                        )
+                    ]
+                }
+
                 row_vals = [
                     rank_str,
-                    s["name"],
+                    nv_cell_cg,
                     fmt_num(s['mt']),
                     fmt_num(s['hn']),
                     cl_str,

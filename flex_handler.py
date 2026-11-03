@@ -31,7 +31,7 @@ TASKS = {
         {'id': 'vs_4', 'icon': '📸', 'name': '4. Ngọc Trì', 'time': '10:00'},
         {'id': 'vs_5', 'icon': '📸', 'name': '5. Ngô Gia Tự', 'time': '10:00'},
         {'id': 'vs_6', 'icon': '📸', 'name': '6. Savico', 'time': '10:00'},
-        {'id': 'vs_6', 'icon': '📸', 'name': '7. Ngọc Thụy', 'time': '10:00'},
+        {'id': 'vs_7', 'icon': '📸', 'name': '7. Ngọc Thụy', 'time': '10:00'},
     ]
 }
 
@@ -109,14 +109,17 @@ def get_tasks_status_from_sheet(group_id, shift_type, all_records=None):
         today_str = datetime.now(tz_vietnam).strftime('%Y-%m-%d')
         
         task_statuses = {}
+        target_gid = str(group_id or '').strip()
         
         for record in all_records:
-            if str(record.get('group_id')) == group_id and record.get('date') == today_str:
-                task_id = record.get('task_id')
+            r_gid = str(record.get('group_id', '')).strip()
+            r_date = str(record.get('date', '')).strip()
+            if (not target_gid or r_gid == target_gid) and r_date == today_str:
+                task_id = str(record.get('task_id', '')).strip()
                 if task_id and task_id.startswith(shift_type):
                     task_statuses[task_id] = {
-                        'status': record.get('status', 'incomplete'),
-                        'user_name': record.get('user_name', '')
+                        'status': str(record.get('status', 'incomplete')).strip(),
+                        'user_name': str(record.get('user_name', '')).strip()
                     }
         return task_statuses
     except Exception as e:
@@ -647,28 +650,6 @@ def cancel_task_group(group_id, token):
         return (0, [])
 
 
-def build_cancel_footer(task_group_hash):
-    """Nút hủy nhóm việc ở chân thẻ Flex."""
-    return {
-        "type": "box",
-        "layout": "vertical",
-        "spacing": "sm",
-        "paddingAll": "sm",
-        "contents": [
-            {
-                "type": "button",
-                "style": "secondary",
-                "height": "sm",
-                "action": {
-                    "type": "postback",
-                    "label": "🗑 Hủy nhóm việc này",
-                    "data": f"action=cancel_task_group&token={task_group_hash}"
-                }
-            }
-        ]
-    }
-
-
 def update_adhoc_task_status(group_id, task_id, target_status, completed_by):
     """
     Cập nhật trạng thái của adhoc task theo đúng group_id và task_id.
@@ -693,9 +674,10 @@ def update_adhoc_task_status(group_id, task_id, target_status, completed_by):
         time_str = datetime.now(pytz.timezone('Asia/Ho_Chi_Minh')).strftime('%H:%M')
         target_gid = str(group_id).strip() if group_id else ''
 
-        row_idx = -1
+        row_indices = []
         assignee = None
         task_group_hash = None
+        clean_tid = str(task_id).strip()
 
         for i, row in enumerate(all_values[1:], start=2):
             if len(row) <= max(i_gid, i_tid):
@@ -703,27 +685,44 @@ def update_adhoc_task_status(group_id, task_id, target_status, completed_by):
             r_gid = str(row[i_gid]).strip()
             r_tid = str(row[i_tid]).strip()
 
-            if (not target_gid or r_gid == target_gid) and r_tid == str(task_id).strip():
-                row_idx = i
+            if (not target_gid or r_gid == target_gid) and r_tid == clean_tid:
+                row_indices.append(i)
                 assignee = str(row[i_assignee]).strip() if len(row) > i_assignee else ''
-                if str(task_id).startswith('all_') or str(task_id).startswith('multi_'):
-                    parts = str(task_id).split('_')
+                if clean_tid.startswith('all_') or clean_tid.startswith('multi_'):
+                    parts = clean_tid.split('_')
                     if len(parts) >= 3:
                         task_group_hash = parts[1]
-                break
 
-        if row_idx != -1:
+        # Fallback: nếu group_id lệch nhưng task_id (chứa mã hash) khớp chính xác
+        if not row_indices:
+            for i, row in enumerate(all_values[1:], start=2):
+                if len(row) <= i_tid:
+                    continue
+                r_tid = str(row[i_tid]).strip()
+                if r_tid == clean_tid:
+                    row_indices.append(i)
+                    assignee = str(row[i_assignee]).strip() if len(row) > i_assignee else ''
+                    if clean_tid.startswith('all_') or clean_tid.startswith('multi_'):
+                        parts = clean_tid.split('_')
+                        if len(parts) >= 3:
+                            task_group_hash = parts[1]
+
+        if row_indices:
             comp_by = completed_by if target_status == 'complete' else ''
             comp_at = time_str if target_status == 'complete' else ''
 
             import gspread.utils
-            col_letter_status = gspread.utils.rowcol_to_a1(row_idx, i_status + 1)
-            col_letter_comp_by = gspread.utils.rowcol_to_a1(row_idx, i_comp_by + 1)
-            col_letter_comp_at = gspread.utils.rowcol_to_a1(row_idx, i_comp_at + 1)
-
-            sheet.update(range_name=col_letter_status, values=[[target_status]])
-            sheet.update(range_name=col_letter_comp_by, values=[[comp_by]])
-            sheet.update(range_name=col_letter_comp_at, values=[[comp_at]])
+            batch_data = []
+            for r_idx in row_indices:
+                col_letter_status = gspread.utils.rowcol_to_a1(r_idx, i_status + 1)
+                col_letter_comp_by = gspread.utils.rowcol_to_a1(r_idx, i_comp_by + 1)
+                col_letter_comp_at = gspread.utils.rowcol_to_a1(r_idx, i_comp_at + 1)
+                batch_data.extend([
+                    {'range': col_letter_status, 'values': [[target_status]]},
+                    {'range': col_letter_comp_by, 'values': [[comp_by]]},
+                    {'range': col_letter_comp_at, 'values': [[comp_at]]},
+                ])
+            sheet.batch_update(batch_data, value_input_option='USER_ENTERED')
             return True, assignee, task_group_hash
 
         return False, None, None
@@ -1312,8 +1311,6 @@ def generate_today_adhoc_flex(group_id):
                 "contents": task_components
             }
         }
-        if latest_token:
-            flex_content["footer"] = build_cancel_footer(latest_token)
 
         return flex_content
     except Exception as e:
@@ -1485,4 +1482,407 @@ def generate_combined_work_flex(group_id, shift_type=None, adhoc_hash=None, adho
     if shift_type:
         return generate_checklist_flex(group_id, shift_type)
     return None
+
+
+# ============================================================================
+# HÀM TIỆN ÍCH GỬI CHECKLIST ĐỊNH KỲ (GỘP TỪ checklist_scheduler.py)
+# ============================================================================
+from linebot.models import FlexSendMessage as _FlexSendMessage
+
+def get_checklist_message(shift_type, group_id):
+    """Khởi tạo công việc và trả về đối tượng FlexSendMessage cho ca làm việc."""
+    try:
+        if not group_id:
+            print("Lỗi: Không có Group ID để tạo checklist.")
+            return None
+        initialize_daily_tasks(group_id, shift_type)
+        flex_content = generate_checklist_flex(group_id, shift_type)
+        if flex_content:
+            return _FlexSendMessage(
+                alt_text=f"Checklist công việc ca {shift_type}",
+                contents=flex_content
+            )
+        return None
+    except Exception as e:
+        print(f"Lỗi tạo checklist message ca {shift_type}: {e}")
+        return None
+
+
+def send_initial_checklist(shift_type):
+    """Hàm tương thích gửi checklist đơn lẻ theo biến môi trường CHECKLIST_GROUP_ID."""
+    import os
+    from linebot import LineBotApi
+    token = os.environ.get('CHANNEL_ACCESS_TOKEN')
+    chk_gid = os.environ.get('CHECKLIST_GROUP_ID')
+    if not token or not chk_gid:
+        print("Thiếu CHANNEL_ACCESS_TOKEN hoặc CHECKLIST_GROUP_ID")
+        return
+    try:
+        msg = get_checklist_message(shift_type, chk_gid)
+        if msg:
+            LineBotApi(token).push_message(chk_gid, msg)
+    except Exception as e:
+        print(f"Lỗi trong send_initial_checklist: {e}")
+
+
+# ============================================================================
+# BỘ PHÂN TÍCH CÚ PHÁP GIAO VIỆC (GỘP TỪ task_parser.py)
+# ============================================================================
+import re
+from meal_handler import clean_person_name, normalize_person_key
+
+GROUP_KEYWORDS = {
+    "all": ("PG", "NV", "QL+TC"),
+    "nv": ("NV",),
+    "pg": ("PG",),
+    "st": ("NV", "QL+TC"),
+    "ql": ("QL+TC",),
+    "tc": ("QL+TC",),
+}
+
+GROUP_LABEL = {
+    "all": "toàn siêu thị (PG + NV + QL + TC)",
+    "nv": "nhân viên (NV)",
+    "pg": "PG",
+    "st": "nhân viên siêu thị (NV + QL + TC)",
+    "ql": "quản lý + trưởng ca",
+    "tc": "quản lý + trưởng ca",
+}
+
+PLACEHOLDER = {
+    "", "khong co", "khong", "trong", "n a", "na", "none", "null",
+    "khong co ai", "chua co", "-", "--", "0",
+}
+
+BULLETS = "-*•+–—"
+
+_ONE_LINE_RE = re.compile(r"^\s*\S+\s+@[^:]+:\s*(\S.*)$")
+
+
+def is_work_command(lines):
+    """True nếu các dòng này là một lệnh `việc`."""
+    lines = [l.strip() for l in lines if l.strip()]
+    if not lines:
+        return False
+    head = lines[0].lower()
+    if not (head.startswith("việc") or head.startswith("viec")):
+        return False
+    if len(lines) >= 2 and lines[1][:1] in BULLETS:
+        return True
+    return bool(_ONE_LINE_RE.match(lines[0]))
+
+
+def _expand_one_line(lines):
+    """Biến 'việc @tuấn: dọn kho' thành ['việc @tuấn', '- dọn kho']."""
+    if len(lines) != 1:
+        return lines
+    s = lines[0]
+    i = s.find(":")
+    if i == -1 or "@" not in s[:i]:
+        return lines
+    return [s[:i].strip() + ":", "- " + s[i + 1:].strip()]
+
+
+def is_placeholder(name):
+    """True nếu chuỗi không phải tên người (vd 'Không có')."""
+    return normalize_person_key(name) in PLACEHOLDER
+
+
+def split_names(cell):
+    """Tách một ô sheet thành danh sách tên đã làm sạch và khử trùng."""
+    if not cell:
+        return []
+    out, seen = [], set()
+    for token in re.split(r"[,\n;•+]", str(cell)):
+        name = clean_person_name(token)
+        if not name or name.isdigit() or len(name) < 2:
+            continue
+        if is_placeholder(name):
+            continue
+        key = normalize_person_key(name)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        out.append(name)
+    return out
+
+
+def extract_code(name):
+    """Lấy mã số trong tên dạng 'Thảo-156494*' -> '156494'."""
+    m = re.search(r"[-–]\s*(\d{2,8})", str(name))
+    return m.group(1) if m else None
+
+
+def build_token_index(names):
+    """Trả về list [(token, tên_đầy_đủ)] sắp theo độ dài GIẢM DẦN."""
+    idx = []
+    for nm in names:
+        idx.append((nm, nm))
+        code = extract_code(nm)
+        if code:
+            idx.append((code, nm))
+        alias = re.split(r"\s*[-–]\s*", nm)[0].strip()
+        if alias and alias != nm and len(alias) >= 2:
+            idx.append((alias, nm))
+    idx.sort(key=lambda t: len(t[0]), reverse=True)
+    return idx
+
+
+def build_known_tokens(index):
+    """Danh sách token để dò sau dấu @, dài trước ngắn sau."""
+    toks = [t for t, _ in index] + list(GROUP_KEYWORDS.keys())
+    return sorted(set(toks), key=len, reverse=True)
+
+
+def hint(err, names):
+    if err == "ambiguous":
+        return " Trùng %d người: %s." % (len(names), ", ".join(names))
+    if err == "empty":
+        return " Nhóm này đang không có ai trong danh sách."
+    return " Không có trong danh sách nhân sự của siêu thị."
+
+
+MENTION_SPACE = "\uE000"
+
+
+def roster_code_set(roster_names):
+    """Tập mã NV (chuỗi số) có trong roster — dùng để nhận diện mention."""
+    idx = build_token_index([nm for grp in roster_names.values() for nm in grp])
+    return {tok for tok, _ in idx if tok.isdigit()}
+
+
+def _mention_code(display, code_set):
+    """Mã NV (2-8 chữ số) ĐẦU TIÊN trong tên hiển thị mà CÓ trong roster."""
+    for m in re.finditer(r"\d{2,8}", str(display)):
+        if m.group(0) in code_set:
+            return m.group(0)
+    return None
+
+
+def resolve_mentions(raw_text, mentionees, roster_names=None):
+    """Viết lại raw_text để mỗi MENTION THẬT trở thành MỘT token duy nhất."""
+    if not mentionees or not raw_text:
+        return raw_text
+
+    utf16_to_char = {}
+    current_utf16 = 0
+    for char_idx, ch in enumerate(raw_text):
+        utf16_to_char[current_utf16] = char_idx
+        current_utf16 += 2 if ord(ch) > 0xFFFF else 1
+    utf16_to_char[current_utf16] = len(raw_text)
+
+    sorted_mentions = sorted(mentionees, key=lambda x: int(x["index"]), reverse=True)
+    out = raw_text
+
+    for m in sorted_mentions:
+        idx = int(m["index"])
+        ln = int(m["length"])
+        end_idx = idx + ln
+
+        char_start = utf16_to_char.get(idx)
+        if char_start is None:
+            keys = sorted(utf16_to_char.keys())
+            char_start = utf16_to_char[max(k for k in keys if k <= idx)] if any(k <= idx for k in keys) else 0
+
+        char_end = utf16_to_char.get(end_idx)
+        if char_end is None:
+            keys = sorted(utf16_to_char.keys())
+            char_end = utf16_to_char[min(k for k in keys if k >= end_idx)] if any(k >= end_idx for k in keys) else len(raw_text)
+
+        seg = out[char_start:char_end]
+        if not seg:
+            continue
+
+        overflow = ""
+        if "\n" in seg:
+            seg, overflow = seg.split("\n", 1)
+            overflow = "\n" + overflow
+
+        display = seg[1:] if seg.startswith("@") else seg
+
+        if str(m.get("type", "user")).lower() == "all":
+            token = "all"
+        else:
+            token = display.replace(" ", MENTION_SPACE).strip() or "?"
+
+        out = out[:char_start] + "@" + token + overflow + out[char_end:]
+
+    return out
+
+
+def resolve_target(token, roster_names, index):
+    """Trả về (danh_sách_tên, lỗi). lỗi ∈ (None, 'empty')."""
+    t = str(token).strip().replace(MENTION_SPACE, " ")
+    low = t.lower()
+
+    if low in GROUP_KEYWORDS:
+        out = []
+        for grp in GROUP_KEYWORDS[low]:
+            for nm in roster_names.get(grp, []):
+                if nm not in out:
+                    out.append(nm)
+        return (out, None) if out else ([], "empty")
+
+    if re.fullmatch(r"\d{2,8}", t):
+        cand = []
+        for tok, nm in index:
+            if tok == t and nm not in cand:
+                cand.append(nm)
+        if len(cand) == 1:
+            return (cand, None)
+
+    return ([t], None) if t else ([], None)
+
+
+def split_line(line, known_tokens, known_norm=None, allow_colon=False):
+    """Tách 1 dòng thành (nội_dung_việc, [đích...]). @ nhận ở BẤT KỲ vị trí nào."""
+    if known_norm is None:
+        known_norm = {normalize_person_key(t) for t in known_tokens}
+
+    spans, tokens = [], []
+    i = 0
+    while True:
+        at = line.find("@", i)
+        if at == -1:
+            break
+        rest = line[at + 1:]
+
+        best = ""
+        words = re.split(r"\s+", rest)
+        for n in range(min(4, len(words)), 0, -1):
+            cand = " ".join(words[:n]).rstrip(",;:.")
+            if cand and normalize_person_key(cand) in known_norm:
+                best = cand
+                break
+
+        if not best and allow_colon:
+            colon = rest.find(":")
+            nxt = rest.find("@")
+            if colon != -1 and (nxt == -1 or colon < nxt):
+                cand = rest[:colon].strip()
+                if cand:
+                    best = cand
+
+        if not best:
+            m = re.match(r"[^\s,;:@]+", rest)
+            best = m.group(0) if m else ""
+
+        spans.append((at, at + 1 + len(best)))
+        tokens.append(best)
+        i = at + 1 + len(best)
+
+    text = line
+    for a, b in reversed(spans):
+        text = text[:a] + " " + text[b:]
+    text = re.sub(r"[:;,\-–—•+]+", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text, [t for t in tokens if t]
+
+
+def parse_work_command(lines, roster_names):
+    """Phân tích toàn bộ lệnh `việc`."""
+    index = build_token_index(
+        [nm for grp in roster_names.values() for nm in grp])
+    known = build_known_tokens(index)
+    known_norm = {normalize_person_key(t) for t in known}
+
+    lines = _expand_one_line([l.strip() for l in lines if l.strip()])
+
+    header = (lines[0] if lines else "").strip()
+    header_body = re.sub(r"^(việc|viec)\b", "", header, flags=re.IGNORECASE).strip()
+    header_text, header_tokens = split_line(header_body, known, known_norm,
+                                            allow_colon=True)
+
+    header_names, errors = [], []
+    _seen_h = set()
+    for t in header_tokens:
+        names, err = resolve_target(t, roster_names, index)
+        if err:
+            errors.append("Dòng đầu: không hiểu “@%s”.%s" % (t, hint(err, names)))
+            continue
+        for nm in names:
+            k = normalize_person_key(nm) or nm.lower().strip()
+            if not k or k in _seen_h:
+                continue
+            _seen_h.add(k)
+            header_names.append(nm)
+
+    job = header_text or None
+    assignments = []
+
+    for raw in lines[1:]:
+        s = raw.strip()
+        if not s or s[0] not in BULLETS:
+            continue
+        body = s[1:].strip()
+        if not body:
+            continue
+
+        text, tokens = split_line(body, known, known_norm)
+
+        names = []
+        _seen_n = set()
+        for t in tokens:
+            rn, err = resolve_target(t, roster_names, index)
+            if err:
+                errors.append("Dòng “%s”: không hiểu “@%s”.%s" % (s, t, hint(err, rn)))
+                continue
+            for nm in rn:
+                k = normalize_person_key(nm) or nm.lower().strip()
+                if not k or k in _seen_n:
+                    continue
+                _seen_n.add(k)
+                names.append(nm)
+
+        if not names:
+            if tokens:
+                continue
+            names = list(header_names)
+        if not names:
+            errors.append("Dòng “%s”: chưa chỉ định ai làm." % s)
+            continue
+
+        if job:
+            task = ("%s | %s" % (job, text)) if text else job
+        else:
+            task = text
+        if not task:
+            errors.append("Dòng “%s”: thiếu nội dung công việc." % s)
+            continue
+
+        assignments.append((task, names))
+
+    if not assignments and not errors and job and header_names:
+        assignments.append((job, list(header_names)))
+        job = None
+
+    if not assignments and not errors:
+        errors.append("Chưa có dòng công việc nào (mỗi việc bắt đầu bằng dấu “-”).")
+
+    return {"job": job, "header_names": header_names,
+            "assignments": assignments, "errors": errors}
+
+
+def plan_assignments(parsed):
+    """Quyết định bot sẽ LƯU việc như thế nào."""
+    assigns = parsed["assignments"]
+    job = parsed["job"]
+
+    if job is None and len(assigns) == 1:
+        task, names = assigns[0]
+        return {"mode": "all", "job": task, "task": task, "names": list(names)}
+
+    card_job = job if job else ""
+    pairs = []
+
+    if job and parsed["header_names"]:
+        for n in parsed["header_names"]:
+            pairs.append((job, n))
+
+    for task_name, names in assigns:
+        sub = task_name.split(" | ", 1)[-1]
+        for n in names:
+            pairs.append((sub, n))
+    return {"mode": "multi", "job": card_job, "pairs": pairs}
+
 

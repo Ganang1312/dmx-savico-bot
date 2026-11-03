@@ -217,7 +217,7 @@ def _read_roster_columns(values):
 
     QUÉT HẾT MỌI DÒNG — không lọc theo day_of_week, vì danh sách nằm dọc.
     """
-    from task_parser import split_names
+    from flex_handler import split_names
 
     header, rows = _header_and_rows(values)
     out = {}

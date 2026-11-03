@@ -31,17 +31,20 @@ from flex_handler import (
     add_all_adhoc_tasks, generate_all_adhoc_flex, register_group_member,
     add_multi_adhoc_tasks, generate_multi_adhoc_flex,
     find_latest_task_token, cancel_task_group,
-    generate_combined_work_flex, generate_today_adhoc_flex
+    generate_combined_work_flex, generate_today_adhoc_flex,
+    send_initial_checklist, get_checklist_message,
+    is_work_command, parse_work_command, plan_assignments, resolve_mentions
 )
-from checklist_scheduler import send_initial_checklist, get_checklist_message 
 from meal_handler import generate_meal_flex, update_meal_status
 from vesinh_handler import generate_vesinh_flex, update_vesinh_status, get_current_vesinh_session
-from dmx_data_provider import trigger_adhoc_scrape, check_scrape_status
-from dmx_flex_messages import (build_luyke_flex, build_nhanvien_flex,
-                               build_help_commands_flex, build_realtime_messages,
-                               build_realtime_staff_detail_messages,
-                               build_custom_groups_messages,
-                               LINE_MAX_MESSAGES)
+from dmx_flex_messages import (
+    trigger_adhoc_scrape, check_scrape_status,
+    build_luyke_flex, build_nhanvien_flex,
+    build_help_commands_flex, build_realtime_messages,
+    build_realtime_staff_detail_messages,
+    build_custom_groups_messages,
+    LINE_MAX_MESSAGES
+)
 from coupon_handler import (
     build_category_menu_flex, build_product_list_flex,
     claim_coupon_for_user, import_coupons_from_text,
@@ -363,18 +366,9 @@ def ping():
 @handler.add(PostbackEvent)
 def handle_postback(event):
     data_str = event.postback.data
-    data = dict(part.split('=') for part in data_str.split('&'))
+    data = dict(part.split('=', 1) for part in data_str.split('&') if '=' in part)
     action = data.get('action')
-    
     user_id = event.source.user_id
-    if event.source.type == 'group':
-        group_id = event.source.group_id
-        try:
-            profile = line_bot_api.get_group_member_profile(group_id, user_id)
-            if profile and profile.display_name:
-                register_group_member(group_id, user_id, profile.display_name)
-        except Exception as e_reg:
-            print(f"Không thể lấy profile để lưu thành viên postback: {e_reg}")
 
     # 1. Gia hạn User
     if action == 'renew':
@@ -404,12 +398,17 @@ def handle_postback(event):
 
     # 2. Hoàn thành Task công việc (Checklist Công việc)
     if action == 'complete_task':
-        task_id = data.get('task_id')
+        task_id = str(data.get('task_id') or '').strip()
         shift_type = data.get('shift', 'sang')
         target_status = data.get('target_status', 'complete')
         
         # Lấy group_id an toàn (hỗ trợ cả khi bấm trong nhóm, phòng chat hoặc chat 1-1)
-        group_id = data.get('group_id') or getattr(event.source, 'group_id', None) or os.environ.get('EMPLOYEE_GROUP_ID') or MAIN_CHECKLIST_GROUP_ID
+        group_id = str(
+            getattr(event.source, 'group_id', None)
+            or data.get('group_id')
+            or os.environ.get('EMPLOYEE_GROUP_ID')
+            or MAIN_CHECKLIST_GROUP_ID
+        ).strip()
         user_id = getattr(event.source, 'user_id', None)
 
         try:
@@ -432,39 +431,37 @@ def handle_postback(event):
             new_user = f"{user_name} lúc {time_str}" if target_status == 'complete' else ''
             
             all_records = sheet.get_all_records()
-            row_to_update = -1
-            target_record = None
+            rows_to_update = []
             
-            # 1. Tìm dòng khớp cả group_id, date và task_id
+            # 1. Tìm TẤT CẢ các dòng khớp cả group_id, date và task_id (tránh bị dòng trùng làm kẹt trạng thái)
             for i, record in enumerate(all_records):
-                if (record.get('date') == today_str and
-                    record.get('task_id') == task_id and
-                    (not group_id or str(record.get('group_id')) == str(group_id))):
-                    row_to_update = i + 2 
-                    target_record = record
-                    break
+                r_date = str(record.get('date', '')).strip()
+                r_tid = str(record.get('task_id', '')).strip()
+                r_gid = str(record.get('group_id', '')).strip()
+                if r_date == today_str and r_tid == task_id and (not group_id or r_gid == group_id):
+                    rows_to_update.append((i + 2, record))
             
             # 2. Fallback nếu group_id khác (ví dụ bấm từ group khác nhưng task cùng ngày)
-            if row_to_update == -1:
+            if not rows_to_update:
                 for i, record in enumerate(all_records):
-                    if record.get('date') == today_str and record.get('task_id') == task_id:
-                        row_to_update = i + 2
-                        target_record = record
-                        group_id = str(record.get('group_id'))
-                        break
+                    r_date = str(record.get('date', '')).strip()
+                    r_tid = str(record.get('task_id', '')).strip()
+                    if r_date == today_str and r_tid == task_id:
+                        rows_to_update.append((i + 2, record))
+                        group_id = str(record.get('group_id', '')).strip()
 
-            if row_to_update != -1:
-                current_status = target_record.get('status', 'incomplete') if target_record else 'incomplete'
-                if current_status == target_status:
-                    print(f"Task {task_id} đã ở trạng thái {target_status} từ trước.")
-                else:
-                    range_to_update = f'F{row_to_update}:G{row_to_update}'
-                    sheet.update(range_name=range_to_update, values=[[target_status, new_user]])
-                    if target_record:
-                        target_record['status'] = target_status
-                        target_record['user_name'] = new_user
+            if rows_to_update:
+                batch_updates = []
+                for r_num, rec in rows_to_update:
+                    rec['status'] = target_status
+                    rec['user_name'] = new_user
+                    batch_updates.append({
+                        'range': f'F{r_num}:G{r_num}',
+                        'values': [[target_status, new_user]]
+                    })
+                sheet.batch_update(batch_updates, value_input_option='USER_ENTERED')
             else:
-                # 3. Tự động thêm dòng mới vào sheet nếu hôm nay chưa khởi tạo task này
+                # 3. Tự động thêm dòng mới vào sheet VÀ vào bộ nhớ RAM nếu hôm nay chưa khởi tạo task này
                 task_name_val = task_id
                 task_time_val = ''
                 for t in TASKS.get(shift_type, []):
@@ -474,16 +471,30 @@ def handle_postback(event):
                         break
                 new_row = [str(group_id or ''), today_str, task_id, task_name_val, task_time_val, target_status, new_user]
                 sheet.append_row(new_row, value_input_option='USER_ENTERED')
+                all_records.append({
+                    'group_id': str(group_id or ''),
+                    'date': today_str,
+                    'task_id': task_id,
+                    'name': task_name_val,
+                    'time': task_time_val,
+                    'status': target_status,
+                    'user_name': new_user
+                })
                 print(f"Đã tự động khởi tạo và cập nhật task {task_id} vào sheet.")
             
             if shift_type == 'vs':
                 updated_flex_content = generate_checklist_flex(group_id, 'vs', all_records_prefetched=all_records)
                 alt_text = "Cập nhật checklist hình ảnh"
             elif str(group_id).strip() == str(MAIN_CHECKLIST_GROUP_ID).strip():
-                updated_flex_content = generate_combined_work_flex(group_id, shift_type)
+                checklist_bubble = generate_checklist_flex(group_id, shift_type, all_records_prefetched=all_records)
+                adhoc_bubble = generate_today_adhoc_flex(group_id)
+                if checklist_bubble and adhoc_bubble:
+                    updated_flex_content = {"type": "carousel", "contents": [checklist_bubble, adhoc_bubble]}
+                else:
+                    updated_flex_content = checklist_bubble or adhoc_bubble
                 alt_text = f"📋 Cập nhật checklist ca {shift_type}"
             else:
-                updated_flex_content = generate_checklist_flex(group_id, shift_type)
+                updated_flex_content = generate_checklist_flex(group_id, shift_type, all_records_prefetched=all_records)
                 alt_text = f"📋 Cập nhật checklist ca {shift_type}"
 
             line_bot_api.reply_message(
@@ -550,23 +561,6 @@ def handle_postback(event):
             print(f"Lỗi nghiêm trọng khi xử lý postback hoàn thành công việc phát sinh: {e}")
         return
 
-    # 2.6. Hủy nhóm việc — bấm nút "🗑 Hủy nhóm việc này" trên thẻ Flex
-    if action == 'cancel_task_group':
-        group_id = getattr(event.source, 'group_id', None)
-        token = data.get('token')
-        if not group_id or not token:
-            return
-        try:
-            removed, ten_viec = cancel_task_group(group_id, token)
-            if removed:
-                ds = ", ".join(ten_viec[:3])
-                line_bot_api.reply_message(event.reply_token, TextSendMessage(
-                    text=f"🗑 Đã hủy {removed} dòng việc.\nMã nhóm: {token}\nViệc: {ds}"))
-            else:
-                line_bot_api.reply_message(event.reply_token, TextSendMessage(
-                    text="Không còn việc nào để hủy (có thể đã hủy trước đó)."))
-        except Exception as e:
-            print(f"Lỗi hủy nhóm việc qua nút: {e}")
     # 2.7. Xem danh mục phiếu giảm giá (GVGS)
     if action == 'view_coupon_menu':
         flex = build_category_menu_flex()
@@ -834,10 +828,6 @@ def handle_message(event):
             print(f"Không thể lấy profile để lưu thành viên: {e_reg}")
 
     # 0. Giao công việc phát sinh (Adhoc task) — cú pháp mở rộng 22/09/2026
-    #    Xem task_parser.py để biết toàn bộ cú pháp. Điểm chính:
-    #      - @ nhận ở BẤT KỲ vị trí nào trong dòng ("- @tuấn giá tv" = "- giá tv @tuấn")
-    #      - đích: @all / @nv / @pg / @st / @ql / @tc / @156494 / @Thảo / @Yến Sony
-    from task_parser import is_work_command
     lines = [line.strip() for line in user_message.split('\n') if line.strip()]
     _la_lenh_viec = is_work_command(lines)
 
@@ -850,8 +840,6 @@ def handle_message(event):
 
         try:
             from meal_handler import get_task_roster
-            from task_parser import parse_work_command, plan_assignments, resolve_mentions
-
             roster = get_task_roster()
 
             # MENTION THẬT CỦA LINE (sửa 24/09/2026): tên hiển thị LINE được phép
