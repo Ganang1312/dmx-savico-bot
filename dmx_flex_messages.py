@@ -2468,9 +2468,11 @@ def build_realtime_flex(detail_limit=None):
     rt_tSL = 0.0
     rt_tTarget = 0.0
     parsed_rt_bi = []
+    total_row_rt = None
     
     for r in rt_rows:
         if is_total_row(r):
+            total_row_rt = r
             continue
         nganh = get_key_val(r, "Nhóm Ngành Hàng", "nhóm ngành hàng", "Ngành hàng", "salegroupmastername", default=None)
         if not nganh or str(nganh).strip().upper() == "N/A" or is_total_row(nganh):
@@ -2478,28 +2480,20 @@ def build_realtime_flex(detail_limit=None):
         raw_thuc = parse_number(get_key_val(r, "revenue_RT", "Doanh thu", "doanh thu", "revenue", default=0))
         dt_thuc = raw_thuc / 1000000.0 if abs(raw_thuc) >= 1000000 else raw_thuc
 
-        raw_qd = max(
-            parse_number(get_key_val(r, "revenue_KFactor_RT")),
-            parse_number(get_key_val(r, "revenue_RT")),
-            parse_number(get_key_val(r, "Doanh thu Quy đổi", "doanh thu quy đổi", "Doanh thu", "doanh thu"))
-        )
+        val_qd = get_key_val(r, "Doanh thu Quy đổi", "doanh thu quy đổi", "revenue_KFactor_RT", "revenue_kfactor", "revenue_RT", "Doanh thu", "doanh thu", default=0)
+        raw_qd = parse_number(val_qd)
         dtqd = raw_qd / 1000000.0 if abs(raw_qd) >= 1000000 else raw_qd
-        if dt_thuc <= 0:
+        if dt_thuc == 0 and dtqd != 0:
             dt_thuc = dtqd
 
-        sl = max(
-            parse_number(get_key_val(r, "quantity_RT")),
-            parse_number(get_key_val(r, "quantity_KFactor")),
-            parse_number(get_key_val(r, "Số lượng", "số lượng"))
-        )
-        targetDay = max(
-            parse_number(get_key_val(r, "revenue_KFactor_AVEDay")),
-            parse_number(get_key_val(r, "target_Day", "Target", "target"))
-        )
-        dtTC = max(
-            parse_number(get_key_val(r, "revenue_Installment")),
-            parse_number(get_key_val(r, "Doanh thu trả góp", "DT Trả chậm", "doanh thu trả chậm"))
-        )
+        val_sl = get_key_val(r, "Số lượng", "số lượng", "quantity_RT", "quantity", "quantity_KFactor", default=0)
+        sl = parse_number(val_sl)
+
+        val_tg_day = get_key_val(r, "revenue_KFactor_AVEDay", "target_Day", "Target", "target", default=0)
+        targetDay = parse_number(val_tg_day)
+
+        val_tc = get_key_val(r, "DT Trả chậm", "Doanh thu trả góp", "doanh thu trả chậm", "revenue_Installment", "revenue_tragop", default=0)
+        dtTC = parse_number(val_tc)
         
         rt_total += dtqd
         rt_tTC += dtTC
@@ -2518,6 +2512,15 @@ def build_realtime_flex(detail_limit=None):
                 "tg": targetDay,
                 "ht": dtqd / targetDay if targetDay > 0 else 0.0
             })
+
+    if total_row_rt:
+        tot_qd_raw = parse_number(get_key_val(total_row_rt, "Doanh thu Quy đổi", "doanh thu quy đổi", "revenue_KFactor_RT", "revenue_kfactor", "Doanh thu", default=0))
+        tot_qd_val = tot_qd_raw / 1000000.0 if abs(tot_qd_raw) >= 1000000 else tot_qd_raw
+        if tot_qd_val != 0:
+            rt_total = tot_qd_val
+        tot_tc_raw = parse_number(get_key_val(total_row_rt, "DT Trả chậm", "Doanh thu trả góp", "doanh thu trả chậm", "revenue_Installment", "revenue_tragop", default=0))
+        if tot_tc_raw != 0:
+            rt_tTC = tot_tc_raw / 1000000.0 if abs(tot_tc_raw) >= 1000000 else tot_tc_raw
             
     parsed_rt_bi.sort(key=lambda x: x["dt"], reverse=True)
     htChung = rt_total / target_today if target_today > 0 else 0.0
@@ -2928,25 +2931,34 @@ def build_realtime_flex(detail_limit=None):
             staff_realtime_agg[m_id]["doanh thu thực"] += rev_val
             staff_realtime_agg[m_id]["doanh thu quy đổi"] += rev_qd
 
-    # Ưu tiên số 1: Lấy chuẩn xác từ chi tiết từng đơn hàng realtime trong ngày (Fail-safe chốt chặn an toàn)
     has_rt_detail = len(staff_realtime_agg) > 0
 
-    # Kiểm tra xem Data_Realtime_NV có bị lẫn số lũy kế cả tháng (Data_NV_BI) không
+    # Kiểm tra xem Data_Realtime_NV có phải dữ liệu chuẩn 1 ngày từ BI gốc (revenue-consolidated-get GROUPBY=STAFF) không
+    is_valid_official_rt_nv = False
     is_cum_data = False
     if data_rt_nv and isinstance(data_rt_nv, list) and len(data_rt_nv) > 0:
         sample_first = data_rt_nv[0]
-        if sample_first.get("numday_cum") is not None or sample_first.get("cum_as_of_date_key") is not None:
+        numday_win = int(parse_number(sample_first.get("numday_window", 0)))
+        total_check_qd = 0.0
+        total_check_thuc = 0.0
+        for r in data_rt_nv:
+            q_val = parse_number(get_key_val(r, "doanh thu quy đổi", "revenue_kfactor", "dt quy đổi", "Doanh thu Quy đổi", default=0))
+            t_val = parse_number(get_key_val(r, "doanh thu thực", "doanh thu", "revenue", default=0))
+            total_check_qd += (q_val / 1000000.0 if abs(q_val) >= 1000000 else q_val)
+            total_check_thuc += (t_val / 1000000.0 if abs(t_val) >= 1000000 else t_val)
+
+        if numday_win > 1 or (rt_total > 0 and total_check_qd > rt_total * 2.2):
             is_cum_data = True
-        else:
-            total_check_dt = sum(parse_number(get_key_val(r, "doanh thu quy đổi", "revenue_kfactor", "dt quy đổi", "Doanh thu Quy đổi", default=0)) for r in data_rt_nv[:5])
-            if abs(total_check_dt) >= 1000000:
-                total_check_dt /= 1000000.0
-            if rt_total > 0 and total_check_dt > (rt_total * 2.5):
-                is_cum_data = True
+        elif numday_win == 1 or (abs(total_check_qd - total_check_thuc) > 0.01 and (rt_total <= 0 or abs(total_check_qd - rt_total) <= max(15.0, rt_total * 0.25))):
+            is_valid_official_rt_nv = True
 
     source_nv_rows = []
-    if has_rt_detail:
+    used_fallback_agg = False
+    if is_valid_official_rt_nv:
+        source_nv_rows = data_rt_nv
+    elif has_rt_detail:
         source_nv_rows = list(staff_realtime_agg.values())
+        used_fallback_agg = True
     elif not is_cum_data and data_rt_nv:
         source_nv_rows = data_rt_nv
 
@@ -2969,7 +2981,7 @@ def build_realtime_flex(detail_limit=None):
                 dt_thuc_nv = raw_thuc / 1000000.0
             else:
                 dt_thuc_nv = raw_thuc
-            if dt_thuc_nv <= 0:
+            if dt_thuc_nv == 0 and dt_nv != 0:
                 dt_thuc_nv = dt_nv
 
             sl_nv = parse_number(get_key_val(row, "số lượng", "soluong", "quantity", "quantity_RT", default=0))
@@ -3012,108 +3024,450 @@ def build_realtime_flex(detail_limit=None):
                 "ht": ht_nv
             })
 
+        # Nếu đang dùng bảng tổng hợp tạm từ chi tiết đơn hàng, đồng bộ hệ số khớp với tổng DTQĐ siêu thị (rt_total)
+        raw_sum_nv_qd = sum(it["dt"] for it in parsed_nv_rt)
+        if used_fallback_agg and rt_total > 0 and raw_sum_nv_qd > 0 and abs(rt_total - raw_sum_nv_qd) <= rt_total * 0.25:
+            nv_scale = rt_total / raw_sum_nv_qd
+            for it in parsed_nv_rt:
+                it["dt"] = it["dt"] * nv_scale
+                it["ht"] = (it["dt"] / it["target"]) if it["target"] > 0 else (1.0 if it["dt"] > 0 else 0.0)
+
         parsed_nv_rt.sort(key=lambda x: x["dt"], reverse=True)
 
         if parsed_nv_rt:
+            def _fmt_nv_dec(val):
+                v = round(float(val or 0), 1)
+                if abs(v - round(v)) < 1e-6:
+                    return f"{int(round(v))}"
+                return f"{v:.1f}".replace(".", ",")
+
+            tot_nv_sl = sum(it["sl"] for it in parsed_nv_rt)
+            tot_nv_dt = rt_total if (rt_total > 0 and abs(rt_total - sum(it["dt"] for it in parsed_nv_rt)) <= 2.0) else sum(it["dt"] for it in parsed_nv_rt)
+            tot_nv_tg = sum(it["target"] for it in parsed_nv_rt)
+            st_target_val = target_today if target_today > 0 else tot_nv_tg
+            st_cl_val = max(0.0, st_target_val - tot_nv_dt)
+            st_ht_val = (tot_nv_dt / st_target_val) if st_target_val > 0 else 0.0
+
+            max_staff_dt = max([abs(it["dt"]) for it in parsed_nv_rt] + [1.0])
+
+            # Header biểu đồ Doanh thu nhân viên (Chuẩn bố cục Ảnh 2)
             nv_card_contents = [
-                {"type": "text", "text": "🏆 THỨ HẠNG DOANH THU NHÂN VIÊN", "size": "xxs", "color": "#0284c7", "weight": "bold", "margin": "xs"}
-            ]
-            nv_headers = ["#", "NV", "SL", "DT", "TG", "Còn", "%HT"]
-            nv_weights = [1, 4, 1, 2, 2, 2, 2]
-            nv_aligns = ["center", "start", "center", "end", "end", "end", "end"]
-            nv_card_contents.append(make_table_header(nv_headers, nv_weights, nv_aligns, bg_color="#0284c7"))
-            nv_card_contents.append({"type": "separator", "color": "#cbd5e1", "margin": "xs"})
-
-            rank_icons = ["🥇", "🥈", "🥉"]
-            for idx, item in enumerate(parsed_nv_rt):
-                rank_str = rank_icons[idx] if idx < 3 else f"{idx+1}."
-
-                sl_str = fmt_num(item["sl"])
-                dt_tr_str = fmt_num(item["dt"])
-                tg_tr_str = fmt_num(item["target"])
-
-                # Còn lại
-                con_lai = item['target'] - item['dt']
-                if con_lai <= 0 and item['target'] > 0:
-                    con_lai_str = "Đạt"
-                    con_color = "#059669"
-                else:
-                    val_cl = max(0, con_lai)
-                    con_lai_str = fmt_num(val_cl)
-                    con_color = "#ef4444"
-
-                ht_str = f"{round(item['ht']*100)}%"
-
-                nv_cell = {
+                {
                     "type": "box",
-                    "layout": "vertical",
+                    "layout": "horizontal",
+                    "alignItems": "center",
+                    "paddingBottom": "xs",
                     "contents": [
                         {
-                            "type": "text",
-                            "text": str(item.get("short_name") or item["name"]),
-                            "size": "xxs",
-                            "color": "#0f172a",
-                            "weight": "bold" if idx < 3 else "regular",
-                            "maxLines": 1
+                            "type": "box",
+                            "layout": "vertical",
+                            "width": "32px",
+                            "height": "32px",
+                            "backgroundColor": "#fef3c7",
+                            "cornerRadius": "md",
+                            "justifyContent": "center",
+                            "alignItems": "center",
+                            "flex": 0,
+                            "contents": [
+                                {"type": "text", "text": "👥", "size": "sm", "align": "center"}
+                            ]
                         },
-                        *(
-                            [{
-                                "type": "text",
-                                "text": str(item["ma_nv"]),
-                                "size": "xxs",
-                                "color": "#64748b",
-                                "maxLines": 1
-                            }] if item.get("ma_nv") else []
-                        )
+                        {
+                            "type": "box",
+                            "layout": "vertical",
+                            "flex": 1,
+                            "paddingStart": "sm",
+                            "contents": [
+                                {"type": "text", "text": "Doanh thu nhân viên", "size": "xs", "weight": "bold", "color": "#0f172a"},
+                                {"type": "text", "text": f"{len(parsed_nv_rt)} nhân viên · DT quy đổi", "size": "xxs", "color": "#64748b"}
+                            ]
+                        },
+                        {
+                            "type": "box",
+                            "layout": "vertical",
+                            "alignItems": "flex-end",
+                            "flex": 0,
+                            "contents": [
+                                {"type": "text", "text": fmt_num(tot_nv_dt), "size": "md", "weight": "bold", "color": "#0f172a", "align": "end"},
+                                {"type": "text", "text": "DT quy đổi", "size": "xxs", "color": "#64748b", "align": "end"}
+                            ]
+                        }
+                    ]
+                },
+                {"type": "separator", "color": "#e2e8f0", "margin": "xs"}
+            ]
+
+            rank_icons = ["🥇", "🥈", "🥉"]
+            avatar_palette = ["#0ea5e9", "#10b981", "#8b5cf6", "#f59e0b", "#ec4899", "#0284c7", "#14b8a6", "#6366f1", "#f97316"]
+            bar_palette = ["#10b981", "#0ea5e9", "#8b5cf6", "#f59e0b", "#ec4899", "#10b981", "#0ea5e9", "#8b5cf6", "#f59e0b"]
+            top_borders = ["#f59e0b", "#0ea5e9", "#f97316"]
+
+            for idx, item in enumerate(parsed_nv_rt):
+                short_name_str = str(item.get("short_name") or item["name"]).strip()
+                first_char = short_name_str[0].upper() if short_name_str else "N"
+                disp_short_name = f"{short_name_str} 👑" if idx == 0 else short_name_str
+
+                avatar_col = avatar_palette[idx % len(avatar_palette)]
+                is_neg = item["dt"] < 0
+                bar_col = "#f43f5e" if is_neg else bar_palette[idx % len(bar_palette)]
+                pill_text_col = "#e11d48" if is_neg else bar_col
+                card_border_col = top_borders[idx] if idx < 3 else "#e2e8f0"
+
+                dt_tr_str = _fmt_nv_dec(item["dt"])
+                tg_tr_str = _fmt_nv_dec(item["target"])
+
+                con_lai = item["target"] - item["dt"]
+                if con_lai <= 0 and item["target"] > 0:
+                    con_lai_str = "Đạt"
+                    con_color = "#15803d"
+                else:
+                    con_lai_str = f"{_fmt_nv_dec(max(0.0, con_lai))}tr"
+                    con_color = "#dc2626"
+
+                ht_pct_val = item["ht"] * 100.0
+                ht_str = f"{_fmt_nv_dec(ht_pct_val)}%"
+                if item["ht"] >= 1.0:
+                    ht_color = "#15803d"
+                elif item["ht"] >= 0.5:
+                    ht_color = "#0284c7"
+                else:
+                    ht_color = "#dc2626"
+
+                if max_staff_dt > 0:
+                    bar_pct = int(round((abs(item["dt"]) / max_staff_dt) * 92))
+                else:
+                    bar_pct = 6
+                bar_pct = max(6, min(100, bar_pct))
+
+                if idx < 3:
+                    rank_node = {
+                        "type": "text",
+                        "text": rank_icons[idx],
+                        "size": "sm",
+                        "flex": 0,
+                        "align": "center"
+                    }
+                else:
+                    rank_node = {
+                        "type": "box",
+                        "layout": "vertical",
+                        "width": "18px",
+                        "height": "18px",
+                        "backgroundColor": "#e0f2fe",
+                        "cornerRadius": "sm",
+                        "justifyContent": "center",
+                        "alignItems": "center",
+                        "flex": 0,
+                        "contents": [
+                            {"type": "text", "text": str(idx + 1), "size": "xxs", "weight": "bold", "color": "#0284c7", "align": "center"}
+                        ]
+                    }
+
+                avatar_node = {
+                    "type": "box",
+                    "layout": "vertical",
+                    "width": "22px",
+                    "height": "22px",
+                    "backgroundColor": avatar_col,
+                    "cornerRadius": "11px",
+                    "justifyContent": "center",
+                    "alignItems": "center",
+                    "margin": "xs",
+                    "flex": 0,
+                    "contents": [
+                        {"type": "text", "text": first_char, "size": "xxs", "weight": "bold", "color": "#ffffff", "align": "center"}
                     ]
                 }
 
-                row_vals = [rank_str, nv_cell, sl_str, dt_tr_str, tg_tr_str, con_lai_str, ht_str]
-                row_colors = [
-                    "#d97706" if idx < 3 else "#64748b",
-                    "#0f172a",
-                    "#475569",
-                    "#ef4444" if item["dt"] < 0 else "#059669",
-                    "#475569",
-                    con_color,
-                    get_color_class(item["ht"])
+                name_col_contents = [
+                    {
+                        "type": "text",
+                        "text": disp_short_name,
+                        "size": "xxs",
+                        "weight": "bold",
+                        "color": "#0f172a",
+                        "maxLines": 1
+                    }
                 ]
-                nv_card_contents.append(make_table_row(row_vals, nv_weights, nv_aligns, row_colors, bold=(idx < 3)))
-                if idx < len(parsed_nv_rt) - 1:
-                    nv_card_contents.append({"type": "separator", "color": "#f1f5f9", "margin": "xs"})
+                if item.get("ma_nv"):
+                    name_col_contents.append({
+                        "type": "text",
+                        "text": str(item["ma_nv"]),
+                        "size": "xxs",
+                        "color": "#64748b",
+                        "maxLines": 1
+                    })
 
-            # Thêm dòng TỔNG ở cuối bảng Thứ Hạng Doanh Thu Nhân Viên (Đồng bộ chuẩn Ảnh 2)
-            tot_nv_sl = sum(it["sl"] for it in parsed_nv_rt)
-            tot_nv_dt = sum(it["dt"] for it in parsed_nv_rt)
-            tot_nv_tg = sum(it["target"] for it in parsed_nv_rt)
-            tot_nv_cl = max(0, tot_nv_tg - tot_nv_dt)
-            tot_nv_ht = (tot_nv_dt / tot_nv_tg) if tot_nv_tg > 0 else 0.0
+                staff_row_box = {
+                    "type": "box",
+                    "layout": "horizontal",
+                    "alignItems": "center",
+                    "backgroundColor": "#ffffff",
+                    "borderColor": card_border_col,
+                    "borderWidth": "1px",
+                    "cornerRadius": "md",
+                    "paddingAll": "xs",
+                    "margin": "xs",
+                    "contents": [
+                        {
+                            "type": "box",
+                            "layout": "horizontal",
+                            "alignItems": "center",
+                            "width": "96px",
+                            "flex": 0,
+                            "contents": [
+                                rank_node,
+                                avatar_node,
+                                {
+                                    "type": "box",
+                                    "layout": "vertical",
+                                    "flex": 1,
+                                    "paddingStart": "xs",
+                                    "contents": name_col_contents
+                                }
+                            ]
+                        },
+                        {
+                            "type": "box",
+                            "layout": "vertical",
+                            "flex": 1,
+                            "paddingStart": "xs",
+                            "contents": [
+                                {
+                                    "type": "box",
+                                    "layout": "horizontal",
+                                    "alignItems": "center",
+                                    "contents": [
+                                        {
+                                            "type": "text",
+                                            "size": "xxs",
+                                            "flex": 4,
+                                            "maxLines": 1,
+                                            "contents": [
+                                                {"type": "span", "text": f"🎯 {dt_tr_str}", "weight": "bold", "color": "#e11d48" if is_neg else "#0284c7"},
+                                                {"type": "span", "text": f"/{tg_tr_str}tr", "color": "#64748b"}
+                                            ]
+                                        },
+                                        {
+                                            "type": "text",
+                                            "text": f"⏳ {con_lai_str}",
+                                            "size": "xxs",
+                                            "weight": "bold",
+                                            "color": con_color,
+                                            "flex": 3,
+                                            "align": "center",
+                                            "maxLines": 1
+                                        },
+                                        {
+                                            "type": "text",
+                                            "text": f"🔥 {ht_str}",
+                                            "size": "xxs",
+                                            "weight": "bold",
+                                            "color": ht_color,
+                                            "flex": 3,
+                                            "align": "end",
+                                            "maxLines": 1
+                                        }
+                                    ]
+                                },
+                                {
+                                    "type": "box",
+                                    "layout": "horizontal",
+                                    "alignItems": "center",
+                                    "margin": "xs",
+                                    "contents": [
+                                        {
+                                            "type": "box",
+                                            "layout": "horizontal",
+                                            "flex": 1,
+                                            "height": "6px",
+                                            "backgroundColor": "#e2e8f0",
+                                            "cornerRadius": "3px",
+                                            "contents": [
+                                                {
+                                                    "type": "box",
+                                                    "layout": "vertical",
+                                                    "width": f"{bar_pct}%",
+                                                    "height": "6px",
+                                                    "backgroundColor": bar_col,
+                                                    "cornerRadius": "3px",
+                                                    "contents": [{"type": "filler"}]
+                                                }
+                                            ]
+                                        },
+                                        {
+                                            "type": "box",
+                                            "layout": "vertical",
+                                            "flex": 0,
+                                            "margin": "xs",
+                                            "backgroundColor": "#f8fafc",
+                                            "borderColor": "#e2e8f0",
+                                            "borderWidth": "1px",
+                                            "cornerRadius": "sm",
+                                            "paddingStart": "4px",
+                                            "paddingEnd": "4px",
+                                            "paddingTop": "1px",
+                                            "paddingBottom": "1px",
+                                            "contents": [
+                                                {
+                                                    "type": "text",
+                                                    "text": f"{dt_tr_str}Tr",
+                                                    "size": "xxs",
+                                                    "weight": "bold",
+                                                    "color": pill_text_col,
+                                                    "align": "end"
+                                                }
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        }
+                    ]
+                }
+                nv_card_contents.append(staff_row_box)
 
+            # Dòng TỔNG ST ở cuối biểu đồ (Đồng bộ chuẩn Ảnh 2)
             tot_dt_str = fmt_num(tot_nv_dt)
-            tot_tg_str = fmt_num(tot_nv_tg)
-            tot_cl_str = "Đạt" if tot_nv_dt >= tot_nv_tg else fmt_num(tot_nv_cl)
-            tot_ht_str = f"{round(tot_nv_ht*100)}%"
+            tot_tg_str = fmt_num(st_target_val)
+            tot_cl_str = "Đạt" if tot_nv_dt >= st_target_val and st_target_val > 0 else f"{fmt_num(st_cl_val)}tr"
+            tot_cl_col = "#15803d" if tot_cl_str == "Đạt" else "#dc2626"
+            tot_ht_str = f"{_fmt_nv_dec(st_ht_val * 100.0)}%"
+            tot_ht_col = "#15803d" if st_ht_val >= 1.0 else ("#0284c7" if st_ht_val >= 0.5 else "#dc2626")
+            tot_bar_pct = max(6, min(100, int(round(st_ht_val * 100)))) if st_ht_val > 0 else 6
 
-            nv_card_contents.append({"type": "separator", "color": "#cbd5e1", "margin": "xs"})
-            tot_nv_row_vals = ["⭐", "TỔNG", fmt_num(tot_nv_sl), tot_dt_str, tot_tg_str, tot_cl_str, tot_ht_str]
-            tot_nv_row_colors = [
-                "#d97706",
-                "#0f172a",
-                "#0f172a",
-                "#0284c7",
-                "#475569",
-                "#059669" if tot_nv_dt >= tot_nv_tg else "#ef4444",
-                get_color_class(tot_nv_ht)
-            ]
-            nv_card_contents.append(make_table_row(tot_nv_row_vals, nv_weights, nv_aligns, tot_nv_row_colors, bold=True, bg_color="#f8fafc"))
+            nv_card_contents.append({
+                "type": "box",
+                "layout": "horizontal",
+                "alignItems": "center",
+                "backgroundColor": "#f0f9ff",
+                "borderColor": "#38bdf8",
+                "borderWidth": "1px",
+                "cornerRadius": "md",
+                "paddingAll": "xs",
+                "margin": "sm",
+                "contents": [
+                    {
+                        "type": "box",
+                        "layout": "vertical",
+                        "width": "86px",
+                        "flex": 0,
+                        "backgroundColor": "#0284c7",
+                        "cornerRadius": "sm",
+                        "paddingTop": "4px",
+                        "paddingBottom": "4px",
+                        "paddingStart": "4px",
+                        "paddingEnd": "4px",
+                        "justifyContent": "center",
+                        "alignItems": "center",
+                        "contents": [
+                            {"type": "text", "text": "⭐ TỔNG ST", "size": "xxs", "weight": "bold", "color": "#ffffff", "align": "center", "maxLines": 1}
+                        ]
+                    },
+                    {
+                        "type": "box",
+                        "layout": "vertical",
+                        "flex": 1,
+                        "paddingStart": "sm",
+                        "contents": [
+                            {
+                                "type": "box",
+                                "layout": "horizontal",
+                                "alignItems": "center",
+                                "contents": [
+                                    {
+                                        "type": "text",
+                                        "size": "xxs",
+                                        "flex": 4,
+                                        "maxLines": 1,
+                                        "contents": [
+                                            {"type": "span", "text": f"🎯 {tot_dt_str}", "weight": "bold", "color": "#0284c7"},
+                                            {"type": "span", "text": f"/{tot_tg_str}tr", "color": "#64748b"}
+                                        ]
+                                    },
+                                    {
+                                        "type": "text",
+                                        "text": f"⏳ {tot_cl_str}",
+                                        "size": "xxs",
+                                        "weight": "bold",
+                                        "color": tot_cl_col,
+                                        "flex": 3,
+                                        "align": "center",
+                                        "maxLines": 1
+                                    },
+                                    {
+                                        "type": "text",
+                                        "text": f"🔥 {tot_ht_str}",
+                                        "size": "xxs",
+                                        "weight": "bold",
+                                        "color": tot_ht_col,
+                                        "flex": 3,
+                                        "align": "end",
+                                        "maxLines": 1
+                                    }
+                                ]
+                            },
+                            {
+                                "type": "box",
+                                "layout": "horizontal",
+                                "alignItems": "center",
+                                "margin": "xs",
+                                "contents": [
+                                    {
+                                        "type": "box",
+                                        "layout": "horizontal",
+                                        "flex": 1,
+                                        "height": "6px",
+                                        "backgroundColor": "#dbeafe",
+                                        "cornerRadius": "3px",
+                                        "contents": [
+                                            {
+                                                "type": "box",
+                                                "layout": "vertical",
+                                                "width": f"{tot_bar_pct}%",
+                                                "height": "6px",
+                                                "backgroundColor": "#10b981",
+                                                "cornerRadius": "3px",
+                                                "contents": [{"type": "filler"}]
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "type": "box",
+                                        "layout": "vertical",
+                                        "flex": 0,
+                                        "margin": "xs",
+                                        "backgroundColor": "#0284c7",
+                                        "cornerRadius": "sm",
+                                        "paddingStart": "6px",
+                                        "paddingEnd": "6px",
+                                        "paddingTop": "1px",
+                                        "paddingBottom": "1px",
+                                        "contents": [
+                                            {
+                                                "type": "text",
+                                                "text": f"{tot_dt_str}Tr",
+                                                "size": "xxs",
+                                                "weight": "bold",
+                                                "color": "#ffffff",
+                                                "align": "end"
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            })
 
             body_contents_rt1.append({
                 "type": "box",
                 "layout": "vertical",
-                "backgroundColor": "#ffffff",
+                "backgroundColor": "#f8fafc",
                 "borderColor": "#e2e8f0",
                 "borderWidth": "1px",
-                "cornerRadius": "md",
+                "cornerRadius": "lg",
                 "paddingAll": "sm",
                 "margin": "md",
                 "contents": nv_card_contents
