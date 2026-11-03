@@ -3040,20 +3040,39 @@ def build_realtime_flex(detail_limit=None):
         parsed_nv_rt.sort(key=lambda x: x["dt"], reverse=True)
 
         if parsed_nv_rt:
-            max_staff_dt = max([abs(it["dt"]) for it in parsed_nv_rt] + [1.0])
-
-            # Header Card Thứ Hạng & Tiến Độ Doanh Thu Nhân Viên (Chuẩn đồng bộ giao diện thẻ Flex DMX)
+            # Header Bảng Thứ Hạng Doanh Thu Nhân Viên (Chuẩn giao diện bảng DMX đồng bộ các phần khác)
             nv_card_contents = [
-                {"type": "text", "text": "🏆 THỨ HẠNG & TIẾN ĐỘ DOANH THU NV", "size": "xxs", "color": "#0284c7", "weight": "bold", "margin": "xs"},
-                {"type": "separator", "color": "#cbd5e1", "margin": "xs"}
+                {"type": "text", "text": "🏆 THỨ HẠNG DOANH THU NHÂN VIÊN", "size": "xxs", "color": "#0284c7", "weight": "bold", "margin": "xs"}
             ]
 
+            headers_nv = ["#", "NV", "SL", "DTQĐ", "TG", "Còn", "%HT"]
+            weights_nv = [1, 5, 1, 2, 2, 2, 2]
+            aligns_nv = ["center", "start", "center", "center", "center", "center", "center"]
+            wraps_nv = [False, False, False, False, False, False, False]
+
+            nv_card_contents.append(make_table_header(headers_nv, weights_nv, aligns_nv, bg_color="#0284c7"))
+            nv_card_contents.append({"type": "separator", "color": "#cbd5e1", "margin": "xs"})
+
             rank_icons = ["🥇", "🥈", "🥉"]
-            top_border_colors = ["#f59e0b", "#0284c7", "#f97316"]
 
             for idx, item in enumerate(parsed_nv_rt):
                 short_name_str = str(item.get("short_name") or item["name"]).strip()
                 rank_str = rank_icons[idx] if idx < 3 else f"{idx + 1}."
+
+                # Cột NV: Tên nhân viên và Mã NV nằm cạnh nhau trên 1 dòng, mã NV thu nhỏ và không bị xuống dòng
+                ma_nv_str = str(item.get("ma_nv") or "").strip()
+                nv_spans = [
+                    {"type": "span", "text": short_name_str, "weight": "bold", "color": "#0f172a", "size": "xxs"}
+                ]
+                if ma_nv_str:
+                    nv_spans.append({"type": "span", "text": f" {ma_nv_str}", "color": "#94a3b8", "size": "xxs"})
+
+                nv_col_box = {
+                    "type": "text",
+                    "wrap": False,
+                    "maxLines": 1,
+                    "contents": nv_spans
+                }
 
                 # Làm tròn số nguyên toàn bộ
                 sl_val = int(round(item["sl"]))
@@ -3065,121 +3084,54 @@ def build_realtime_flex(detail_limit=None):
                     con_lai_str = "Đạt"
                     con_color = "#16a34a"
                 else:
-                    con_lai_str = f"{fmt_num(max(0, con_lai))}Tr"
+                    con_lai_str = fmt_num(max(0, con_lai))
                     con_color = "#dc2626"
 
                 ht_pct_val = round(item["ht"] * 100.0)
                 ht_str = f"{ht_pct_val}%"
                 ht_color = get_color_class(item["ht"])
 
-                is_neg = dt_val < 0
-                if is_neg:
+                # Làm nổi bật chỉ số Doanh thu quy đổi (DTQĐ): in đậm, màu sắc tương phản rõ rệt
+                if dt_val < 0:
                     dt_color = "#ef4444"
-                    bar_color = "#ef4444"
                 elif dt_val >= tg_val and tg_val > 0:
                     dt_color = "#16a34a"
-                    bar_color = "#10b981"
                 elif item["ht"] >= 0.5:
                     dt_color = "#0284c7"
-                    bar_color = "#0284c7"
                 else:
-                    dt_color = "#dc2626"
-                    bar_color = "#f97316"
+                    dt_color = "#ea580c"
 
-                # Chiều dài thanh ngang tiến độ (tỷ lệ theo người cao nhất)
-                if max_staff_dt > 0:
-                    bar_pct = max(6, min(100, int(round((abs(dt_val) / max_staff_dt) * 100))))
-                else:
-                    bar_pct = 6
-
-                card_border = top_border_colors[idx] if idx < 3 else "#e2e8f0"
-
-                # Khối 1 nhân viên: Toàn bộ nằm trên 1 hàng ngang (horizontal), chỉ số giữa nhỏ gọn, DT quy đổi cuối cùng nổi bật
-                nv_box = {
-                    "type": "box",
-                    "layout": "horizontal",
-                    "alignItems": "center",
-                    "backgroundColor": "#ffffff",
-                    "borderColor": card_border,
-                    "borderWidth": "1px",
-                    "cornerRadius": "sm",
-                    "paddingAll": "xs",
-                    "margin": "xs",
-                    "contents": [
-                        # Cột 1: Rank + Tên & Mã NV ở dưới (chiều rộng cố định gọn gàng)
-                        {
-                            "type": "box",
-                            "layout": "horizontal",
-                            "alignItems": "center",
-                            "width": "68px",
-                            "flex": 0,
-                            "contents": [
-                                {"type": "text", "text": rank_str, "size": "xs" if idx < 3 else "xxs", "weight": "bold", "color": "#0284c7", "flex": 0},
-                                {
-                                    "type": "box",
-                                    "layout": "vertical",
-                                    "paddingStart": "xs",
-                                    "flex": 1,
-                                    "contents": [
-                                        {"type": "text", "text": short_name_str, "size": "xxs", "weight": "bold", "color": "#0f172a", "maxLines": 1},
-                                        {"type": "text", "text": str(item["ma_nv"]), "size": "xxs", "color": "#64748b", "maxLines": 1}
-                                    ]
-                                }
-                            ]
-                        },
-                        # Cột 2 (Ở giữa): Các chỉ số nhỏ xuống ở trên + Thanh ngang tiến độ ở dưới
-                        {
-                            "type": "box",
-                            "layout": "vertical",
-                            "flex": 1,
-                            "paddingStart": "xs",
-                            "paddingEnd": "xs",
-                            "contents": [
-                                {
-                                    "type": "box",
-                                    "layout": "horizontal",
-                                    "alignItems": "center",
-                                    "contents": [
-                                        {"type": "text", "text": f"🎯{fmt_num(dt_val)}/{fmt_num(tg_val)}tr", "size": "xxs", "color": dt_color, "flex": 5, "maxLines": 1},
-                                        {"type": "text", "text": f"⏳{con_lai_str}", "size": "xxs", "color": con_color, "flex": 3, "align": "center", "maxLines": 1},
-                                        {"type": "text", "text": f"🔥{ht_str}", "size": "xxs", "color": ht_color, "flex": 3, "align": "end", "maxLines": 1}
-                                    ]
-                                },
-                                {
-                                    "type": "box",
-                                    "layout": "vertical",
-                                    "height": "5px",
-                                    "backgroundColor": "#e2e8f0",
-                                    "cornerRadius": "2px",
-                                    "margin": "xs",
-                                    "contents": [
-                                        {
-                                            "type": "box",
-                                            "layout": "vertical",
-                                            "width": f"{bar_pct}%",
-                                            "height": "5px",
-                                            "backgroundColor": bar_color,
-                                            "cornerRadius": "2px",
-                                            "contents": [{"type": "filler"}]
-                                        }
-                                    ]
-                                }
-                            ]
-                        },
-                        # Cột 3: Chỉ số doanh thu quy đổi cuối cùng giữ nguyên kích thước
-                        {
-                            "type": "text",
-                            "text": f"{fmt_num(dt_val)}Tr",
-                            "size": "xxs",
-                            "weight": "bold",
-                            "color": dt_color,
-                            "align": "end",
-                            "flex": 0,
-                            "paddingStart": "xs"
-                        }
-                    ]
+                dtqd_cell = {
+                    "type": "text",
+                    "text": fmt_num(dt_val),
+                    "size": "xxs",
+                    "weight": "bold",
+                    "color": dt_color,
+                    "align": "center"
                 }
-                nv_card_contents.append(nv_box)
+
+                vals_nv = [
+                    rank_str,
+                    nv_col_box,
+                    fmt_num(sl_val),
+                    dtqd_cell,
+                    fmt_num(tg_val),
+                    con_lai_str,
+                    ht_str
+                ]
+                colors_nv = [
+                    "#64748b",
+                    "#0f172a",
+                    "#64748b",
+                    dt_color,
+                    "#64748b",
+                    con_color,
+                    ht_color
+                ]
+
+                nv_card_contents.append(make_table_row(vals_nv, weights_nv, aligns_nv, colors_nv, wraps=wraps_nv))
+                if idx < len(parsed_nv_rt) - 1:
+                    nv_card_contents.append({"type": "separator", "color": "#f1f5f9", "margin": "xs"})
 
             body_contents_rt1.append({
                 "type": "box",
