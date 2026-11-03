@@ -3040,266 +3040,87 @@ def build_realtime_flex(detail_limit=None):
         parsed_nv_rt.sort(key=lambda x: x["dt"], reverse=True)
 
         if parsed_nv_rt:
-            def _fmt_nv_dec(val):
-                v = round(float(val or 0), 1)
-                if abs(v - round(v)) < 1e-6:
-                    return f"{int(round(v))}"
-                return f"{v:.1f}".replace(".", ",")
-
-            tot_nv_sl = sum(it["sl"] for it in parsed_nv_rt)
-            tot_nv_dt = rt_total if (rt_total > 0 and abs(rt_total - sum(it["dt"] for it in parsed_nv_rt)) <= 2.0) else sum(it["dt"] for it in parsed_nv_rt)
-            tot_nv_tg = sum(it["target"] for it in parsed_nv_rt)
-            st_target_val = target_today if target_today > 0 else tot_nv_tg
-            st_cl_val = max(0.0, st_target_val - tot_nv_dt)
-            st_ht_val = (tot_nv_dt / st_target_val) if st_target_val > 0 else 0.0
-
-            max_staff_dt = max([abs(it["dt"]) for it in parsed_nv_rt] + [1.0])
-
-            # Header biểu đồ Doanh thu nhân viên (Chuẩn bố cục Ảnh 2)
+            # Header Bảng Thứ Hạng Doanh Thu Nhân Viên (Chuẩn giao diện bảng DMX đồng bộ các phần khác)
             nv_card_contents = [
-                {
-                    "type": "box",
-                    "layout": "horizontal",
-                    "alignItems": "center",
-                    "paddingBottom": "xs",
-                    "contents": [
-                        {
-                            "type": "box",
-                            "layout": "vertical",
-                            "width": "32px",
-                            "height": "32px",
-                            "backgroundColor": "#fef3c7",
-                            "cornerRadius": "md",
-                            "justifyContent": "center",
-                            "alignItems": "center",
-                            "flex": 0,
-                            "contents": [
-                                {"type": "text", "text": "👥", "size": "sm", "align": "center"}
-                            ]
-                        },
-                        {
-                            "type": "box",
-                            "layout": "vertical",
-                            "flex": 1,
-                            "paddingStart": "sm",
-                            "contents": [
-                                {"type": "text", "text": "Doanh thu nhân viên", "size": "xs", "weight": "bold", "color": "#0f172a"},
-                                {"type": "text", "text": f"{len(parsed_nv_rt)} nhân viên · DT quy đổi", "size": "xxs", "color": "#64748b"}
-                            ]
-                        },
-                        {
-                            "type": "box",
-                            "layout": "vertical",
-                            "alignItems": "flex-end",
-                            "flex": 0,
-                            "contents": [
-                                {"type": "text", "text": fmt_num(tot_nv_dt), "size": "md", "weight": "bold", "color": "#0f172a", "align": "end"},
-                                {"type": "text", "text": "DT quy đổi", "size": "xxs", "color": "#64748b", "align": "end"}
-                            ]
-                        }
-                    ]
-                },
-                {"type": "separator", "color": "#e2e8f0", "margin": "xs"}
+                {"type": "text", "text": "🏆 THỨ HẠNG DOANH THU NHÂN VIÊN", "size": "xxs", "color": "#0284c7", "weight": "bold", "margin": "xs"}
             ]
 
+            headers_nv = ["#", "NV", "SL", "DT", "TG", "Còn", "%HT"]
+            weights_nv = [1, 4, 1, 2, 2, 2, 2]
+            aligns_nv = ["center", "start", "center", "center", "center", "center", "center"]
+            wraps_nv = [False, True, False, False, False, False, False]
+
+            nv_card_contents.append(make_table_header(headers_nv, weights_nv, aligns_nv, bg_color="#0284c7"))
+            nv_card_contents.append({"type": "separator", "color": "#cbd5e1", "margin": "xs"})
+
             rank_icons = ["🥇", "🥈", "🥉"]
-            avatar_palette = ["#0ea5e9", "#10b981", "#8b5cf6", "#f59e0b", "#ec4899", "#0284c7", "#14b8a6", "#6366f1", "#f97316"]
-            bar_palette = ["#10b981", "#0ea5e9", "#8b5cf6", "#f59e0b", "#ec4899", "#10b981", "#0ea5e9", "#8b5cf6", "#f59e0b"]
-            top_borders = ["#f59e0b", "#0ea5e9", "#f97316"]
 
             for idx, item in enumerate(parsed_nv_rt):
                 short_name_str = str(item.get("short_name") or item["name"]).strip()
-                first_char = short_name_str[0].upper() if short_name_str else "N"
-                disp_short_name = f"{short_name_str} 👑" if idx == 0 else short_name_str
+                rank_str = rank_icons[idx] if idx < 3 else f"{idx + 1}."
 
-                avatar_col = avatar_palette[idx % len(avatar_palette)]
-                is_neg = item["dt"] < 0
-                bar_col = "#f43f5e" if is_neg else bar_palette[idx % len(bar_palette)]
-                pill_text_col = "#e11d48" if is_neg else bar_col
-                card_border_col = top_borders[idx] if idx < 3 else "#e2e8f0"
-
-                dt_tr_str = _fmt_nv_dec(item["dt"])
-                tg_tr_str = _fmt_nv_dec(item["target"])
-
-                con_lai = item["target"] - item["dt"]
-                if con_lai <= 0 and item["target"] > 0:
-                    con_lai_str = "Đạt"
-                    con_color = "#15803d"
-                else:
-                    con_lai_str = f"{_fmt_nv_dec(max(0.0, con_lai))}tr"
-                    con_color = "#dc2626"
-
-                ht_pct_val = item["ht"] * 100.0
-                ht_str = f"{_fmt_nv_dec(ht_pct_val)}%"
-                if item["ht"] >= 1.0:
-                    ht_color = "#15803d"
-                elif item["ht"] >= 0.5:
-                    ht_color = "#0284c7"
-                else:
-                    ht_color = "#dc2626"
-
-                if max_staff_dt > 0:
-                    bar_pct = int(round((abs(item["dt"]) / max_staff_dt) * 92))
-                else:
-                    bar_pct = 6
-                bar_pct = max(6, min(100, bar_pct))
-
-                rank_prefix = rank_icons[idx] if idx < 3 else f"{idx + 1}."
-                disp_short_name = f"{rank_prefix} {short_name_str}"
-
-                avatar_node = {
-                    "type": "box",
-                    "layout": "vertical",
-                    "width": "18px",
-                    "height": "18px",
-                    "backgroundColor": avatar_col,
-                    "cornerRadius": "9px",
-                    "contents": [
-                        {"type": "text", "text": first_char, "size": "xxs", "weight": "bold", "color": "#ffffff", "align": "center"}
-                    ]
-                }
-
-                name_col_contents = [
-                    {"type": "text", "text": disp_short_name, "size": "xxs", "weight": "bold"}
+                # Cột NV: Tên nhân viên ở trên, User/Mã NV ở dòng nhỏ ngay dưới
+                nv_cell_contents = [
+                    {"type": "text", "text": short_name_str, "size": "xxs", "weight": "bold", "color": "#0f172a", "maxLines": 1}
                 ]
                 if item.get("ma_nv"):
-                    name_col_contents.append({"type": "text", "text": str(item["ma_nv"]), "size": "xxs", "color": "#64748b"})
+                    nv_cell_contents.append({"type": "text", "text": str(item["ma_nv"]), "size": "xxs", "color": "#64748b", "maxLines": 1})
 
-                staff_row_box = {
+                nv_col_box = {
                     "type": "box",
-                    "layout": "horizontal",
-                    "alignItems": "center",
-                    "backgroundColor": "#ffffff",
-                    "cornerRadius": "md",
-                    "paddingAll": "xs",
-                    "margin": "xs",
-                    "contents": [
-                        avatar_node,
-                        {
-                            "type": "box",
-                            "layout": "vertical",
-                            "width": "62px",
-                            "margin": "xs",
-                            "contents": name_col_contents
-                        },
-                        {
-                            "type": "box",
-                            "layout": "vertical",
-                            "flex": 1,
-                            "margin": "xs",
-                            "contents": [
-                                {
-                                    "type": "box",
-                                    "layout": "horizontal",
-                                    "contents": [
-                                        {"type": "text", "text": f"🎯{dt_tr_str}/{tg_tr_str}tr", "size": "xxs", "weight": "bold", "color": "#e11d48" if is_neg else "#0284c7", "flex": 5},
-                                        {"type": "text", "text": f"⏳{con_lai_str} 🔥{ht_str}", "size": "xxs", "weight": "bold", "color": ht_color, "flex": 6, "align": "end"}
-                                    ]
-                                },
-                                {
-                                    "type": "box",
-                                    "layout": "vertical",
-                                    "height": "6px",
-                                    "backgroundColor": "#e2e8f0",
-                                    "cornerRadius": "3px",
-                                    "margin": "xs",
-                                    "contents": [
-                                        {
-                                            "type": "box",
-                                            "layout": "vertical",
-                                            "width": f"{bar_pct}%",
-                                            "height": "6px",
-                                            "backgroundColor": bar_col,
-                                            "contents": [{"type": "filler"}]
-                                        }
-                                    ]
-                                }
-                            ]
-                        },
-                        {"type": "text", "text": f"{dt_tr_str}Tr", "size": "xxs", "weight": "bold", "color": pill_text_col, "flex": 0, "margin": "xs"}
-                    ]
+                    "layout": "vertical",
+                    "contents": nv_cell_contents
                 }
-                if idx < 3:
-                    staff_row_box["borderColor"] = card_border_col
-                    staff_row_box["borderWidth"] = "1px"
-                nv_card_contents.append(staff_row_box)
 
-            # Dòng TỔNG ST ở cuối biểu đồ (Đồng bộ chuẩn Ảnh 2)
-            tot_dt_str = fmt_num(tot_nv_dt)
-            tot_tg_str = fmt_num(st_target_val)
-            tot_cl_str = "Đạt" if tot_nv_dt >= st_target_val and st_target_val > 0 else f"{fmt_num(st_cl_val)}tr"
-            tot_cl_col = "#15803d" if tot_cl_str == "Đạt" else "#dc2626"
-            tot_ht_str = f"{_fmt_nv_dec(st_ht_val * 100.0)}%"
-            tot_ht_col = "#15803d" if st_ht_val >= 1.0 else ("#0284c7" if st_ht_val >= 0.5 else "#dc2626")
-            tot_bar_pct = max(6, min(100, int(round(st_ht_val * 100)))) if st_ht_val > 0 else 6
+                # Làm tròn số nguyên toàn bộ
+                sl_val = int(round(item["sl"]))
+                dt_val = int(round(item["dt"]))
+                tg_val = int(round(item["target"]))
+                
+                con_lai = tg_val - dt_val
+                if dt_val >= tg_val and tg_val > 0:
+                    con_lai_str = "Đạt"
+                    con_color = "#16a34a"
+                else:
+                    con_lai_str = fmt_num(max(0, con_lai))
+                    con_color = "#dc2626"
 
-            nv_card_contents.append({
-                "type": "box",
-                "layout": "horizontal",
-                "alignItems": "center",
-                "backgroundColor": "#f0f9ff",
-                "borderColor": "#38bdf8",
-                "borderWidth": "1px",
-                "cornerRadius": "md",
-                "paddingAll": "xs",
-                "margin": "sm",
-                "contents": [
-                    {
-                        "type": "box",
-                        "layout": "vertical",
-                        "width": "74px",
-                        "backgroundColor": "#0284c7",
-                        "cornerRadius": "sm",
-                        "paddingAll": "xs",
-                        "contents": [
-                            {"type": "text", "text": "⭐ TỔNG ST", "size": "xxs", "weight": "bold", "color": "#ffffff", "align": "center"}
-                        ]
-                    },
-                    {
-                        "type": "box",
-                        "layout": "vertical",
-                        "flex": 1,
-                        "margin": "xs",
-                        "contents": [
-                            {
-                                "type": "box",
-                                "layout": "horizontal",
-                                "contents": [
-                                    {"type": "text", "text": f"🎯{tot_dt_str}/{tot_tg_str}tr", "size": "xxs", "weight": "bold", "color": "#0284c7", "flex": 5},
-                                    {"type": "text", "text": f"⏳{tot_cl_str} 🔥{tot_ht_str}", "size": "xxs", "weight": "bold", "color": tot_ht_col, "flex": 6, "align": "end"}
-                                ]
-                            },
-                            {
-                                "type": "box",
-                                "layout": "vertical",
-                                "height": "6px",
-                                "backgroundColor": "#dbeafe",
-                                "cornerRadius": "3px",
-                                "margin": "xs",
-                                "contents": [
-                                    {
-                                        "type": "box",
-                                        "layout": "vertical",
-                                        "width": f"{tot_bar_pct}%",
-                                        "height": "6px",
-                                        "backgroundColor": "#10b981",
-                                        "contents": [{"type": "filler"}]
-                                    }
-                                ]
-                            }
-                        ]
-                    },
-                    {"type": "text", "text": f"{tot_dt_str}Tr", "size": "xxs", "weight": "bold", "color": "#0284c7", "flex": 0, "margin": "xs"}
+                ht_pct_val = round(item["ht"] * 100.0)
+                ht_str = f"{ht_pct_val}%"
+                ht_color = get_color_class(item["ht"])
+
+                dt_color = "#ef4444" if dt_val < 0 else ("#16a34a" if (dt_val >= tg_val and tg_val > 0) else "#0284c7")
+
+                vals_nv = [
+                    rank_str,
+                    nv_col_box,
+                    fmt_num(sl_val),
+                    fmt_num(dt_val),
+                    fmt_num(tg_val),
+                    con_lai_str,
+                    ht_str
                 ]
-            })
+                colors_nv = [
+                    "#64748b",
+                    "#0f172a",
+                    "#0f172a",
+                    dt_color,
+                    "#475569",
+                    con_color,
+                    ht_color
+                ]
+
+                nv_card_contents.append(make_table_row(vals_nv, weights_nv, aligns_nv, colors_nv, wraps=wraps_nv))
+                if idx < len(parsed_nv_rt) - 1:
+                    nv_card_contents.append({"type": "separator", "color": "#f1f5f9", "margin": "xs"})
 
             body_contents_rt1.append({
                 "type": "box",
                 "layout": "vertical",
-                "backgroundColor": "#f8fafc",
+                "backgroundColor": "#ffffff",
                 "borderColor": "#e2e8f0",
                 "borderWidth": "1px",
-                "cornerRadius": "lg",
+                "cornerRadius": "md",
                 "paddingAll": "sm",
                 "margin": "md",
                 "contents": nv_card_contents
