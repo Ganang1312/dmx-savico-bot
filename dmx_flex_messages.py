@@ -3094,10 +3094,11 @@ def build_realtime_flex(detail_limit=None):
 
                 card_border = top_border_colors[idx] if idx < 3 else "#e2e8f0"
 
-                # Khối 1 nhân viên dạng thanh ngang biểu đồ tiến độ chuẩn Flex
+                # Khối 1 nhân viên: Toàn bộ nằm trên 1 hàng ngang (horizontal), chỉ số giữa nhỏ gọn, DT quy đổi cuối cùng nổi bật
                 nv_box = {
                     "type": "box",
-                    "layout": "vertical",
+                    "layout": "horizontal",
+                    "alignItems": "center",
                     "backgroundColor": "#ffffff",
                     "borderColor": card_border,
                     "borderWidth": "1px",
@@ -3105,74 +3106,76 @@ def build_realtime_flex(detail_limit=None):
                     "paddingAll": "xs",
                     "margin": "xs",
                     "contents": [
-                        # Dòng 1: Tên & các chỉ số làm tròn
+                        # Cột 1: Rank + Tên & Mã NV ở dưới (chiều rộng cố định gọn gàng)
                         {
                             "type": "box",
                             "layout": "horizontal",
                             "alignItems": "center",
+                            "width": "68px",
+                            "flex": 0,
                             "contents": [
-                                # Cột trái: Rank + Tên & User bên dưới
+                                {"type": "text", "text": rank_str, "size": "xs" if idx < 3 else "xxs", "weight": "bold", "color": "#0284c7", "flex": 0},
                                 {
                                     "type": "box",
-                                    "layout": "horizontal",
-                                    "alignItems": "center",
-                                    "flex": 4,
+                                    "layout": "vertical",
+                                    "paddingStart": "xs",
+                                    "flex": 1,
                                     "contents": [
-                                        {"type": "text", "text": rank_str, "size": "xs" if idx < 3 else "xxs", "weight": "bold", "color": "#0284c7", "flex": 0},
-                                        {
-                                            "type": "box",
-                                            "layout": "vertical",
-                                            "paddingStart": "xs",
-                                            "flex": 1,
-                                            "contents": [
-                                                {"type": "text", "text": short_name_str, "size": "xxs", "weight": "bold", "color": "#0f172a", "maxLines": 1},
-                                                {"type": "text", "text": str(item["ma_nv"]), "size": "xxs", "color": "#64748b", "maxLines": 1}
-                                            ]
-                                        }
-                                    ]
-                                },
-                                # Cột phải: Chỉ số tiến độ (🎯 Thực hiện/Target · ⏳ Còn lại · 🔥 %HT)
-                                {
-                                    "type": "box",
-                                    "layout": "horizontal",
-                                    "alignItems": "center",
-                                    "flex": 6,
-                                    "contents": [
-                                        {"type": "text", "text": f"🎯 {fmt_num(dt_val)}/{fmt_num(tg_val)}Tr", "size": "xxs", "weight": "bold", "color": dt_color, "flex": 5, "maxLines": 1},
-                                        {"type": "text", "text": f"⏳ {con_lai_str}", "size": "xxs", "weight": "bold", "color": con_color, "flex": 3, "align": "center", "maxLines": 1},
-                                        {"type": "text", "text": f"🔥 {ht_str}", "size": "xxs", "weight": "bold", "color": ht_color, "flex": 3, "align": "end", "maxLines": 1}
+                                        {"type": "text", "text": short_name_str, "size": "xxs", "weight": "bold", "color": "#0f172a", "maxLines": 1},
+                                        {"type": "text", "text": str(item["ma_nv"]), "size": "xxs", "color": "#64748b", "maxLines": 1}
                                     ]
                                 }
                             ]
                         },
-                        # Dòng 2: Thanh ngang biểu đồ tiến độ & con số doanh thu
+                        # Cột 2 (Ở giữa): Các chỉ số nhỏ xuống ở trên + Thanh ngang tiến độ ở dưới
                         {
                             "type": "box",
-                            "layout": "horizontal",
-                            "alignItems": "center",
-                            "margin": "xs",
+                            "layout": "vertical",
+                            "flex": 1,
+                            "paddingStart": "xs",
+                            "paddingEnd": "xs",
                             "contents": [
                                 {
                                     "type": "box",
+                                    "layout": "horizontal",
+                                    "alignItems": "center",
+                                    "contents": [
+                                        {"type": "text", "text": f"🎯{fmt_num(dt_val)}/{fmt_num(tg_val)}tr", "size": "xxs", "color": dt_color, "flex": 5, "maxLines": 1},
+                                        {"type": "text", "text": f"⏳{con_lai_str}", "size": "xxs", "color": con_color, "flex": 3, "align": "center", "maxLines": 1},
+                                        {"type": "text", "text": f"🔥{ht_str}", "size": "xxs", "color": ht_color, "flex": 3, "align": "end", "maxLines": 1}
+                                    ]
+                                },
+                                {
+                                    "type": "box",
                                     "layout": "vertical",
-                                    "flex": 1,
-                                    "height": "6px",
+                                    "height": "5px",
                                     "backgroundColor": "#e2e8f0",
-                                    "cornerRadius": "3px",
+                                    "cornerRadius": "2px",
+                                    "margin": "xs",
                                     "contents": [
                                         {
                                             "type": "box",
                                             "layout": "vertical",
                                             "width": f"{bar_pct}%",
-                                            "height": "6px",
+                                            "height": "5px",
                                             "backgroundColor": bar_color,
-                                            "cornerRadius": "3px",
+                                            "cornerRadius": "2px",
                                             "contents": [{"type": "filler"}]
                                         }
                                     ]
-                                },
-                                {"type": "text", "text": f"{fmt_num(dt_val)}Tr", "size": "xxs", "weight": "bold", "color": dt_color, "align": "end", "flex": 0, "paddingStart": "xs"}
+                                }
                             ]
+                        },
+                        # Cột 3: Chỉ số doanh thu quy đổi cuối cùng giữ nguyên kích thước
+                        {
+                            "type": "text",
+                            "text": f"{fmt_num(dt_val)}Tr",
+                            "size": "xxs",
+                            "weight": "bold",
+                            "color": dt_color,
+                            "align": "end",
+                            "flex": 0,
+                            "paddingStart": "xs"
                         }
                     ]
                 }
