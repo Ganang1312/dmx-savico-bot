@@ -1695,30 +1695,6 @@ def generate_today_adhoc_flex(group_id):
             }
         }
 
-        # Mục 15: Nếu có URL Web App / LIFF thì gắn nút mở nhanh ở Footer
-        liff_url = get_liff_url()
-        if liff_url:
-            sep = "&" if "?" in liff_url else "?"
-            target_url = f"{liff_url}{sep}group_id={group_id}"
-            flex_content["footer"] = {
-                "type": "box",
-                "layout": "vertical",
-                "paddingAll": "sm",
-                "backgroundColor": "#F8FAFC",
-                "contents": [
-                    {
-                        "type": "button",
-                        "action": {
-                            "type": "uri",
-                            "label": "🌐 Mở Web App Quản Lý & Giao Việc",
-                            "uri": target_url
-                        },
-                        "style": "secondary",
-                        "height": "sm"
-                    }
-                ]
-            }
-
         return flex_content
     except Exception as e:
         print(f"Lỗi khi tạo flex tổng hợp công việc trong ngày: {e}")
