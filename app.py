@@ -4,6 +4,7 @@ import collections
 import math
 import threading
 import time
+import urllib.parse
 import requests
 from datetime import datetime, date
 import pytz
@@ -1345,7 +1346,7 @@ def serve_liff_app():
 @handler.add(PostbackEvent)
 def handle_postback(event):
     data_str = event.postback.data
-    data = dict(part.split('=', 1) for part in data_str.split('&') if '=' in part)
+    data = dict(urllib.parse.parse_qsl(data_str))
     action = data.get('action')
     user_id = event.source.user_id
     event_group_id = getattr(event.source, 'group_id', None)

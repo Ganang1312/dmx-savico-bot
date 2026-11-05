@@ -1,5 +1,6 @@
 import re
 import math
+import urllib.parse
 from datetime import datetime
 import pytz
 import unicodedata
@@ -19,7 +20,8 @@ MEAL_HEADERS = ['group_id', 'date', 'session', 'type', 'name', 'status', 'time_c
 def normalize_text(text):
     """Chuẩn hóa chuỗi để so sánh chính xác."""
     if not text: return ""
-    text = str(text).strip().lower()
+    text = urllib.parse.unquote(str(text))
+    text = text.strip().lower()
     return unicodedata.normalize('NFC', text)
 
 def get_vietnamese_day_of_week():
