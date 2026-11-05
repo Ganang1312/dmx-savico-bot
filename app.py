@@ -10,7 +10,7 @@ import pytz
 from dateutil.relativedelta import relativedelta
 import re
 
-from flask import Flask, request, abort
+from flask import Flask, request, abort, jsonify, Response
 from linebot import (
     LineBotApi, WebhookHandler
 )
@@ -20,13 +20,18 @@ from linebot.models import (
 )
 
 # --- IMPORT ---
-from config import CLIENT, SHEET_NAME, WORKSHEET_NAME_USERS, WORKSHEET_NAME, WORKSHEET_TRACKER_NAME, get_spreadsheet
-# CẬP NHẬT IMPORT MỚI
+from config import (
+    CLIENT, SHEET_NAME, WORKSHEET_NAME_USERS, WORKSHEET_NAME,
+    WORKSHEET_TRACKER_NAME, WORKSHEET_SCHEDULES_NAME,
+    get_spreadsheet, MAIN_CHECKLIST_GROUP_ID,
+    get_cached_values, get_cached_records, set_cached_values,
+    run_bg_sheet_task, get_liff_url
+)
 from schedule_handler import send_daily_schedule
-from config import MAIN_CHECKLIST_GROUP_ID
 from flex_handler import (
     TASKS,
     initialize_daily_tasks, generate_checklist_flex, get_tasks_status_from_sheet,
+    update_shift_task_status, get_adhoc_tasks_for_group_today,
     add_adhoc_tasks, generate_adhoc_flex, update_adhoc_task_status,
     add_all_adhoc_tasks, generate_all_adhoc_flex, register_group_member,
     add_multi_adhoc_tasks, generate_multi_adhoc_flex,
@@ -35,8 +40,14 @@ from flex_handler import (
     send_initial_checklist, get_checklist_message,
     is_work_command, parse_work_command, plan_assignments, resolve_mentions
 )
-from meal_handler import generate_meal_flex, update_meal_status
-from vesinh_handler import generate_vesinh_flex, update_vesinh_status, get_current_vesinh_session
+from meal_handler import (
+    generate_meal_flex, update_meal_status, get_task_roster,
+    sync_meal_sheet, get_vietnamese_day_of_week
+)
+from vesinh_handler import (
+    generate_vesinh_flex, update_vesinh_status,
+    get_current_vesinh_session, sync_vesinh_sheet
+)
 from dmx_flex_messages import (
     trigger_adhoc_scrape, check_scrape_status,
     build_luyke_flex, build_nhanvien_flex,
@@ -62,15 +73,271 @@ if not all([CHANNEL_ACCESS_TOKEN, CHANNEL_SECRET, ADMIN_USER_ID]):
 
 allowed_ids_cache = set()
 app = Flask(__name__)
+
 line_bot_api = LineBotApi(CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(CHANNEL_SECRET)
+
+
+# ============================================================================
+# BỘ ĐỆM TÊN HIỂN THỊ NGƯỜI DÙNG (TRÁNH GỌI LINE PROFILE API LẶP LẠI MỖI LẦN BẤM)
+# ============================================================================
+_USER_PROFILE_CACHE = {}  # {(group_id_or_empty, user_id): (display_name, ts)}
+
+def get_cached_user_display_name(group_id, user_id, fallback="Nhân viên"):
+    if not user_id:
+        return fallback
+    key = (str(group_id or ''), str(user_id))
+    now = time.time()
+    cached = _USER_PROFILE_CACHE.get(key)
+    if cached and (now - cached[1]) < 3600:
+        return cached[0]
+    try:
+        if group_id:
+            profile = line_bot_api.get_group_member_profile(group_id, user_id)
+        else:
+            profile = line_bot_api.get_profile(user_id)
+        if profile and profile.display_name:
+            _USER_PROFILE_CACHE[key] = (profile.display_name, now)
+            return profile.display_name
+    except Exception:
+        pass
+    return fallback
+
+
+# ============================================================================
+# NHÓM 1 (MỤC 1, 2, 4): CƠ CHẾ AUTO-TRIGGER ĐẦU CA BẰNG REPLY_TOKEN (TỐN 0 PUSH)
+# ============================================================================
+_SHIFT_BROADCAST_LOCK = threading.RLock()
+_SHIFT_BROADCAST_STATE = {
+    'date': '',
+    'sang': set(),   # Tập hợp các group_id đã phát thông báo Ca Sáng hôm nay
+    'chieu': set(),  # Tập hợp các group_id đã phát thông báo Ca Chiều hôm nay
+}
+
+
+def _sync_broadcast_date():
+    tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
+    today_str = datetime.now(tz_vietnam).strftime('%Y-%m-%d')
+    with _SHIFT_BROADCAST_LOCK:
+        if _SHIFT_BROADCAST_STATE['date'] != today_str:
+            _SHIFT_BROADCAST_STATE['date'] = today_str
+            _SHIFT_BROADCAST_STATE['sang'] = set()
+            _SHIFT_BROADCAST_STATE['chieu'] = set()
+    return today_str
+
+
+def mark_shift_broadcast_sent(group_id, shift_type):
+    if not group_id or shift_type not in ('sang', 'chieu'):
+        return
+    _sync_broadcast_date()
+    with _SHIFT_BROADCAST_LOCK:
+        _SHIFT_BROADCAST_STATE[shift_type].add(str(group_id).strip())
+
+
+def is_shift_broadcast_sent(group_id, shift_type):
+    if not group_id or shift_type not in ('sang', 'chieu'):
+        return False
+    _sync_broadcast_date()
+    with _SHIFT_BROADCAST_LOCK:
+        return str(group_id).strip() in _SHIFT_BROADCAST_STATE[shift_type]
+
+
+def build_shift_broadcast_messages(group_id, shift_type):
+    """
+    Tạo danh sách tin nhắn mở ca cho nhóm:
+      - Ca Sáng ('sang'):
+          + Nếu là nhóm PG riêng: [Lịch PG]
+          + Nếu là nhóm NV / nhóm chính: [Lịch PG (nếu gộp), Lịch NV, Checklist Ca Sáng]
+      - Ca Chiều ('chieu') (Mục 4):
+          + KHÔNG gửi lặp lại Lịch NV & Lịch PG (vì đã gửi từ sáng).
+          + Chỉ gửi [Checklist Ca Chiều].
+    """
+    gid = str(group_id or '').strip()
+    if not gid:
+        return []
+
+    pg_group_id = (os.environ.get('PG_GROUP_ID') or '').strip()
+    employee_group_id = (os.environ.get('EMPLOYEE_GROUP_ID') or MAIN_CHECKLIST_GROUP_ID or '').strip()
+
+    msgs = []
+    if shift_type == 'sang':
+        if pg_group_id and gid == pg_group_id and pg_group_id != employee_group_id:
+            msg_pg = send_daily_schedule('pg', return_msg_only=True)
+            if msg_pg:
+                msgs.append(msg_pg)
+        else:
+            if not pg_group_id or pg_group_id == employee_group_id or gid == str(MAIN_CHECKLIST_GROUP_ID).strip():
+                msg_pg = send_daily_schedule('pg', return_msg_only=True)
+                if msg_pg:
+                    msgs.append(msg_pg)
+            msg_nv = send_daily_schedule('employee', return_msg_only=True)
+            if msg_nv:
+                msgs.append(msg_nv)
+            msg_check = get_checklist_message('sang', gid)
+            if msg_check:
+                msgs.append(msg_check)
+    elif shift_type == 'chieu':
+        # Mục 4: Buổi chiều chỉ gửi Checklist Kho Ca Chiều, cắt bỏ gửi lặp Lịch NV & PG
+        if pg_group_id and gid == pg_group_id and pg_group_id != employee_group_id:
+            return []
+        msg_check = get_checklist_message('chieu', gid)
+        if msg_check:
+            msgs.append(msg_check)
+
+    return msgs
+
+
+def get_pending_auto_shift_messages(group_id):
+    """
+    Kiểm tra xem nhóm `group_id` hiện tại có gói thông báo đầu ca nào chưa phát không.
+    Khung giờ tự động:
+      - Ca Sáng: 07:00 -> 13:59
+      - Ca Chiều: 14:00 -> 21:59
+    """
+    gid = str(group_id or '').strip()
+    if not gid:
+        return [], None
+
+    pg_group_id = (os.environ.get('PG_GROUP_ID') or '').strip()
+    employee_group_id = (os.environ.get('EMPLOYEE_GROUP_ID') or '').strip()
+    main_gid = str(MAIN_CHECKLIST_GROUP_ID or '').strip()
+
+    target_groups = {g for g in (pg_group_id, employee_group_id, main_gid) if g}
+    if target_groups and gid not in target_groups:
+        return [], None
+
+    tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
+    hour = datetime.now(tz_vietnam).hour
+
+    if 7 <= hour < 14:
+        shift_type = 'sang'
+    elif 14 <= hour < 22:
+        shift_type = 'chieu'
+    else:
+        return [], None
+
+    if is_shift_broadcast_sent(gid, shift_type):
+        return [], None
+
+    msgs = build_shift_broadcast_messages(gid, shift_type)
+    return msgs, shift_type
+
+
+def reply_with_auto_shift(reply_token, primary_messages, group_id=None):
+    """
+    Gửi `reply_message` (MIỄN PHÍ 100%) và tự động đính kèm thông báo Lịch/Checklist đầu ca
+    nếu ca đó hôm nay chưa được phát trong nhóm và tổng số message <= 5.
+    """
+    if primary_messages is None:
+        msg_list = []
+    elif isinstance(primary_messages, list):
+        msg_list = list(primary_messages)
+    else:
+        msg_list = [primary_messages]
+
+    if group_id:
+        try:
+            pending_msgs, pending_shift = get_pending_auto_shift_messages(group_id)
+            if pending_msgs and (len(msg_list) + len(pending_msgs)) <= LINE_MAX_MESSAGES:
+                mark_shift_broadcast_sent(group_id, pending_shift)
+                msg_list.extend(pending_msgs)
+                print(f"[AUTO-TRIGGER] Đã đính kèm thông báo ca '{pending_shift}' miễn phí qua reply_token cho nhóm {group_id}.")
+        except Exception as e:
+            print(f"Lỗi kiểm tra auto-shift: {e}")
+
+    if msg_list:
+        line_bot_api.reply_message(reply_token, msg_list[:LINE_MAX_MESSAGES])
+
+
+def build_scrape_pending_flex(scrape_type_val, req_time_str=""):
+    """
+    Mục 3: Thẻ Flex thông báo đang đồng bộ dữ liệu BI kèm nút Postback [🔄 Xem báo cáo vừa cào]
+    giúp lấy kết quả hoàn toàn bằng reply_token miễn phí, KHÔNG tốn push_message.
+    """
+    label_type = "LŨY KẾ THÁNG" if scrape_type_val == "luyke" else "REALTIME NGÀY"
+    return {
+        "type": "bubble",
+        "size": "mega",
+        "header": {
+            "type": "box",
+            "layout": "vertical",
+            "backgroundColor": "#0284C7",
+            "paddingAll": "md",
+            "contents": [
+                {
+                    "type": "text",
+                    "text": f"⏳ ĐANG ĐỒNG BỘ BÁO CÁO {label_type}",
+                    "weight": "bold",
+                    "size": "sm",
+                    "color": "#FFFFFF"
+                }
+            ]
+        },
+        "body": {
+            "type": "box",
+            "layout": "vertical",
+            "paddingAll": "md",
+            "spacing": "sm",
+            "contents": [
+                {
+                    "type": "text",
+                    "text": "Hệ thống đang cào dữ liệu mới nhất từ Portal BI.",
+                    "size": "xs",
+                    "weight": "bold",
+                    "color": "#0F172A",
+                    "wrap": True
+                },
+                {
+                    "type": "text",
+                    "text": "👉 Vui lòng đợi khoảng 10–15 giây rồi bấm nút bên dưới để hiển thị báo cáo (cơ chế mới tiết kiệm 100% tin nhắn Push cho nhóm).",
+                    "size": "xxs",
+                    "color": "#475569",
+                    "wrap": True
+                }
+            ]
+        },
+        "footer": {
+            "type": "box",
+            "layout": "vertical",
+            "paddingAll": "sm",
+            "contents": [
+                {
+                    "type": "button",
+                    "action": {
+                        "type": "postback",
+                        "label": f"🔄 Xem báo cáo {label_type}",
+                        "data": f"action=view_scraped_report&type={scrape_type_val}&req={req_time_str[:16]}"
+                    },
+                    "style": "primary",
+                    "color": "#16A34A",
+                    "height": "sm"
+                }
+            ]
+        }
+    }
+
+
+def resolve_effective_liff_url(group_id=None):
+    base_url = get_liff_url()
+    if not base_url:
+        try:
+            host = request.url_root.rstrip('/')
+            if host.startswith('http://') and 'localhost' not in host and '127.0.0.1' not in host:
+                host = 'https://' + host[len('http://'):]
+            base_url = host + '/liff'
+        except Exception:
+            base_url = ''
+    if base_url and group_id:
+        sep = '&' if '?' in base_url else '?'
+        return f"{base_url}{sep}group_id={group_id}"
+    return base_url
+
 
 # --- UTILS ---
 def load_allowed_ids():
     global allowed_ids_cache
     try:
-        sheet = get_spreadsheet().worksheet(WORKSHEET_NAME_USERS)
-        records = sheet.get_all_records()
+        records = get_cached_records(WORKSHEET_NAME_USERS, ttl=120, force_refresh=True)
         new_allowed_ids = set()
         today = datetime.now(pytz.timezone('Asia/Ho_Chi_Minh')).date()
         for record in records:
@@ -361,6 +628,718 @@ def callback():
 def ping():
     return "OK", 200
 
+
+# ============================================================================
+# NHÓM 4 (MỤC 15): ROUTES MINI WEB-APP / LINE LIFF TÍCH HỢP TRỰC TIẾP TRÊN FLASK
+# ============================================================================
+
+def _resolve_liff_group_id(req_gid=None):
+    gid = str(req_gid or '').strip()
+    if gid and gid not in ('null', 'undefined', 'None'):
+        return gid
+    return (
+        os.environ.get('EMPLOYEE_GROUP_ID')
+        or os.environ.get('MAIN_CHECKLIST_GROUP_ID')
+        or MAIN_CHECKLIST_GROUP_ID
+    )
+
+
+@app.route('/api/liff/state', methods=['GET'])
+def api_liff_state():
+    """Trả về toàn bộ trạng thái công việc, nhân sự, vệ sinh, ăn uống từ RAM Cache."""
+    try:
+        tz = pytz.timezone('Asia/Ho_Chi_Minh')
+        now = datetime.now(tz)
+        group_id = _resolve_liff_group_id(request.args.get('group_id'))
+        shift = request.args.get('shift') or ('sang' if now.hour < 15 else 'chieu')
+        if shift not in ('sang', 'chieu', 'vs'):
+            shift = 'sang'
+
+        initialize_daily_tasks(group_id, shift)
+        statuses = get_tasks_status_from_sheet(group_id, shift)
+        shift_tasks = []
+        for t in TASKS.get(shift, []):
+            st_obj = statuses.get(t['id'], {})
+            st_val = st_obj if isinstance(st_obj, str) else st_obj.get('status', 'incomplete')
+            usr_val = '' if isinstance(st_obj, str) else st_obj.get('user_name', '')
+            shift_tasks.append({
+                'id': t['id'],
+                'icon': t.get('icon', '📦'),
+                'name': t['name'],
+                'time': t['time'],
+                'status': st_val,
+                'user_name': usr_val
+            })
+
+        adhoc_tasks = get_adhoc_tasks_for_group_today(group_id)
+        roster = get_task_roster()
+
+        meal_session = 'ansang' if now.hour < 15 else 'anchieu'
+        meal_list = sync_meal_sheet(group_id, meal_session)
+
+        vesinh_session = get_current_vesinh_session()
+        vesinh_list = sync_vesinh_sheet(group_id, vesinh_session)
+
+        schedules = get_cached_records(WORKSHEET_SCHEDULES_NAME, ttl=300)
+        today_day = get_vietnamese_day_of_week()
+        today_sched = next((r for r in schedules if r.get('day_of_week') == today_day), {})
+
+        return jsonify({
+            'ok': True,
+            'group_id': group_id,
+            'now_str': now.strftime('%H:%M • %d/%m/%Y'),
+            'day_of_week': today_day,
+            'current_shift': shift,
+            'shift_tasks': shift_tasks,
+            'adhoc_tasks': adhoc_tasks,
+            'roster': roster,
+            'meal_session': meal_session,
+            'meal_list': meal_list,
+            'vesinh_session': vesinh_session,
+            'vesinh_list': vesinh_list,
+            'today_schedule': {
+                'employee': today_sched.get('employee_schedule', ''),
+                'pg': today_sched.get('pg_schedule', '')
+            }
+        })
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+
+@app.route('/api/liff/toggle-shift-task', methods=['POST'])
+def api_toggle_shift_task():
+    try:
+        body = request.get_json(force=True) or {}
+        group_id = _resolve_liff_group_id(body.get('group_id'))
+        task_id = str(body.get('task_id') or '').strip()
+        shift = str(body.get('shift') or 'sang').strip()
+        target_status = str(body.get('target_status') or 'complete').strip()
+        user_name = str(body.get('user_name') or 'Nhân viên').strip()
+        if not task_id:
+            return jsonify({'ok': False, 'error': 'Thiếu task_id'}), 400
+        update_shift_task_status(group_id, task_id, shift, target_status, user_name)
+        return jsonify({'ok': True})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+
+@app.route('/api/liff/toggle-adhoc-task', methods=['POST'])
+def api_toggle_adhoc_task():
+    try:
+        body = request.get_json(force=True) or {}
+        group_id = _resolve_liff_group_id(body.get('group_id'))
+        task_id = str(body.get('task_id') or '').strip()
+        target_status = str(body.get('target_status') or 'complete').strip()
+        user_name = str(body.get('user_name') or 'Nhân viên').strip()
+        if not task_id:
+            return jsonify({'ok': False, 'error': 'Thiếu task_id'}), 400
+        ok, _, _ = update_adhoc_task_status(group_id, task_id, target_status, user_name)
+        return jsonify({'ok': ok})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+
+@app.route('/api/liff/assign-task', methods=['POST'])
+def api_assign_task():
+    try:
+        body = request.get_json(force=True) or {}
+        group_id = _resolve_liff_group_id(body.get('group_id'))
+        task_title = str(body.get('task_title') or '').strip()
+        assignees = body.get('assignees') or []
+        if not task_title:
+            return jsonify({'ok': False, 'error': 'Vui lòng nhập nội dung công việc.'}), 400
+        if not assignees or not isinstance(assignees, list):
+            return jsonify({'ok': False, 'error': 'Vui lòng chọn ít nhất 1 nhân sự nhận việc.'}), 400
+
+        clean_names = [str(n).strip() for n in assignees if str(n).strip()]
+        lines = [l.lstrip('-*•+ ').strip() for l in task_title.split('\n') if l.strip()]
+        if len(lines) == 1:
+            token = add_all_adhoc_tasks(group_id, clean_names, lines[0])
+        else:
+            pairs = []
+            for ln in lines:
+                for nm in clean_names:
+                    pairs.append((ln, nm))
+            token = add_multi_adhoc_tasks(group_id, "", pairs)
+        return jsonify({'ok': bool(token), 'token': token, 'count': len(clean_names) * len(lines)})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+
+@app.route('/api/liff/cancel-latest-task', methods=['POST'])
+def api_cancel_latest_task():
+    try:
+        body = request.get_json(force=True) or {}
+        group_id = _resolve_liff_group_id(body.get('group_id'))
+        token, label, _ = find_latest_task_token(group_id)
+        if not token:
+            return jsonify({'ok': False, 'error': 'Hôm nay chưa có việc nào được giao để hủy.'})
+        removed, names = cancel_task_group(group_id, token)
+        return jsonify({'ok': removed > 0, 'removed': removed, 'token': token, 'names': names})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+
+@app.route('/api/liff/toggle-meal', methods=['POST'])
+def api_toggle_meal():
+    try:
+        body = request.get_json(force=True) or {}
+        group_id = _resolve_liff_group_id(body.get('group_id'))
+        session_type = str(body.get('session') or 'ansang').strip()
+        staff_name = str(body.get('name') or '').strip()
+        clicker_name = str(body.get('user_name') or staff_name).strip()
+        target_status = str(body.get('target_status') or 'done').strip()
+        ok, _ = update_meal_status(group_id, session_type, staff_name, clicker_name, target_status)
+        return jsonify({'ok': ok is True or ok == 'already'})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+
+@app.route('/api/liff/toggle-vesinh', methods=['POST'])
+def api_toggle_vesinh():
+    try:
+        body = request.get_json(force=True) or {}
+        group_id = _resolve_liff_group_id(body.get('group_id'))
+        session_type = str(body.get('session') or 'vesinh_sang').strip()
+        staff_name = str(body.get('name') or '').strip()
+        clicker_name = str(body.get('user_name') or staff_name).strip()
+        target_status = str(body.get('target_status') or 'done').strip()
+        ok, _ = update_vesinh_status(group_id, session_type, staff_name, clicker_name, target_status)
+        return jsonify({'ok': ok is True or ok == 'already'})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+
+@app.route('/liff', methods=['GET'])
+def serve_liff_app():
+    """Giao diện Mini Web-App (LINE LIFF) chuẩn Mobile cho ĐMX Savico."""
+    liff_id = (os.environ.get('LIFF_ID') or '').strip()
+    default_gid = _resolve_liff_group_id(request.args.get('group_id'))
+
+    html = f"""<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>ĐMX Savico • Quản Lý & Giao Việc</title>
+  <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+  <style>
+    :root {{
+      --primary: #0284c7;
+      --green: #16a34a;
+      --green-bg: #f0fdf4;
+      --green-border: #bbf7d0;
+      --red: #dc2626;
+      --bg: #f1f5f9;
+      --card: #ffffff;
+      --text: #0f172a;
+      --muted: #64748b;
+      --border: #e2e8f0;
+    }}
+    * {{ box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }}
+    body {{ background: var(--bg); color: var(--text); padding-bottom: 80px; }}
+    .topbar {{
+      background: linear-gradient(135deg, #0284c7, #1e3a8a);
+      color: #fff; padding: 14px 16px; position: sticky; top: 0; z-index: 50;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.12);
+    }}
+    .topbar-row {{ display: flex; justify-content: space-between; align-items: center; gap: 8px; }}
+    .topbar h1 {{ font-size: 16px; font-weight: 800; }}
+    .topbar-sub {{ font-size: 11px; color: #bae6fd; margin-top: 4px; display: flex; justify-content: space-between; }}
+    .user-pill {{
+      background: rgba(255,255,255,0.18); border: 1px solid rgba(255,255,255,0.3);
+      color: #fff; border-radius: 999px; padding: 4px 10px; font-size: 12px; font-weight: 600;
+    }}
+    .tabs {{
+      display: flex; background: #fff; border-bottom: 1px solid var(--border);
+      position: sticky; top: 61px; z-index: 40;
+    }}
+    .tab-btn {{
+      flex: 1; text-align: center; padding: 11px 4px; font-size: 12px; font-weight: 700;
+      color: var(--muted); border: none; background: none; border-bottom: 3px solid transparent; cursor: pointer;
+    }}
+    .tab-btn.active {{ color: var(--primary); border-bottom-color: var(--primary); background: #f8fafc; }}
+    .container {{ max-width: 600px; margin: 0 auto; padding: 12px; }}
+    .card {{
+      background: var(--card); border-radius: 12px; padding: 14px; margin-bottom: 12px;
+      border: 1px solid var(--border); box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+    }}
+    .card-title {{ font-size: 14px; font-weight: 800; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; }}
+    .badge {{
+      font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 999px;
+      background: #e0f2fe; color: #0369a1;
+    }}
+    .badge.green {{ background: #dcfce7; color: #15803d; }}
+    .progress-wrap {{ background: #e2e8f0; height: 8px; border-radius: 999px; overflow: hidden; margin: 8px 0 12px; }}
+    .progress-bar {{ background: var(--green); height: 100%; border-radius: 999px; transition: width 0.25s ease; }}
+    .task-item {{
+      display: flex; align-items: center; justify-content: space-between; gap: 10px;
+      padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border);
+      background: #f8fafc; margin-bottom: 8px;
+    }}
+    .task-item.done {{ background: var(--green-bg); border-color: var(--green-border); }}
+    .task-info {{ flex: 1; }}
+    .task-name {{ font-size: 13px; font-weight: 700; color: var(--text); }}
+    .task-item.done .task-name {{ text-decoration: line-through; color: var(--muted); }}
+    .task-meta {{ font-size: 11px; color: var(--red); font-weight: 600; margin-top: 2px; }}
+    .task-done-by {{ font-size: 11px; color: var(--green); font-weight: 700; margin-top: 2px; }}
+    .btn {{
+      border: none; border-radius: 8px; padding: 8px 12px; font-size: 12px; font-weight: 700;
+      cursor: pointer; white-space: nowrap;
+    }}
+    .btn-primary {{ background: var(--primary); color: #fff; }}
+    .btn-muted {{ background: #94a3b8; color: #fff; }}
+    .btn-danger {{ background: #fee2e2; color: #b91c1c; }}
+    .shift-switch {{ display: flex; gap: 6px; margin-bottom: 10px; }}
+    .shift-switch button {{
+      flex: 1; padding: 7px; border-radius: 8px; border: 1px solid var(--border);
+      background: #f8fafc; font-size: 12px; font-weight: 700; color: var(--muted); cursor: pointer;
+    }}
+    .shift-switch button.active {{ background: var(--primary); color: #fff; border-color: var(--primary); }}
+    .grid-2 {{ display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 8px; }}
+    .chip-btn {{
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 7px 9px; border-radius: 8px; border: 1px solid #cbd5e1; background: #fff;
+      font-size: 11px; font-weight: 700; color: var(--text); cursor: pointer; text-align: left;
+    }}
+    .chip-btn.done {{ background: #dcfce7; border-color: #86efac; color: #15803d; }}
+    textarea, select {{
+      width: 100%; border: 1px solid #cbd5e1; border-radius: 8px; padding: 9px 11px;
+      font-size: 13px; margin-bottom: 8px; background: #fff;
+    }}
+    .group-pills {{ display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }}
+    .pill {{
+      padding: 5px 10px; border-radius: 999px; font-size: 11px; font-weight: 700;
+      border: 1px solid #cbd5e1; background: #f8fafc; cursor: pointer;
+    }}
+    .roster-grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 6px; max-height: 220px; overflow-y: auto; padding: 4px 0; }}
+    .staff-chk {{
+      display: flex; align-items: center; gap: 6px; padding: 6px 8px;
+      border: 1px solid var(--border); border-radius: 8px; font-size: 11px; font-weight: 600; background: #f8fafc;
+    }}
+    .toast {{
+      position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%);
+      background: #0f172a; color: #fff; padding: 9px 16px; border-radius: 999px;
+      font-size: 12px; font-weight: 700; display: none; z-index: 100;
+    }}
+    pre.sched-box {{
+      white-space: pre-wrap; font-size: 12px; line-height: 1.5; color: #334155;
+      background: #f8fafc; padding: 10px; border-radius: 8px; border: 1px solid var(--border);
+    }}
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <div class="topbar-row">
+      <h1>⚡ ĐMX SAVICO • MINI APP</h1>
+      <select id="userSelect" class="user-pill" onchange="saveCurrentUser(this.value)">
+        <option value="Nhân viên">👤 Chọn tên bạn...</option>
+      </select>
+    </div>
+    <div class="topbar-sub">
+      <span id="clockText">Đang tải dữ liệu...</span>
+      <span onclick="loadState()" style="cursor:pointer;text-decoration:underline;">🔄 Làm mới</span>
+    </div>
+  </div>
+
+  <div class="tabs">
+    <button class="tab-btn active" onclick="switchTab('work', this)">📋 Công Việc</button>
+    <button class="tab-btn" onclick="switchTab('assign', this)">➕ Giao Việc</button>
+    <button class="tab-btn" onclick="switchTab('ops', this)">🧹 Vệ Sinh & Ăn</button>
+    <button class="tab-btn" onclick="switchTab('sched', this)">📅 Lịch Làm</button>
+  </div>
+
+  <div class="container">
+    <div id="tab-work">
+      <div class="card">
+        <div class="shift-switch">
+          <button id="btn-shift-sang" onclick="changeShift('sang')">☀️ Ca Sáng</button>
+          <button id="btn-shift-chieu" onclick="changeShift('chieu')">🌙 Ca Chiều</button>
+          <button id="btn-shift-vs" onclick="changeShift('vs')">📸 Hình Ảnh 10h</button>
+        </div>
+        <div class="card-title">
+          <span>📦 Checklist Kho & Vận Hành</span>
+          <span id="shift-badge" class="badge">0/0</span>
+        </div>
+        <div class="progress-wrap"><div id="shift-progress" class="progress-bar" style="width:0%"></div></div>
+        <div id="shift-tasks-list"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">
+          <span>📌 Công Việc Giao Thêm Hôm Nay</span>
+          <span id="adhoc-badge" class="badge">0/0</span>
+        </div>
+        <div class="progress-wrap"><div id="adhoc-progress" class="progress-bar" style="width:0%"></div></div>
+        <div id="adhoc-tasks-list"></div>
+      </div>
+    </div>
+
+    <div id="tab-assign" style="display:none;">
+      <div class="card">
+        <div class="card-title"><span>🚀 Giao Việc Nhanh (Không cần nhớ cú pháp)</span></div>
+        <label style="font-size:12px;font-weight:700;color:var(--muted);display:block;margin-bottom:4px;">
+          1. Nhập nội dung công việc (mỗi dòng 1 việc):
+        </label>
+        <textarea id="assignTaskInput" rows="3" placeholder="Ví dụ:&#10;Thay bảng giá khuyến mãi Tivi&#10;Dọn vệ sinh kho tầng 2"></textarea>
+
+        <label style="font-size:12px;font-weight:700;color:var(--muted);display:block;margin:6px 0;">
+          2. Chọn nhanh nhóm hoặc tick chọn từng người:
+        </label>
+        <div class="group-pills">
+          <span class="pill" onclick="selectRosterGroup('ALL')">👥 @All (Cả ST)</span>
+          <span class="pill" onclick="selectRosterGroup('NV')">👨‍💼 @NV</span>
+          <span class="pill" onclick="selectRosterGroup('PG')">👩‍💼 @PG</span>
+          <span class="pill" onclick="selectRosterGroup('QL+TC')">⭐ @QL+TC</span>
+          <span class="pill" onclick="selectRosterGroup('NONE')">✖ Bỏ chọn</span>
+        </div>
+        <div id="rosterCheckboxes" class="roster-grid"></div>
+
+        <div style="display:flex;gap:8px;margin-top:12px;">
+          <button class="btn btn-primary" style="flex:2;padding:11px;" onclick="submitAssignTask()">🚀 Giao Việc Ngay</button>
+          <button class="btn btn-danger" style="flex:1;padding:11px;" onclick="cancelLatestTask()">🗑 Hủy việc cuối</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="tab-ops" style="display:none;">
+      <div class="card">
+        <div class="card-title">
+          <span id="vesinh-title">🧹 Phân Công Vệ Sinh</span>
+          <span id="vesinh-badge" class="badge">0/0</span>
+        </div>
+        <div id="vesinh-list"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">
+          <span id="meal-title">🍱 Điểm Danh Ăn Ca</span>
+          <span id="meal-badge" class="badge">0/0</span>
+        </div>
+        <div id="meal-list" class="grid-2"></div>
+      </div>
+    </div>
+
+    <div id="tab-sched" style="display:none;">
+      <div class="card">
+        <div class="card-title"><span>👨‍💼 Lịch Nhân Viên Hôm Nay</span></div>
+        <pre id="sched-nv" class="sched-box">Đang tải...</pre>
+      </div>
+      <div class="card">
+        <div class="card-title"><span>👩‍💼 Lịch PG Hôm Nay</span></div>
+        <pre id="sched-pg" class="sched-box">Đang tải...</pre>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <script>
+    const LIFF_ID = "{liff_id}";
+    const urlParams = new URLSearchParams(window.location.search);
+    const GROUP_ID = urlParams.get('group_id') || "{default_gid}";
+    let currentShift = "";
+
+    function showToast(msg) {{
+      const el = document.getElementById('toast');
+      el.textContent = msg;
+      el.style.display = 'block';
+      setTimeout(() => {{ el.style.display = 'none'; }}, 2400);
+    }}
+
+    function getCurrentUser() {{
+      return localStorage.getItem('dmx_user_name') || document.getElementById('userSelect').value || 'Nhân viên';
+    }}
+
+    function saveCurrentUser(val) {{
+      if (val) localStorage.setItem('dmx_user_name', val);
+    }}
+
+    function switchTab(tab, btn) {{
+      ['work', 'assign', 'ops', 'sched'].forEach(t => {{
+        document.getElementById('tab-' + t).style.display = (t === tab) ? 'block' : 'none';
+      }});
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      if (btn) btn.classList.add('active');
+    }}
+
+    function changeShift(s) {{
+      currentShift = s;
+      loadState();
+    }}
+
+    async function initLiffIfAvailable() {{
+      if (!LIFF_ID) return;
+      try {{
+        await liff.init({{ liffId: LIFF_ID }});
+        if (liff.isLoggedIn()) {{
+          const prof = await liff.getProfile();
+          if (prof && prof.displayName) saveCurrentUser(prof.displayName);
+        }}
+      }} catch (e) {{}}
+    }}
+
+    async function loadState() {{
+      try {{
+        const qs = new URLSearchParams({{ group_id: GROUP_ID }});
+        if (currentShift) qs.set('shift', currentShift);
+        const res = await fetch('/api/liff/state?' + qs.toString());
+        const data = await res.json();
+        if (!data.ok) return;
+        currentShift = data.current_shift;
+        renderAll(data);
+      }} catch (e) {{}}
+    }}
+
+    function renderAll(data) {{
+      document.getElementById('clockText').textContent = data.day_of_week + ' • ' + data.now_str;
+      ['sang', 'chieu', 'vs'].forEach(s => {{
+        const b = document.getElementById('btn-shift-' + s);
+        if (b) b.classList.toggle('active', s === data.current_shift);
+      }});
+
+      const allStaff = [];
+      ['NV', 'PG', 'QL+TC'].forEach(g => {{
+        (data.roster[g] || []).forEach(n => {{ if (!allStaff.includes(n)) allStaff.push(n); }});
+      }});
+      const sel = document.getElementById('userSelect');
+      const savedUser = localStorage.getItem('dmx_user_name');
+      if (sel.options.length <= 1 && allStaff.length > 0) {{
+        allStaff.forEach(n => {{
+          const opt = document.createElement('option');
+          opt.value = n; opt.textContent = '👤 ' + n;
+          sel.appendChild(opt);
+        }});
+        if (savedUser) sel.value = savedUser;
+      }}
+
+      const stList = document.getElementById('shift-tasks-list');
+      stList.innerHTML = '';
+      let stDone = 0;
+      (data.shift_tasks || []).forEach(t => {{
+        const isDone = t.status === 'complete';
+        if (isDone) stDone++;
+        const div = document.createElement('div');
+        div.className = 'task-item' + (isDone ? ' done' : '');
+        div.innerHTML = `
+          <div class="task-info">
+            <div class="task-name">${{isDone ? '✅' : t.icon}} ${{t.name}}</div>
+            <div class="task-meta">⏰ Hạn: ${{t.time}}</div>
+            ${{isDone && t.user_name ? `<div class="task-done-by">✓ ${{t.user_name}}</div>` : ''}}
+          </div>
+          <button class="btn ${{isDone ? 'btn-muted' : 'btn-primary'}}"
+            onclick="toggleShiftTask('${{t.id}}', '${{isDone ? 'incomplete' : 'complete'}}')">
+            ${{isDone ? '✓ Xong' : 'Hoàn tất'}}
+          </button>
+        `;
+        stList.appendChild(div);
+      }});
+      const stTotal = (data.shift_tasks || []).length;
+      const stPct = stTotal ? Math.round((stDone / stTotal) * 100) : 0;
+      document.getElementById('shift-badge').textContent = `${{stDone}}/${{stTotal}} (${{stPct}}%)`;
+      document.getElementById('shift-progress').style.width = stPct + '%';
+
+      const adhocWrap = document.getElementById('adhoc-tasks-list');
+      adhocWrap.innerHTML = '';
+      const rawAdhoc = data.adhoc_tasks || [];
+      let adDone = 0;
+      rawAdhoc.forEach(r => {{ if (r.status === 'complete') adDone++; }});
+      const adTotal = rawAdhoc.length;
+      const adPct = adTotal ? Math.round((adDone / adTotal) * 100) : 0;
+      document.getElementById('adhoc-badge').textContent = `${{adDone}}/${{adTotal}} (${{adPct}}%)`;
+      document.getElementById('adhoc-progress').style.width = adPct + '%';
+
+      if (rawAdhoc.length === 0) {{
+        adhocWrap.innerHTML = '<div style="font-size:12px;color:var(--muted);text-align:center;padding:12px;">Hôm nay chưa có công việc giao thêm nào.</div>';
+      }} else {{
+        const groups = [];
+        const map = {{}};
+        rawAdhoc.forEach(r => {{
+          const key = r.task_name;
+          if (!(key in map)) {{
+            map[key] = groups.length;
+            groups.push({{ title: r.task_name, created_at: r.created_at, items: [] }});
+          }}
+          groups[map[key]].items.push(r);
+        }});
+        groups.forEach((g, idx) => {{
+          const gDone = g.items.filter(i => i.status === 'complete').length;
+          const box = document.createElement('div');
+          box.className = 'task-item' + (gDone === g.items.length ? ' done' : '');
+          box.style.flexDirection = 'column';
+          box.style.alignItems = 'stretch';
+          let chipsHtml = '<div class="grid-2">';
+          g.items.forEach(item => {{
+            const comp = item.status === 'complete';
+            const nextSt = comp ? 'incomplete' : 'complete';
+            const timeLabel = comp && item.completed_at ? ` • ${{item.completed_at}}` : '';
+            chipsHtml += `
+              <button class="chip-btn ${{comp ? 'done' : ''}}" onclick="toggleAdhocTask('${{item.task_id}}', '${{nextSt}}')">
+                <span>${{comp ? '✓' : '⏳'}} ${{item.assignee}}${{timeLabel}}</span>
+              </button>
+            `;
+          }});
+          chipsHtml += '</div>';
+          box.innerHTML = `
+            <div style="display:flex;justify-content:space-between;align-items:center;">
+              <div class="task-name">${{idx + 1}}. ${{g.title}}</div>
+              <span class="badge ${{gDone === g.items.length ? 'green' : ''}}">${{gDone}}/${{g.items.length}}</span>
+            </div>
+            <div style="font-size:11px;color:var(--muted);margin-top:2px;">🕒 Giao lúc: ${{g.created_at || '--:--'}} (Chạm tên để Hoàn tất / Hủy)</div>
+            ${{chipsHtml}}
+          `;
+          adhocWrap.appendChild(box);
+        }});
+      }}
+
+      const rBox = document.getElementById('rosterCheckboxes');
+      if (rBox.children.length === 0 && allStaff.length > 0) {{
+        ['NV', 'PG', 'QL+TC'].forEach(grp => {{
+          (data.roster[grp] || []).forEach(nm => {{
+            const lbl = document.createElement('label');
+            lbl.className = 'staff-chk';
+            lbl.innerHTML = `<input type="checkbox" class="chk-staff" data-group="${{grp}}" value="${{nm}}" /> <span>[${{grp}}] ${{nm}}</span>`;
+            rBox.appendChild(lbl);
+          }});
+        }});
+      }}
+
+      const vsWrap = document.getElementById('vesinh-list');
+      vsWrap.innerHTML = '';
+      const vsList = data.vesinh_list || [];
+      let vsDone = 0;
+      vsList.forEach(v => {{
+        const isDone = v.status === 'done';
+        if (isDone) vsDone++;
+        const nextSt = isDone ? 'waiting' : 'done';
+        const d = document.createElement('div');
+        d.className = 'task-item' + (isDone ? ' done' : '');
+        d.innerHTML = `
+          <div class="task-info">
+            <div class="task-name">[${{v.type}}] ${{v.name}}</div>
+            <div style="font-size:11px;color:var(--muted);margin-top:2px;">📍 ${{v.zone}}</div>
+            ${{isDone ? `<div class="task-done-by">✅ Xong lúc ${{v.time_clicked}}</div>` : ''}}
+          </div>
+          <button class="btn ${{isDone ? 'btn-muted' : 'btn-primary'}}"
+            onclick="toggleVesinh('${{data.vesinh_session}}', '${{v.name}}', '${{nextSt}}')">
+            ${{isDone ? '✓ Xong' : 'Hoàn tất'}}
+          </button>
+        `;
+        vsWrap.appendChild(d);
+      }});
+      document.getElementById('vesinh-badge').textContent = `${{vsDone}}/${{vsList.length}}`;
+
+      const mealWrap = document.getElementById('meal-list');
+      mealWrap.innerHTML = '';
+      const mList = data.meal_list || [];
+      let mDone = 0;
+      mList.forEach(m => {{
+        const isDone = m.status === 'done';
+        if (isDone) mDone++;
+        const nextSt = isDone ? 'waiting' : 'done';
+        const btn = document.createElement('button');
+        btn.className = 'chip-btn' + (isDone ? ' done' : '');
+        btn.onclick = () => toggleMeal(data.meal_session, m.name, nextSt);
+        btn.innerHTML = `<span>${{isDone ? '🟢' : '🍲'}} ${{m.name}}</span><span>${{m.time_clicked || ''}}</span>`;
+        mealWrap.appendChild(btn);
+      }});
+      document.getElementById('meal-badge').textContent = `${{mDone}}/${{mList.length}}`;
+
+      document.getElementById('sched-nv').textContent = (data.today_schedule && data.today_schedule.employee) || 'Chưa có dữ liệu';
+      document.getElementById('sched-pg').textContent = (data.today_schedule && data.today_schedule.pg) || 'Chưa có dữ liệu';
+    }}
+
+    async function toggleShiftTask(taskId, targetStatus) {{
+      await fetch('/api/liff/toggle-shift-task', {{
+        method: 'POST',
+        headers: {{ 'Content-Type': 'application/json' }},
+        body: JSON.stringify({{ group_id: GROUP_ID, task_id: taskId, shift: currentShift, target_status: targetStatus, user_name: getCurrentUser() }})
+      }});
+      showToast(targetStatus === 'complete' ? '✅ Đã đánh dấu hoàn tất!' : '↩️ Đã hoàn tác!');
+      loadState();
+    }}
+
+    async function toggleAdhocTask(taskId, targetStatus) {{
+      await fetch('/api/liff/toggle-adhoc-task', {{
+        method: 'POST',
+        headers: {{ 'Content-Type': 'application/json' }},
+        body: JSON.stringify({{ group_id: GROUP_ID, task_id: taskId, target_status: targetStatus, user_name: getCurrentUser() }})
+      }});
+      showToast(targetStatus === 'complete' ? '✅ Đã hoàn tất công việc!' : '↩️ Đã hoàn tác!');
+      loadState();
+    }}
+
+    function selectRosterGroup(grp) {{
+      document.querySelectorAll('.chk-staff').forEach(chk => {{
+        if (grp === 'ALL') chk.checked = true;
+        else if (grp === 'NONE') chk.checked = false;
+        else chk.checked = (chk.getAttribute('data-group') === grp);
+      }});
+    }}
+
+    async function submitAssignTask() {{
+      const title = document.getElementById('assignTaskInput').value.trim();
+      const selected = Array.from(document.querySelectorAll('.chk-staff:checked')).map(c => c.value);
+      if (!title) {{ showToast('⚠️ Vui lòng nhập nội dung việc!'); return; }}
+      if (selected.length === 0) {{ showToast('⚠️ Vui lòng chọn người nhận việc!'); return; }}
+
+      const res = await fetch('/api/liff/assign-task', {{
+        method: 'POST',
+        headers: {{ 'Content-Type': 'application/json' }},
+        body: JSON.stringify({{ group_id: GROUP_ID, task_title: title, assignees: selected }})
+      }});
+      const out = await res.json();
+      if (out.ok) {{
+        document.getElementById('assignTaskInput').value = '';
+        showToast(`🚀 Đã giao việc thành công (${{out.count}} mục)!`);
+        switchTab('work', document.querySelectorAll('.tab-btn')[0]);
+        loadState();
+      }} else {{
+        showToast('❌ ' + (out.error || 'Lỗi giao việc'));
+      }}
+    }}
+
+    async function cancelLatestTask() {{
+      const res = await fetch('/api/liff/cancel-latest-task', {{
+        method: 'POST',
+        headers: {{ 'Content-Type': 'application/json' }},
+        body: JSON.stringify({{ group_id: GROUP_ID }})
+      }});
+      const out = await res.json();
+      if (out.ok) {{
+        showToast(`🗑 Đã hủy nhóm việc (${{out.removed}} mục)!`);
+        loadState();
+      }} else {{
+        showToast('⚠️ ' + (out.error || 'Không có việc để hủy'));
+      }}
+    }}
+
+    async function toggleMeal(session, name, targetStatus) {{
+      await fetch('/api/liff/toggle-meal', {{
+        method: 'POST',
+        headers: {{ 'Content-Type': 'application/json' }},
+        body: JSON.stringify({{ group_id: GROUP_ID, session: session, name: name, user_name: getCurrentUser(), target_status: targetStatus }})
+      }});
+      showToast('🍱 Đã cập nhật điểm danh ăn!');
+      loadState();
+    }}
+
+    async function toggleVesinh(session, name, targetStatus) {{
+      await fetch('/api/liff/toggle-vesinh', {{
+        method: 'POST',
+        headers: {{ 'Content-Type': 'application/json' }},
+        body: JSON.stringify({{ group_id: GROUP_ID, session: session, name: name, user_name: getCurrentUser(), target_status: targetStatus }})
+      }});
+      showToast('🧹 Đã cập nhật vệ sinh!');
+      loadState();
+    }}
+
+    initLiffIfAvailable().then(loadState);
+  </script>
+</body>
+</html>"""
+    return Response(html, mimetype='text/html')
+
 # --- XỬ LÝ SỰ KIỆN POSTBACK ---
 
 @handler.add(PostbackEvent)
@@ -369,6 +1348,7 @@ def handle_postback(event):
     data = dict(part.split('=', 1) for part in data_str.split('&') if '=' in part)
     action = data.get('action')
     user_id = event.source.user_id
+    event_group_id = getattr(event.source, 'group_id', None)
 
     # 1. Gia hạn User
     if action == 'renew':
@@ -396,92 +1376,85 @@ def handle_postback(event):
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text="Có lỗi xảy ra khi gia hạn."))
         return
 
-    # 2. Hoàn thành Task công việc (Checklist Công việc)
+    # 1.5. Nút phát Lịch & Checklist đầu ca miễn phí qua reply_token
+    if action == 'broadcast_shift':
+        shift_type = data.get('shift')
+        if not shift_type:
+            tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
+            shift_type = 'sang' if datetime.now(tz_vietnam).hour < 14 else 'chieu'
+        target_gid = event_group_id or data.get('group_id') or os.environ.get('EMPLOYEE_GROUP_ID') or MAIN_CHECKLIST_GROUP_ID
+        msgs = build_shift_broadcast_messages(target_gid, shift_type)
+        if msgs:
+            mark_shift_broadcast_sent(target_gid, shift_type)
+            line_bot_api.reply_message(event.reply_token, msgs[:LINE_MAX_MESSAGES])
+        else:
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="⚠️ Không có dữ liệu lịch hoặc checklist cho ca này."))
+        return
+
+    # 1.8. Mục 3: Xem kết quả cào dữ liệu BI qua Postback (Miễn phí 100% không tốn Push)
+    if action == 'view_scraped_report':
+        scrape_type_val = data.get('type', 'realtime')
+        req_prefix = data.get('req', '')
+        try:
+            st_info = check_scrape_status()
+            sig_status = st_info.get("status")
+            if sig_status == "running":
+                pending_flex = build_scrape_pending_flex(scrape_type_val, req_prefix)
+                line_bot_api.reply_message(
+                    event.reply_token,
+                    FlexSendMessage(alt_text="⏳ Đang cào dữ liệu BI...", contents=pending_flex)
+                )
+                return
+
+            if scrape_type_val == "luyke":
+                flex_msg = build_luyke_flex()
+                if isinstance(flex_msg, list):
+                    carousel_content = {"type": "carousel", "contents": flex_msg}
+                    line_bot_api.reply_message(
+                        event.reply_token,
+                        FlexSendMessage(alt_text="📊 BÁO CÁO LŨY KẾ (Cuộn Ngang P.1 & P.2)", contents=carousel_content)
+                    )
+                else:
+                    line_bot_api.reply_message(
+                        event.reply_token,
+                        FlexSendMessage(alt_text="Báo Cáo Lũy Kế Savico", contents=flex_msg)
+                    )
+            else:
+                rt_messages, _ = build_realtime_messages(max_messages=LINE_MAX_MESSAGES)
+                if rt_messages:
+                    reply_msgs = [FlexSendMessage(alt_text=m["alt_text"], contents=m["contents"]) for m in rt_messages]
+                    line_bot_api.reply_message(event.reply_token, reply_msgs[:LINE_MAX_MESSAGES])
+                else:
+                    line_bot_api.reply_message(
+                        event.reply_token,
+                        TextSendMessage(text="⚠️ Báo cáo realtime quá lớn để gói gọn trong 5 tin nhắn. Vui lòng xem dashboard HTML.")
+                    )
+        except Exception as e:
+            print(f"Lỗi xem báo cáo vừa cào: {e}")
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"⚠️ Lỗi hiển thị báo cáo: {e}"))
+        return
+
+    # 2. Hoàn thành Task công việc (Checklist Công việc — Tốc độ tức thì qua RAM Cache)
     if action == 'complete_task':
         task_id = str(data.get('task_id') or '').strip()
         shift_type = data.get('shift', 'sang')
         target_status = data.get('target_status', 'complete')
         
-        # Lấy group_id an toàn (hỗ trợ cả khi bấm trong nhóm, phòng chat hoặc chat 1-1)
         group_id = str(
-            getattr(event.source, 'group_id', None)
+            event_group_id
             or data.get('group_id')
             or os.environ.get('EMPLOYEE_GROUP_ID')
             or MAIN_CHECKLIST_GROUP_ID
         ).strip()
-        user_id = getattr(event.source, 'user_id', None)
 
         try:
-            user_name = "Nhân viên"
-            if user_id:
-                try:
-                    if getattr(event.source, 'group_id', None):
-                        profile = line_bot_api.get_group_member_profile(event.source.group_id, user_id)
-                    else:
-                        profile = line_bot_api.get_profile(user_id)
-                    if profile and profile.display_name:
-                        user_name = profile.display_name
-                except Exception as e_prof:
-                    print(f"Không thể lấy profile người bấm checklist: {e_prof}")
-            
-            sheet = get_spreadsheet().worksheet(WORKSHEET_TRACKER_NAME)
-            tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
-            today_str = datetime.now(tz_vietnam).strftime('%Y-%m-%d')
-            time_str = datetime.now(tz_vietnam).strftime('%H:%M')
-            new_user = f"{user_name} lúc {time_str}" if target_status == 'complete' else ''
-            
-            all_records = sheet.get_all_records()
-            rows_to_update = []
-            
-            # 1. Tìm TẤT CẢ các dòng khớp cả group_id, date và task_id (tránh bị dòng trùng làm kẹt trạng thái)
-            for i, record in enumerate(all_records):
-                r_date = str(record.get('date', '')).strip()
-                r_tid = str(record.get('task_id', '')).strip()
-                r_gid = str(record.get('group_id', '')).strip()
-                if r_date == today_str and r_tid == task_id and (not group_id or r_gid == group_id):
-                    rows_to_update.append((i + 2, record))
-            
-            # 2. Fallback nếu group_id khác (ví dụ bấm từ group khác nhưng task cùng ngày)
-            if not rows_to_update:
-                for i, record in enumerate(all_records):
-                    r_date = str(record.get('date', '')).strip()
-                    r_tid = str(record.get('task_id', '')).strip()
-                    if r_date == today_str and r_tid == task_id:
-                        rows_to_update.append((i + 2, record))
-                        group_id = str(record.get('group_id', '')).strip()
+            user_name = get_cached_user_display_name(event_group_id, user_id, fallback="Nhân viên")
+            all_records, resolved_gid = update_shift_task_status(
+                group_id, task_id, shift_type, target_status, user_name
+            )
+            if resolved_gid:
+                group_id = resolved_gid
 
-            if rows_to_update:
-                batch_updates = []
-                for r_num, rec in rows_to_update:
-                    rec['status'] = target_status
-                    rec['user_name'] = new_user
-                    batch_updates.append({
-                        'range': f'F{r_num}:G{r_num}',
-                        'values': [[target_status, new_user]]
-                    })
-                sheet.batch_update(batch_updates, value_input_option='USER_ENTERED')
-            else:
-                # 3. Tự động thêm dòng mới vào sheet VÀ vào bộ nhớ RAM nếu hôm nay chưa khởi tạo task này
-                task_name_val = task_id
-                task_time_val = ''
-                for t in TASKS.get(shift_type, []):
-                    if t['id'] == task_id:
-                        task_name_val = t['name']
-                        task_time_val = t['time']
-                        break
-                new_row = [str(group_id or ''), today_str, task_id, task_name_val, task_time_val, target_status, new_user]
-                sheet.append_row(new_row, value_input_option='USER_ENTERED')
-                all_records.append({
-                    'group_id': str(group_id or ''),
-                    'date': today_str,
-                    'task_id': task_id,
-                    'name': task_name_val,
-                    'time': task_time_val,
-                    'status': target_status,
-                    'user_name': new_user
-                })
-                print(f"Đã tự động khởi tạo và cập nhật task {task_id} vào sheet.")
-            
             if shift_type == 'vs':
                 updated_flex_content = generate_checklist_flex(group_id, 'vs', all_records_prefetched=all_records)
                 alt_text = "Cập nhật checklist hình ảnh"
@@ -497,6 +1470,7 @@ def handle_postback(event):
                 updated_flex_content = generate_checklist_flex(group_id, shift_type, all_records_prefetched=all_records)
                 alt_text = f"📋 Cập nhật checklist ca {shift_type}"
 
+            mark_shift_broadcast_sent(group_id, shift_type)
             line_bot_api.reply_message(
                 event.reply_token,
                 FlexSendMessage(alt_text=alt_text, contents=updated_flex_content)
@@ -513,28 +1487,16 @@ def handle_postback(event):
                 pass
         return
 
-    # 2.5. Hoàn thành công việc phát sinh (Adhoc task)
+    # 2.5. Hoàn thành công việc phát sinh (Adhoc task — Tốc độ tức thì qua RAM Cache)
     if action == 'complete_adhoc_task':
         task_id = data.get('task_id')
         assignee = data.get('assignee')
         target_status = data.get('target_status', 'complete')
         shift_type = data.get('shift')
-        group_id = getattr(event.source, 'group_id', None) or os.environ.get('EMPLOYEE_GROUP_ID') or MAIN_CHECKLIST_GROUP_ID
-        user_id = getattr(event.source, 'user_id', None)
+        group_id = event_group_id or os.environ.get('EMPLOYEE_GROUP_ID') or MAIN_CHECKLIST_GROUP_ID
 
         try:
-            user_name = assignee or "Nhân viên"
-            if user_id:
-                try:
-                    if getattr(event.source, 'group_id', None):
-                        profile = line_bot_api.get_group_member_profile(event.source.group_id, user_id)
-                    else:
-                        profile = line_bot_api.get_profile(user_id)
-                    if profile and profile.display_name:
-                        user_name = profile.display_name
-                except Exception:
-                    pass
-            
+            user_name = get_cached_user_display_name(event_group_id, user_id, fallback=assignee or "Nhân viên")
             success, resolved_assignee, task_group_hash = update_adhoc_task_status(group_id, task_id, target_status, user_name)
             
             if success:
@@ -553,9 +1515,10 @@ def handle_postback(event):
                 alt_text = "📋 Cập nhật công việc giao thêm"
 
                 if updated_flex_content:
-                    line_bot_api.reply_message(
+                    reply_with_auto_shift(
                         event.reply_token,
-                        FlexSendMessage(alt_text=alt_text, contents=updated_flex_content)
+                        FlexSendMessage(alt_text=alt_text, contents=updated_flex_content),
+                        group_id=event_group_id
                     )
         except Exception as e:
             print(f"Lỗi nghiêm trọng khi xử lý postback hoàn thành công việc phát sinh: {e}")
@@ -564,48 +1527,31 @@ def handle_postback(event):
     # 2.7. Xem danh mục phiếu giảm giá (GVGS)
     if action == 'view_coupon_menu':
         flex = build_category_menu_flex()
-        line_bot_api.reply_message(event.reply_token, FlexSendMessage(
+        reply_with_auto_shift(event.reply_token, FlexSendMessage(
             alt_text="🎟️ Danh mục phiếu giảm giá (GVGS)", contents=flex
-        ))
+        ), group_id=event_group_id)
         return
 
     # 2.8. Xem danh sách model thuộc ngành hàng
     if action == 'view_coupon_cat':
         cat = data.get('cat')
         flex = build_product_list_flex(cat)
-        line_bot_api.reply_message(event.reply_token, FlexSendMessage(
+        reply_with_auto_shift(event.reply_token, FlexSendMessage(
             alt_text=f"🎟️ Phiếu giảm giá {cat}", contents=flex
-        ))
+        ), group_id=event_group_id)
         return
 
     # 2.9. Cấp mã coupon cho nhân viên (Claim coupon)
     if action == 'claim_coupon':
         prod_name = data.get('prod')
         cat_from_data = data.get('cat')
-        group_id = getattr(event.source, 'group_id', None)
-        user_id = event.source.user_id
-        
-        user_name = "Nhân viên"
-        try:
-            if group_id:
-                profile = line_bot_api.get_group_member_profile(group_id, user_id)
-            else:
-                profile = line_bot_api.get_profile(user_id)
-            if profile and profile.display_name:
-                user_name = profile.display_name
-        except Exception:
-            pass
+        user_name = get_cached_user_display_name(event_group_id, user_id, fallback="Nhân viên")
 
         success, res, remaining, category = claim_coupon_for_user(prod_name, user_name)
         if success:
             cat_name = cat_from_data or category or "Tất cả"
-            # 1. Thẻ Flex thông báo nhận mã thành công
             claimed_flex = build_claimed_coupon_flex(prod_name, res, remaining, user_name)
-            # 2. Tin nhắn text CHỈ chứa mã (không thêm chữ nào) để nhân viên chạm đè
-            #    sao chép cực nhanh. Anh Dương chốt 25/09/2026: chỉ gửi mỗi mã,
-            #    vì chạm đè tin nhắn dài sẽ copy lẫn cả phần hướng dẫn.
             code_text_msg = TextSendMessage(text=str(res))
-            # 3. Thẻ Flex cập nhật lại danh mục sản phẩm (hiển thị số lượng đã trừ)
             updated_list_flex = build_product_list_flex(cat_name)
 
             messages_to_send = [
@@ -613,9 +1559,9 @@ def handle_postback(event):
                 code_text_msg,
                 FlexSendMessage(alt_text=f"🎟️ Phiếu giảm giá {cat_name} (Đã cập nhật)", contents=updated_list_flex)
             ]
-            line_bot_api.reply_message(event.reply_token, messages_to_send)
+            reply_with_auto_shift(event.reply_token, messages_to_send, group_id=event_group_id)
         else:
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"⚠️ {res}"))
+            reply_with_auto_shift(event.reply_token, TextSendMessage(text=f"⚠️ {res}"), group_id=event_group_id)
         return
 
     # 3. Check-in Ăn Sáng/Chiều
@@ -623,30 +1569,20 @@ def handle_postback(event):
         session_type = data.get('session')
         staff_name = data.get('name')
         target_status = data.get('target_status', 'done')
-        group_id = getattr(event.source, 'group_id', None)
+        group_id = event_group_id
         
         if not group_id: return
 
-        # === LẤY TÊN NGƯỜI BẤM (NICK LINE) ===
-        try:
-            user_id = event.source.user_id
-            profile = line_bot_api.get_group_member_profile(group_id, user_id)
-            clicker_name = profile.display_name
-        except:
-            try:
-                profile = line_bot_api.get_profile(user_id)
-                clicker_name = profile.display_name
-            except:
-                clicker_name = "Unknown"
-
+        clicker_name = get_cached_user_display_name(group_id, user_id, fallback="Unknown")
         status_code, time_str = update_meal_status(group_id, session_type, staff_name, clicker_name, target_status)
         
         if status_code is True:
             updated_flex = generate_meal_flex(group_id, session_type)
             if updated_flex:
-                line_bot_api.reply_message(
+                reply_with_auto_shift(
                     event.reply_token,
-                    FlexSendMessage(alt_text=f"Checklist ăn {session_type} updated", contents=updated_flex)
+                    FlexSendMessage(alt_text=f"Checklist ăn {session_type} updated", contents=updated_flex),
+                    group_id=group_id
                 )
         elif status_code == "already":
             return
@@ -659,29 +1595,20 @@ def handle_postback(event):
         session_type = data.get('session')
         staff_name = data.get('name')
         target_status = data.get('target_status', 'done')
-        group_id = getattr(event.source, 'group_id', None)
+        group_id = event_group_id
         
         if not group_id: return
 
-        try:
-            user_id = event.source.user_id
-            profile = line_bot_api.get_group_member_profile(group_id, user_id)
-            clicker_name = profile.display_name
-        except:
-            try:
-                profile = line_bot_api.get_profile(user_id)
-                clicker_name = profile.display_name
-            except:
-                clicker_name = "Unknown"
-
+        clicker_name = get_cached_user_display_name(group_id, user_id, fallback="Unknown")
         status_code, time_str = update_vesinh_status(group_id, session_type, staff_name, clicker_name, target_status)
         
         if status_code is True:
             updated_flex = generate_vesinh_flex(group_id, session_type)
             if updated_flex:
-                line_bot_api.reply_message(
+                reply_with_auto_shift(
                     event.reply_token,
-                    FlexSendMessage(alt_text=f"Bảng phân công vệ sinh {session_type} updated", contents=updated_flex)
+                    FlexSendMessage(alt_text=f"Bảng phân công vệ sinh {session_type} updated", contents=updated_flex),
+                    group_id=group_id
                 )
         elif status_code == "already":
             return
@@ -689,27 +1616,13 @@ def handle_postback(event):
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text="❌ Lỗi: Không tìm thấy tên hoặc lỗi cập nhật."))
         return
 
-_group_members_sheet_cache = None
 
 def get_group_members(group_id):
     """
-    Lấy danh sách người nhận việc chung @all.
-
-    NGUỒN CHÍNH (22/09/2026): 3 cột E/F/G của sheet `schedules`
-    (E = PG, F = NV, G = QL+TC). Đây là danh sách CHUẨN của siêu thị, không phụ
-    thuộc việc ai đã từng chat trong nhóm (API get_group_member_ids không mở cho
-    tài khoản bot free).
-
-    Ba tầng bên dưới CHỈ CÒN LÀ DỰ PHÒNG, dùng khi không đọc được sheet.
+    Lấy danh sách người nhận việc chung @all từ 3 cột E/F/G của sheet `schedules` (có RAM Cache).
     """
-    global _group_members_sheet_cache
     member_names = []
-
-    # 0. NGUỒN CHÍNH: 3 cột E/F/G của sheet `schedules` (PG | NV | QL+TC)
-    #    Anh Dương chốt 22/09/2026: mọi lệnh việc có tag @all/@pg/@st/@nv đều
-    #    phải lấy danh sách từ đúng 3 cột này.
     try:
-        from meal_handler import get_task_roster
         _roster = get_task_roster()
         roster = []
         for _grp in ('PG', 'NV', 'QL+TC'):
@@ -718,62 +1631,27 @@ def get_group_members(group_id):
                     roster.append(_nm)
         if roster:
             return roster
-        print("Roster từ 3 cột E/F/G trống, chuyển sang phương án dự phòng.")
     except Exception as e_roster:
         print(f"Lỗi đọc roster từ sheet schedules: {e_roster}")
 
-    # 1. Gọi API Line để lấy danh sách đầy đủ
     try:
-        res = line_bot_api.get_group_member_ids(group_id)
-        member_ids = res.member_ids
-        for uid in member_ids:
-            try:
-                profile = line_bot_api.get_group_member_profile(group_id, uid)
-                if profile.display_name:
-                    name_lower = profile.display_name.lower()
-                    # Loại bỏ bot
-                    if 'bot' not in name_lower and name_lower != 'line':
-                        member_names.append(profile.display_name)
-            except Exception as e_prof:
-                print(f"Lỗi lấy profile cho {uid}: {e_prof}")
-    except Exception as e_api:
-        print(f"Lỗi lấy thành viên từ Line API (Có thể do tài khoản Bot Free): {e_api}")
+        records = get_cached_records('group_members', ttl=300)
+        seen_names = set()
+        for r in records:
+            if str(r.get('group_id')) == str(group_id):
+                name = r.get('display_name')
+                if name:
+                    seen_names.add(str(name).strip())
+        if seen_names:
+            member_names = sorted(list(seen_names))
+    except Exception as e_cache:
+        print(f"Lỗi lấy danh sách thành viên từ cache sheet: {e_cache}")
 
-    # 2. Fallback 1: Lấy danh sách thành viên đã từng tương tác trong nhóm từ sheet group_members
-    if not member_names:
-        try:
-            from config import get_spreadsheet
-            import gspread
-            if _group_members_sheet_cache is None:
-                spreadsheet = get_spreadsheet()
-                try:
-                    _group_members_sheet_cache = spreadsheet.worksheet('group_members')
-                except gspread.exceptions.WorksheetNotFound:
-                    pass
-            
-            if _group_members_sheet_cache is not None:
-                records = _group_members_sheet_cache.get_all_records()
-                
-                # Gom tất cả display_name của group này
-                seen_names = set()
-                for r in records:
-                    if str(r.get('group_id')) == str(group_id):
-                        name = r.get('display_name')
-                        if name:
-                            seen_names.add(str(name).strip())
-                if seen_names:
-                    member_names = sorted(list(seen_names))
-                    print(f"Lấy được {len(member_names)} thành viên từ cache sheet group_members.")
-        except Exception as e_cache:
-            print(f"Lỗi lấy danh sách thành viên từ cache sheet: {e_cache}")
-
-    # 3. Fallback 2: Lấy danh sách nhân viên từ lịch làm việc hôm nay
     if not member_names:
         try:
             from meal_handler import get_working_staff
             staff_morning = get_working_staff('ansang')
             staff_afternoon = get_working_staff('anchieu')
-            
             all_staff = set()
             for s_type in ['NV', 'PG']:
                 for name in staff_morning.get(s_type, []):
@@ -781,22 +1659,15 @@ def get_group_members(group_id):
                 for name in staff_afternoon.get(s_type, []):
                     all_staff.add(name)
             member_names = sorted(list(all_staff))
-            print(f"Sử dụng fallback lấy {len(member_names)} nhân viên từ lịch hôm nay.")
         except Exception as e_fallback:
             print(f"Lỗi fallback lấy nhân viên: {e_fallback}")
             
     return member_names
 
+
 # --- XỬ LÝ TIN NHẮN ---
 
 def _extract_mentionees(message):
-    """
-    Lấy danh sách MENTION THẬT của LINE trong một tin nhắn văn bản.
-
-    Trả về [{'index', 'length', 'type'}, ...] — index là vị trí dấu '@' trong
-    message.text, length là độ dài CẢ '@' lẫn tên hiển thị, type là 'user'/'all'.
-    Rỗng nếu tin nhắn không có mention (hoặc SDK cũ không hỗ trợ).
-    """
     mention = getattr(message, 'mention', None)
     if not mention:
         return []
@@ -816,37 +1687,32 @@ def handle_message(event):
     user_message = event.message.text.strip()
     user_msg_upper = user_message.upper()
     user_id = event.source.user_id
-    source_id = getattr(event.source, 'group_id', user_id)
-    # Tự động lưu/cập nhật thông tin thành viên nhóm
-    if event.source.type == 'group':
-        group_id = event.source.group_id
+    event_group_id = getattr(event.source, 'group_id', None)
+    source_id = event_group_id or user_id
+
+    # Tự động lưu thành viên nhóm chạy ngầm (không chặn luồng xử lý lệnh)
+    if getattr(event.source, 'type', '') == 'group' and event_group_id:
         try:
-            profile = line_bot_api.get_group_member_profile(group_id, user_id)
-            if profile and profile.display_name:
-                register_group_member(group_id, user_id, profile.display_name)
+            disp_name = get_cached_user_display_name(event_group_id, user_id, fallback="")
+            if disp_name:
+                register_group_member(event_group_id, user_id, disp_name)
         except Exception as e_reg:
             print(f"Không thể lấy profile để lưu thành viên: {e_reg}")
 
-    # 0. Giao công việc phát sinh (Adhoc task) — cú pháp mở rộng 22/09/2026
+    # 0. Giao công việc phát sinh (Adhoc task)
     lines = [line.strip() for line in user_message.split('\n') if line.strip()]
     _la_lenh_viec = is_work_command(lines)
 
     if _la_lenh_viec:
-        group_id = getattr(event.source, 'group_id', None)
+        group_id = event_group_id
         if not group_id:
             line_bot_api.reply_message(event.reply_token, TextSendMessage(
                 text="⚠️ Chức năng giao việc chỉ sử dụng được trong nhóm chat."))
             return
 
         try:
-            from meal_handler import get_task_roster
             roster = get_task_roster()
 
-            # MENTION THẬT CỦA LINE (sửa 24/09/2026): tên hiển thị LINE được phép
-            # có DẤU CÁCH, vd "@SVC Thắng.61271 AIO". Nếu đưa thẳng vào parser thì
-            # nó chỉ lấy được 1 từ ("SVC"), phần còn lại lọt vào TÊN CÔNG VIỆC.
-            # resolve_mentions() viết lại mỗi mention thành MỘT token duy nhất
-            # (ưu tiên tra MÃ NV trong tên hiển thị để ra đúng tên thật).
             _mentionees = _extract_mentionees(event.message)
             if _mentionees:
                 _fixed = resolve_mentions(event.message.text, _mentionees, roster)
@@ -859,19 +1725,13 @@ def handle_message(event):
                 msg += "\n".join("• " + e for e in parsed['errors'][:6])
                 msg += ("\n\nCú pháp: `việc @all:` rồi xuống dòng `- nội dung việc`.\n"
                         "Đích dùng được: @all @nv @pg @st, hoặc @156494, hoặc @Thảo.")
-                line_bot_api.reply_message(event.reply_token, TextSendMessage(text=msg))
+                reply_with_auto_shift(event.reply_token, TextSendMessage(text=msg), group_id=group_id)
                 return
 
             tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
             current_hour = datetime.now(tz_vietnam).hour
             current_shift = 'sang' if current_hour < 15 else 'chieu'
-            has_shift_checklist = bool(get_tasks_status_from_sheet(group_id, current_shift))
 
-            # Quy tắc lưu việc nằm ở task_parser.plan_assignments() để test
-            # được offline. Tóm tắt: dòng đầu chỉ có đích + đúng 1 dòng việc
-            # -> thẻ "CÔNG VIỆC CHUNG" như cũ; còn lại gom TẤT CẢ vào MỘT nhóm
-            # (nếu không mỗi dòng lại một mã nhóm, thẻ chỉ hiện nhóm cuối và
-            # nút 🗑 chỉ hủy được nhóm cuối).
             plan = plan_assignments(parsed)
             if plan['mode'] == 'all':
                 last_hash = add_all_adhoc_tasks(group_id, plan['names'],
@@ -895,9 +1755,11 @@ def handle_message(event):
                 alt_text = "📋 Công việc giao thêm"
 
             if flex_content:
-                line_bot_api.reply_message(
+                reply_with_auto_shift(
                     event.reply_token,
-                    FlexSendMessage(alt_text=alt_text, contents=flex_content))
+                    FlexSendMessage(alt_text=alt_text, contents=flex_content),
+                    group_id=group_id
+                )
             else:
                 line_bot_api.reply_message(event.reply_token, TextSendMessage(
                     text="❌ Có lỗi xảy ra khi tạo danh sách công việc."))
@@ -907,13 +1769,12 @@ def handle_message(event):
                 text="❌ Gặp lỗi khi xử lý giao việc."))
         return
 
-    # 0b. Hủy việc đã giao. Cố tình đòi ĐỦ 2 chữ ("hủy việc") để một tin nhắn
-    #     chat thường chỉ có chữ "hủy" không vô tình xóa mất việc của cả nhóm.
+    # 0b. Hủy việc đã giao
     _parts = user_message.split()
     if (len(_parts) >= 2
             and _parts[0].upper() in ('HỦY', 'HUY', 'XÓA', 'XOA')
             and _parts[1].upper() in ('VIỆC', 'VIEC', 'TASK')):
-        group_id = getattr(event.source, 'group_id', None)
+        group_id = event_group_id
         if not group_id:
             line_bot_api.reply_message(event.reply_token, TextSendMessage(
                 text="⚠️ Lệnh hủy chỉ dùng được trong nhóm chat."))
@@ -926,29 +1787,30 @@ def handle_message(event):
                 token, label, count = find_latest_task_token(group_id)
 
             if not token:
-                line_bot_api.reply_message(event.reply_token, TextSendMessage(
-                    text="Hôm nay chưa có việc nào được giao để hủy."))
+                reply_with_auto_shift(event.reply_token, TextSendMessage(
+                    text="Hôm nay chưa có việc nào được giao để hủy."), group_id=group_id)
                 return
 
             removed, ten_viec = cancel_task_group(group_id, token)
             if removed:
                 ds = ", ".join(ten_viec[:3])
-                line_bot_api.reply_message(event.reply_token, TextSendMessage(
-                    text=f"🗑 Đã hủy {removed} dòng việc.\nMã nhóm: {token}\nViệc: {ds}"))
+                reply_with_auto_shift(event.reply_token, TextSendMessage(
+                    text=f"🗑 Đã hủy {removed} dòng việc.\nMã nhóm: {token}\nViệc: {ds}"), group_id=group_id)
             else:
-                line_bot_api.reply_message(event.reply_token, TextSendMessage(
-                    text=f"Không tìm thấy việc nào khớp mã {token} để hủy."))
+                reply_with_auto_shift(event.reply_token, TextSendMessage(
+                    text=f"Không tìm thấy việc nào khớp mã {token} để hủy."), group_id=group_id)
         except Exception as e:
             print(f"Lỗi khi hủy việc: {e}")
             line_bot_api.reply_message(event.reply_token, TextSendMessage(
                 text="❌ Gặp lỗi khi hủy việc."))
-    # 0c. Lệnh nạp mã giảm giá: ADD COUPON: ... hoặc THEM COUPON: ...
+        return
+
+    # 0c. Lệnh nạp mã giảm giá
     if (user_msg_upper.startswith('ADD COUPON') or 
         user_msg_upper.startswith('THEM COUPON') or 
         user_msg_upper.startswith('THÊM COUPON') or
         user_msg_upper.startswith('NẠP COUPON') or
         user_msg_upper.startswith('NAP COUPON')):
-        # Bóc tách phần nội dung sau tiền tố lệnh bằng regex (bất kể có dấu : hay không)
         content_after = re.sub(r'^(?:ADD|THEM|THÊM|NẠP|NAP)\s+COUPON\s*:?', '', user_message, flags=re.IGNORECASE).strip()
         if content_after:
             count, prods, dup_count = import_coupons_from_text(content_after)
@@ -966,21 +1828,103 @@ def handle_message(event):
                 reply = "⚠️ Không tìm thấy mã hợp lệ từ nội dung đã gửi. Vui lòng kiểm tra lại định dạng (mỗi dòng gồm Ngày : Sản phẩm : Mã)."
         else:
             reply = "⚠️ Vui lòng gửi theo cú pháp:\n`ADD COUPON:` rồi xuống dòng dán danh sách mã."
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
+        reply_with_auto_shift(event.reply_token, TextSendMessage(text=reply), group_id=event_group_id)
         return
 
-    # Lệnh xóa toàn bộ mã giảm giá: xoa gvgs, xóa gvgs, clear gvgs
+    # Lệnh xóa toàn bộ mã giảm giá
     if user_msg_upper in ['XOA GVGS', 'XÓA GVGS', 'CLEAR GVGS', 'RESET GVGS', 'XOA COUPON', 'XÓA COUPON']:
         success, msg = clear_all_coupons()
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=msg))
+        reply_with_auto_shift(event.reply_token, TextSendMessage(text=msg), group_id=event_group_id)
         return
 
     # 0d. Lệnh xem và nhận phiếu giảm giá (GVGS)
     if user_msg_upper in ['GVGS', 'COUPON', 'MA GIAM GIA', 'MÃ GIẢM GIÁ', 'GIAM GIA', 'GIẢM GIÁ']:
         flex = build_category_menu_flex()
-        line_bot_api.reply_message(event.reply_token, FlexSendMessage(
+        reply_with_auto_shift(event.reply_token, FlexSendMessage(
             alt_text="🎟️ Danh mục phiếu giảm giá (GVGS)", contents=flex
-        ))
+        ), group_id=event_group_id)
+        return
+
+    # 0e. Lệnh mở nhanh Giao diện Web App (LINE LIFF — Mục 15)
+    if user_msg_upper in ['APP', 'WEB', 'LIFF', 'QUANLY', 'QUẢN LÝ', 'GIAOVIEC', 'GIAO VIỆC']:
+        target_url = resolve_effective_liff_url(event_group_id)
+        if not target_url:
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text="⚠️ Chưa cấu hình RENDER_EXTERNAL_URL hoặc LIFF_URL trên hệ thống.")
+            )
+            return
+        app_bubble = {
+            "type": "bubble",
+            "size": "mega",
+            "header": {
+                "type": "box",
+                "layout": "vertical",
+                "backgroundColor": "#0284C7",
+                "paddingAll": "md",
+                "contents": [
+                    {"type": "text", "text": "🌐 MINI WEB-APP ĐMX SAVICO", "weight": "bold", "size": "md", "color": "#FFFFFF"},
+                    {"type": "text", "text": "Giao việc trực quan • Checklist Kho • Vệ sinh & Ăn ca", "size": "xxs", "color": "#E0F2FE", "margin": "xs"}
+                ]
+            },
+            "body": {
+                "type": "box",
+                "layout": "vertical",
+                "paddingAll": "md",
+                "spacing": "sm",
+                "contents": [
+                    {
+                        "type": "text",
+                        "text": "• Xem & đánh dấu hoàn tất công việc cực nhanh.\n• Tick chọn nhân viên bằng Checkbox để giao việc mà không cần nhớ cú pháp gõ tay.\n• Theo dõi phân công Vệ sinh, Điểm danh ăn và Lịch làm việc.",
+                        "size": "xs",
+                        "color": "#334155",
+                        "wrap": True
+                    }
+                ]
+            },
+            "footer": {
+                "type": "box",
+                "layout": "vertical",
+                "paddingAll": "sm",
+                "contents": [
+                    {
+                        "type": "button",
+                        "action": {
+                            "type": "uri",
+                            "label": "🚀 Mở Web App Ngay",
+                            "uri": target_url
+                        },
+                        "style": "primary",
+                        "color": "#0284C7",
+                        "height": "sm"
+                    }
+                ]
+            }
+        }
+        reply_with_auto_shift(
+            event.reply_token,
+            FlexSendMessage(alt_text="🌐 Mở Mini Web-App ĐMX Savico", contents=app_bubble),
+            group_id=event_group_id
+        )
+        return
+
+    # 0f. Lệnh Mở Ca thủ công 1 chạm (Phát trọn bộ Lịch + Checklist bằng reply_token miễn phí)
+    if user_msg_upper in ['MỞ CA', 'MO CA', 'MOCA', 'MỞ CA SÁNG', 'MO CA SANG', 'MỞ CA CHIỀU', 'MO CA CHIEU']:
+        target_gid = event_group_id or os.environ.get('EMPLOYEE_GROUP_ID') or MAIN_CHECKLIST_GROUP_ID
+        if 'SÁNG' in user_msg_upper or 'SANG' in user_msg_upper:
+            shift_type = 'sang'
+        elif 'CHIỀU' in user_msg_upper or 'CHIEU' in user_msg_upper:
+            shift_type = 'chieu'
+        else:
+            tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
+            shift_type = 'sang' if datetime.now(tz_vietnam).hour < 14 else 'chieu'
+
+        msgs = build_shift_broadcast_messages(target_gid, shift_type)
+        if msgs:
+            mark_shift_broadcast_sent(target_gid, shift_type)
+            line_bot_api.reply_message(event.reply_token, msgs[:LINE_MAX_MESSAGES])
+        else:
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="⚠️ Không tìm thấy lịch hoặc checklist cho ca này."))
         return
 
     # 1. Admin ADD
@@ -1021,7 +1965,7 @@ def handle_message(event):
             
         except Exception as e:
             print(f"Lỗi khi cập nhật Google Sheet: {e}")
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"Có lỗi xảy ra khi {action_text.lower()} ID."))
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="Có lỗi xảy ra khi cập nhật ID."))
         return
 
     # 2. Check quyền
@@ -1035,9 +1979,9 @@ def handle_message(event):
     # 3. ID
     if user_msg_upper == 'ID':
         reply_text = f'👤 User ID:\n{user_id}'
-        if hasattr(event.source, 'group_id'):
+        if event_group_id:
             reply_text = f'👥 Group ID:\n{source_id}\n\n' + reply_text
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
+        reply_with_auto_shift(event.reply_token, TextSendMessage(text=reply_text), group_id=event_group_id)
         return
 
     # 4. MENU
@@ -1045,33 +1989,35 @@ def handle_message(event):
         menu_text = (
             "🤖 **MENU HƯỚNG DẪN BOT** 🤖\n"
             "----------------------------------\n"
-            "**🍱 ĐIỂM DANH ĂN:**\n"
-            "• `ăn` - Tự động hiển thị (Trưa <15h, Tối >=15h).\n"
-            "• `ansang` / `anchieu` - Thủ công.\n"
+            "**🌐 WEB APP QUẢN LÝ & GIAO VIỆC:**\n"
+            "• `app` hoặc `liff` - Mở giao diện Web App trực quan.\n"
+            "• `mở ca` - Phát Lịch & Checklist đầu ca (Miễn phí).\n"
+            "\n"
+            "**🍱 ĐIỂM DANH ĂN & VỆ SINH:**\n"
+            "• `ăn` / `ansang` / `anchieu` - Điểm danh ăn.\n"
+            "• `vesinh` - Phân công khu vực vệ sinh.\n"
             "\n"
             "**✅ CHECKLIST CÔNG VIỆC:**\n"
-            "• `sang` - Checklist sáng.\n"
-            "• `chieu` - Checklist chiều.\n"
-            "• `vs` - Checklist hình ảnh.\n"
+            "• `sang` / `chieu` - Checklist kho Sáng/Chiều.\n"
+            "• `vs` - Checklist hình ảnh trước 10h.\n"
             "\n"
             "**📅 LỊCH LÀM VIỆC:**\n"
             "• `nv` / `pg` - Lịch hôm nay.\n"
             "• `nv2`..`nv8` - Lịch NV theo thứ.\n"
             "\n"
-            "**📊 BÁO CÁO REALTIME:**\n"
-            "• `ST [Mã ST]` - Báo cáo chi tiết.\n"
-            "• `bxh` - Top 20.\n"
+            "**📊 BÁO CÁO DOANH THU:**\n"
+            "• `RT1` / `LK1` / `NV0` - Báo cáo Savico.\n"
+            "• `ST [Mã ST]` / `bxh` - Báo cáo cụm.\n"
             "\n"
             "**🎟️ PHIẾU GIẢM GIÁ:**\n"
-            "• `gvgs` - Danh mục phiếu giảm giá (Tivi, Tủ lạnh, Máy giặt...).\n"
-            "• `ADD COUPON:` - Quản lý nạp mã hàng tuần."
+            "• `gvgs` - Danh mục phiếu giảm giá."
         )
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=menu_text))
+        reply_with_auto_shift(event.reply_token, TextSendMessage(text=menu_text), group_id=event_group_id)
         return
 
     # 4.5. Checklist hình ảnh (VS)
     if user_msg_upper == 'VS':
-        group_id = getattr(event.source, 'group_id', None)
+        group_id = event_group_id
         if not group_id:
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text="Lệnh này chỉ hoạt động trong nhóm chat."))
             return
@@ -1080,7 +2026,7 @@ def handle_message(event):
             flex_content = generate_checklist_flex(group_id, 'vs')
             if flex_content:
                 message = FlexSendMessage(alt_text="Checklist hình ảnh trước 10h sáng", contents=flex_content)
-                line_bot_api.reply_message(event.reply_token, message)
+                reply_with_auto_shift(event.reply_token, message, group_id=group_id)
             else:
                 line_bot_api.reply_message(event.reply_token, TextSendMessage(text="Không thể tạo checklist hình ảnh."))
         except Exception as e:
@@ -1092,7 +2038,7 @@ def handle_message(event):
     meal_cmds = ['ansang', 'anchieu', 'an', 'ăn']
     
     if cmd_normalized in meal_cmds:
-        group_id = getattr(event.source, 'group_id', None)
+        group_id = event_group_id
         if not group_id:
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text="⚠️ Lệnh này chỉ hoạt động trong nhóm chat."))
             return
@@ -1110,17 +2056,16 @@ def handle_message(event):
                 flex_content = generate_meal_flex(group_id, session_type)
                 if flex_content:
                     alt = "Check list ăn trưa" if session_type == 'ansang' else "Check list ăn tối"
-                    line_bot_api.reply_message(event.reply_token, FlexSendMessage(alt_text=alt, contents=flex_content))
+                    reply_with_auto_shift(event.reply_token, FlexSendMessage(alt_text=alt, contents=flex_content), group_id=group_id)
                 else:
-                    line_bot_api.reply_message(event.reply_token, TextSendMessage(text="⚠️ Không tìm thấy dữ liệu lịch hoặc toàn bộ nhân sự đều OFF."))
+                    reply_with_auto_shift(event.reply_token, TextSendMessage(text="⚠️ Không tìm thấy dữ liệu lịch hoặc toàn bộ nhân sự đều OFF."), group_id=group_id)
             except Exception as e:
                 print(f"Lỗi tạo meal flex: {e}")
-                # Không push lỗi ra group
         return
 
     # === 5.5 XỬ LÝ LỆNH VỆ SINH (VESINH) ===
     if cmd_normalized.startswith('vesinh') or cmd_normalized.startswith('vệsinh') or cmd_normalized in ['ve sinh', 'vệ sinh']:
-        group_id = getattr(event.source, 'group_id', None)
+        group_id = event_group_id
         if not group_id:
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text="⚠️ Lệnh này chỉ hoạt động trong nhóm chat."))
             return
@@ -1138,9 +2083,9 @@ def handle_message(event):
                 flex_content = generate_vesinh_flex(group_id, session_type)
                 if flex_content:
                     alt = "Bảng phân công vệ sinh Ca Sáng" if session_type == 'vesinh_sang' else "Bảng phân công vệ sinh Ca Chiều"
-                    line_bot_api.reply_message(event.reply_token, FlexSendMessage(alt_text=alt, contents=flex_content))
+                    reply_with_auto_shift(event.reply_token, FlexSendMessage(alt_text=alt, contents=flex_content), group_id=group_id)
                 else:
-                    line_bot_api.reply_message(event.reply_token, TextSendMessage(text="⚠️ Không tìm thấy dữ liệu lịch vệ sinh hoặc toàn bộ nhân sự đều OFF."))
+                    reply_with_auto_shift(event.reply_token, TextSendMessage(text="⚠️ Không tìm thấy dữ liệu lịch vệ sinh hoặc toàn bộ nhân sự đều OFF."), group_id=group_id)
             except Exception as e:
                 print(f"Lỗi tạo vesinh flex: {e}")
         return
@@ -1148,7 +2093,7 @@ def handle_message(event):
     # 6. Checklist công việc (Sang/Chieu)
     if user_msg_upper in ['SANG', 'CHIEU']:
         shift_type = 'sang' if user_msg_upper == 'SANG' else 'chieu'
-        group_id = getattr(event.source, 'group_id', None)
+        group_id = event_group_id
         
         if not group_id:
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text="Lệnh này chỉ hoạt động trong nhóm chat."))
@@ -1162,6 +2107,7 @@ def handle_message(event):
                 flex_content = generate_checklist_flex(group_id, shift_type)
                 alt_text = f"Checklist công việc ca {shift_type}"
             
+            mark_shift_broadcast_sent(group_id, shift_type)
             if flex_content:
                 message = FlexSendMessage(alt_text=alt_text, contents=flex_content)
                 line_bot_api.reply_message(event.reply_token, message)
@@ -1184,23 +2130,21 @@ def handle_message(event):
         try:
             if isinstance(flex_msg, list):
                 carousel_content = {"type": "carousel", "contents": flex_msg}
-                line_bot_api.reply_message(event.reply_token, FlexSendMessage(alt_text="📊 BÁO CÁO LŨY KẾ (Cuộn Ngang P.1 & P.2)", contents=carousel_content))
+                reply_with_auto_shift(event.reply_token, FlexSendMessage(alt_text="📊 BÁO CÁO LŨY KẾ (Cuộn Ngang P.1 & P.2)", contents=carousel_content), group_id=event_group_id)
             else:
-                line_bot_api.reply_message(event.reply_token, FlexSendMessage(alt_text="Báo Cáo Lũy Kế Savico", contents=flex_msg))
+                reply_with_auto_shift(event.reply_token, FlexSendMessage(alt_text="Báo Cáo Lũy Kế Savico", contents=flex_msg), group_id=event_group_id)
         except Exception as e:
-            print(f"Lỗi gửi Flex LK1: {e}")
-            try:
-                line_bot_api.push_message(source_id, TextSendMessage(text=f"Lỗi gửi Flex báo cáo lũy kế: {str(e)}"))
-            except Exception as pe:
-                print(f"Lỗi gửi tin nhắn đẩy dự phòng: {pe}")
+            # Mục 5: Tuyệt đối KHÔNG gọi push_message báo lỗi làm tốn quota nhóm
+            print(f"Lỗi gửi Flex LK1 (không push dự phòng): {e}")
         return
 
     if user_msg_upper in ['#LENH', '#LỆNH', 'HELP', '#HELP', 'MENU', '#CUPHAP', 'CÚ PHÁP', 'CUPHAP']:
         try:
             help_bubble = build_help_commands_flex()
-            line_bot_api.reply_message(
+            reply_with_auto_shift(
                 event.reply_token,
-                FlexSendMessage(alt_text="📖 Danh Sách Câu Lệnh Hỗ Trợ", contents=help_bubble)
+                FlexSendMessage(alt_text="📖 Danh Sách Câu Lệnh Hỗ Trợ", contents=help_bubble),
+                group_id=event_group_id
             )
         except Exception as e:
             print(f"Lỗi gửi bảng lệnh trợ giúp: {e}")
@@ -1217,16 +2161,13 @@ def handle_message(event):
         user_msg_upper.startswith(('NV:', 'NV0 ', 'NV1 ')) and len(user_message[4:].strip()) > 0
     )
     is_nv_kpi_cmd = (
-        user_msg_upper in ['NV0', 'NV1'] or 
-        cmd_clean in ['nv0', 'nv1'] or 
-        user_msg_upper.startswith(('NV0 ', 'NV1 ', 'NV:')) or
+        user_msg_upper in ['NV0', 'NV1', 'NV2'] or 
+        cmd_clean in ['nv0', 'nv1', 'nv2'] or 
+        user_msg_upper.startswith(('NV0 ', 'NV1 ', 'NV2 ', 'NV:')) or
         has_nv_search_query
-    )
+    ) and not re.match(r"^(NV|PG)([2-8])$", user_msg_upper)
 
     if is_nv_kpi_cmd:
-        group_id = getattr(event.source, 'group_id', None)
-        target_id = group_id or getattr(event.source, 'user_id', None)
-        
         try:
             flex_bubbles = build_nhanvien_flex()
         except Exception as e:
@@ -1244,7 +2185,6 @@ def handle_message(event):
             overview_bubble = flex_bubbles[0]
             staff_bubbles = flex_bubbles[1:]
 
-            # 1. Chuẩn hóa lệnh NV0: Bảng Xếp Hạng Doanh Thu NV + Carousel 6 Thẻ KPI Đầu (Chia cụm max 2 thẻ/Carousel)
             if cmd_clean == 'nv0':
                 overview_msg = FlexSendMessage(alt_text="🏆 Bảng Xếp Hạng Doanh Thu NV", contents=overview_bubble)
                 top_staff = staff_bubbles[:6]
@@ -1256,16 +2196,16 @@ def handle_message(event):
                             alt_text=f"🎴 Thẻ KPI Nhân Viên (#{i+1}-#{i+len(chunk)})",
                             contents={"type": "carousel", "contents": chunk}
                         ))
-                line_bot_api.reply_message(event.reply_token, reply_msgs[:5])
+                reply_with_auto_shift(event.reply_token, reply_msgs[:5], group_id=event_group_id)
                 return
 
-            # 2. Chuẩn hóa lệnh NV1: Gửi tiếp các thẻ NV từ #7 đến hết (Chia cụm max 2 thẻ/Carousel)
             elif cmd_clean == 'nv1':
                 rem_staff = staff_bubbles[6:]
                 if not rem_staff:
-                    line_bot_api.reply_message(
+                    reply_with_auto_shift(
                         event.reply_token,
-                        TextSendMessage(text="✅ Tất cả nhân viên đã được hiển thị trọn vẹn trong bảng xếp hạng NV0.")
+                        TextSendMessage(text="✅ Tất cả nhân viên đã được hiển thị trọn vẹn trong bảng xếp hạng NV0."),
+                        group_id=event_group_id
                     )
                 else:
                     carousel_msgs = []
@@ -1276,30 +2216,9 @@ def handle_message(event):
                                 alt_text=f"🎴 Thẻ KPI Nhân Viên (#{i+7}-#{i+6+len(chunk)})",
                                 contents={"type": "carousel", "contents": chunk}
                             ))
-                    line_bot_api.reply_message(event.reply_token, carousel_msgs[:5])
+                    reply_with_auto_shift(event.reply_token, carousel_msgs[:5], group_id=event_group_id)
                 return
 
-            # 3. Chuẩn hóa lệnh NV2 (Dự phòng nếu tổng số NV cực lớn): Gửi tiếp từ #17 trở đi
-            elif cmd_clean == 'nv2':
-                rem_staff = staff_bubbles[16:]
-                if not rem_staff:
-                    line_bot_api.reply_message(
-                        event.reply_token,
-                        TextSendMessage(text="✅ Tất cả nhân viên đã được hiển thị trong NV0 và NV1.")
-                    )
-                else:
-                    carousel_msgs = []
-                    for i in range(0, len(rem_staff), 2):
-                        chunk = rem_staff[i:i+2]
-                        if chunk:
-                            carousel_msgs.append(FlexSendMessage(
-                                alt_text=f"🎴 Thẻ KPI Nhân Viên (#{i+17}-#{i+16+len(chunk)})",
-                                contents={"type": "carousel", "contents": chunk}
-                            ))
-                    line_bot_api.reply_message(event.reply_token, carousel_msgs[:5])
-                return
-
-            # 4. Trường hợp tra cứu riêng 1 hoặc nhiều nhân viên (VD: "NV 61169", "NV 61169,98372", "NV Dương")
             query_param = ""
             if user_msg_upper.startswith('NV '):
                 query_param = user_message[3:].strip()
@@ -1328,9 +2247,10 @@ def handle_message(event):
 
                 if matched_bubbles:
                     if len(matched_bubbles) == 1:
-                        line_bot_api.reply_message(
+                        reply_with_auto_shift(
                             event.reply_token,
-                            FlexSendMessage(alt_text=f"🎴 Thẻ KPI Nhân Viên: {query_param}", contents=matched_bubbles[0])
+                            FlexSendMessage(alt_text=f"🎴 Thẻ KPI Nhân Viên: {query_param}", contents=matched_bubbles[0]),
+                            group_id=event_group_id
                         )
                     else:
                         matched_carousels = []
@@ -1340,26 +2260,20 @@ def handle_message(event):
                                 alt_text=f"🎴 Thẻ KPI Nhân Viên ({i+1}-{i+len(chunk)})",
                                 contents={"type": "carousel", "contents": chunk}
                             ))
-                        line_bot_api.reply_message(event.reply_token, matched_carousels[:5])
+                        reply_with_auto_shift(event.reply_token, matched_carousels[:5], group_id=event_group_id)
                 else:
-                    line_bot_api.reply_message(
+                    reply_with_auto_shift(
                         event.reply_token,
-                        TextSendMessage(text=f"🔍 Không tìm thấy nhân viên với mã/tên: '{query_param}'. Vui lòng thử lại với Mã User (VD: nv 61169).")
+                        TextSendMessage(text=f"🔍 Không tìm thấy nhân viên với mã/tên: '{query_param}'. Vui lòng thử lại với Mã User (VD: nv 61169)."),
+                        group_id=event_group_id
                     )
 
         except Exception as e:
-            print(f"Lỗi gửi Flex NV: {e}")
-            try:
-                line_bot_api.push_message(source_id, TextSendMessage(text=f"Lỗi gửi Flex xếp hạng nhân viên: {str(e)}"))
-            except Exception as pe:
-                print(f"Lỗi gửi tin nhắn đẩy dự phòng: {pe}")
+            # Mục 5: Tuyệt đối KHÔNG gọi push_message báo lỗi làm tốn quota nhóm
+            print(f"Lỗi gửi Flex NV (không push dự phòng): {e}")
         return
 
     if user_msg_upper in ['RT1', 'RT2', 'NHOM', 'NHOM2'] or user_msg_upper.startswith(('RT2 ', 'NHOM ')):
-        # Báo cáo realtime RT1 tích hợp 4 thẻ (Doanh thu, Thi đua & Nhóm gộp Phụ kiện, Bảo hiểm thợ).
-        # Bảng nhóm gộp ở lệnh RT2 đã được tích hợp trọn vẹn vào lệnh RT1.
-        # Báo cáo realtime CHỈ gửi bằng reply_message (MIỄN PHÍ).
-        # KHÔNG dùng push_message: push tốn quota tháng của LINE OA.
         try:
             rt_messages, rt_info = build_realtime_messages(max_messages=LINE_MAX_MESSAGES)
         except Exception as e:
@@ -1380,18 +2294,12 @@ def handle_message(event):
 
             reply_msgs = [FlexSendMessage(alt_text=m["alt_text"], contents=m["contents"])
                           for m in rt_messages]
-            # Chặn cứng ở 5 message: vượt là LINE trả 400 "Size must be between 1 and 5".
-            line_bot_api.reply_message(event.reply_token, reply_msgs[:LINE_MAX_MESSAGES])
-            print(f"RT1: gửi {min(len(reply_msgs), LINE_MAX_MESSAGES)}/{len(reply_msgs)} message | "
-                  f"RT {rt_info.get('rt_parts') if rt_info else '?'} phần, "
-                  f"tổng bubbles: {rt_info.get('total_bubbles') if rt_info else '?'}")
+            reply_with_auto_shift(event.reply_token, reply_msgs[:LINE_MAX_MESSAGES], group_id=event_group_id)
         except Exception as e:
-            # KHÔNG push dự phòng (tốn quota) — chỉ ghi log để còn truy vết.
             print(f"Lỗi gửi Flex RT1 (không push dự phòng): {e}")
         return
 
     if user_msg_upper in ['RTNV', 'RT NV', 'CTNV', 'CHITIETNV', 'RT1NV', 'RT1_DETAIL']:
-        # Báo cáo chi tiết ngành hàng thực bán của từng nhân viên (kích hoạt từ nút bấm trên RT1)
         try:
             nv_messages, nv_info = build_realtime_staff_detail_messages(max_messages=LINE_MAX_MESSAGES)
         except Exception as e:
@@ -1411,79 +2319,76 @@ def handle_message(event):
 
             reply_msgs = [FlexSendMessage(alt_text=m["alt_text"], contents=m["contents"])
                           for m in nv_messages]
-            line_bot_api.reply_message(event.reply_token, reply_msgs[:LINE_MAX_MESSAGES])
-            print(f"RTNV: gửi {len(reply_msgs)} message chi tiết nhân viên | info: {nv_info}")
+            reply_with_auto_shift(event.reply_token, reply_msgs[:LINE_MAX_MESSAGES], group_id=event_group_id)
         except Exception as e:
             print(f"Lỗi gửi Flex RTNV: {e}")
         return
 
+    # Mục 3: Lệnh cào dữ liệu RT / CAO — KHÔNG DÙNG push_message (Tiết kiệm 100% Push Quota)
     if user_msg_upper in ['RT', 'CAO'] or user_msg_upper.startswith(('RT ', 'CAO ')):
         scrape_type = "realtime"
         if "LK" in user_msg_upper or "LUY" in user_msg_upper:
             scrape_type = "luyke"
             
         try:
-            # Kích hoạt tín hiệu trên Supabase
             trigger_success, req_time = trigger_adhoc_scrape(scrape_type)
             if not trigger_success:
-                print("Lỗi kích hoạt tín hiệu cào dữ liệu.")
+                line_bot_api.reply_message(
+                    event.reply_token,
+                    TextSendMessage(text="⚠️ Không thể gửi tín hiệu cào dữ liệu lên Supabase. Vui lòng thử lại.")
+                )
                 return
-                
-            # Đợi đồng bộ cào kết quả trực tiếp và đẩy tin nhắn bằng push_message ngầm để tránh timeout
-            def poll_and_push(scrape_type_val, dest_id, requested_at_str):
-                completed = False
-                saw_running = False
-                req_prefix = requested_at_str[:16] if requested_at_str else ""
-                
-                for _ in range(40): # Tối đa 120 giây (40 vòng lặp * 3 giây)
-                    time.sleep(3)
-                    st_info = check_scrape_status()
-                    sig_status = st_info.get("status")
-                    sig_req = st_info.get("requested_at", "")
-                    
-                    if sig_status == "running":
-                        saw_running = True
-                    elif sig_status == "completed":
-                        if saw_running or not sig_req or sig_req >= req_prefix:
-                            completed = True
-                            break
-                            
-                if completed:
-                    try:
-                        if scrape_type_val == "luyke":
-                            flex_msg = build_luyke_flex()
-                            if isinstance(flex_msg, list):
-                                messages = [FlexSendMessage(alt_text=f"Báo Cáo Lũy Kế Savico P.{i+1}", contents=b) for i, b in enumerate(flex_msg)]
-                                line_bot_api.push_message(dest_id, messages)
-                            else:
-                                line_bot_api.push_message(dest_id, FlexSendMessage(alt_text="Báo Cáo Lũy Kế Savico", contents=flex_msg))
-                        else:
-                            # Lệnh RT/CAO phải chờ cào dữ liệu tới 120 giây, mà reply_token chỉ
-                            # sống ~1 phút nên buộc phải push. Vì push tốn quota, vẫn đóng gói
-                            # ≤ 5 message để KHÔNG bao giờ bị LINE trả 400.
-                            rt_messages, _rt_info = build_realtime_messages(max_messages=LINE_MAX_MESSAGES)
-                            if rt_messages:
-                                push_msgs = [FlexSendMessage(alt_text=m["alt_text"], contents=m["contents"])
-                                             for m in rt_messages]
-                                line_bot_api.push_message(dest_id, push_msgs[:LINE_MAX_MESSAGES])
-                            else:
-                                line_bot_api.push_message(dest_id, TextSendMessage(
-                                    text="⚠️ Báo cáo realtime quá lớn để gói gọn trong 5 tin nhắn. Vui lòng xem dashboard HTML."
-                                ))
-                    except Exception as fe:
-                        print(f"Lỗi gửi Flex báo cáo cào: {fe}")
-                        try:
-                            line_bot_api.push_message(dest_id, TextSendMessage(text=f"❌ Có lỗi xảy ra khi vẽ Flex báo cáo: {str(fe)}"))
-                        except Exception as pe:
-                            print(f"Lỗi gửi tin đẩy báo lỗi: {pe}")
+
+            completed = False
+            saw_running = False
+            req_prefix = req_time[:16] if req_time else ""
+
+            for _ in range(7):
+                time.sleep(3)
+                st_info = check_scrape_status()
+                sig_status = st_info.get("status")
+                sig_req = st_info.get("requested_at", "")
+
+                if sig_status == "running":
+                    saw_running = True
+                elif sig_status == "completed":
+                    if saw_running or not sig_req or sig_req >= req_prefix:
+                        completed = True
+                        break
+
+            if completed:
+                if scrape_type == "luyke":
+                    flex_msg = build_luyke_flex()
+                    if isinstance(flex_msg, list):
+                        carousel_content = {"type": "carousel", "contents": flex_msg}
+                        reply_with_auto_shift(
+                            event.reply_token,
+                            FlexSendMessage(alt_text="📊 BÁO CÁO LŨY KẾ (Cuộn Ngang P.1 & P.2)", contents=carousel_content),
+                            group_id=event_group_id
+                        )
+                    else:
+                        reply_with_auto_shift(
+                            event.reply_token,
+                            FlexSendMessage(alt_text="Báo Cáo Lũy Kế Savico", contents=flex_msg),
+                            group_id=event_group_id
+                        )
                 else:
-                    try:
-                        line_bot_api.push_message(dest_id, TextSendMessage(text=f"⚠️ Thời gian chờ cào dữ liệu [{scrape_type_val.upper()}] quá hạn. Vui lòng đảm bảo Chrome trên máy trạm đã bật và đã đăng nhập Portal BI."))
-                    except Exception as pe:
-                        print(f"Lỗi gửi tin đẩy quá hạn: {pe}")
-
-            threading.Thread(target=poll_and_push, args=(scrape_type, source_id, req_time), daemon=True).start()
-
+                    rt_messages, _ = build_realtime_messages(max_messages=LINE_MAX_MESSAGES)
+                    if rt_messages:
+                        reply_msgs = [FlexSendMessage(alt_text=m["alt_text"], contents=m["contents"]) for m in rt_messages]
+                        reply_with_auto_shift(event.reply_token, reply_msgs[:LINE_MAX_MESSAGES], group_id=event_group_id)
+                    else:
+                        line_bot_api.reply_message(
+                            event.reply_token,
+                            TextSendMessage(text="⚠️ Báo cáo realtime quá lớn để gói gọn trong 5 tin nhắn. Vui lòng xem dashboard HTML.")
+                        )
+            else:
+                pending_flex = build_scrape_pending_flex(scrape_type, req_time)
+                reply_with_auto_shift(
+                    event.reply_token,
+                    FlexSendMessage(alt_text="⏳ Đang đồng bộ báo cáo BI...", contents=pending_flex),
+                    group_id=event_group_id
+                )
         except Exception as e:
             print(f"Lỗi xử lý tín hiệu {user_msg_upper}: {e}")
         return
@@ -1497,8 +2402,9 @@ def handle_message(event):
         days_map = {2: "Thứ Hai", 3: "Thứ Ba", 4: "Thứ Tư", 5: "Thứ Năm", 6: "Thứ Sáu", 7: "Thứ Bảy", 8: "Chủ Nhật"}
         day_str = days_map.get(day_number)
         try:
-            # Gửi lịch với reply_token
-            send_daily_schedule(schedule_type, reply_token=event.reply_token, day_of_week_str=day_str)
+            msg = send_daily_schedule(schedule_type, day_of_week_str=day_str, return_msg_only=True)
+            if msg:
+                reply_with_auto_shift(event.reply_token, msg, group_id=event_group_id)
         except Exception as e:
             print(f"Error schedule: {e}")
         return
@@ -1506,87 +2412,104 @@ def handle_message(event):
     if user_msg_upper in ['NV', 'PG']:
         schedule_type = 'employee' if user_msg_upper == 'NV' else 'pg'
         try:
-            # Gửi lịch với reply_token
-            send_daily_schedule(schedule_type, reply_token=event.reply_token)
+            msg = send_daily_schedule(schedule_type, return_msg_only=True)
+            if msg:
+                reply_with_auto_shift(event.reply_token, msg, group_id=event_group_id)
         except Exception as e:
             print(f"Error schedule: {e}")
         return
         
     # 8. Báo cáo (ST, BXH)
     try:
-        sheet = get_spreadsheet().worksheet(WORKSHEET_NAME)
-        all_data = sheet.get_all_values()
+        all_data = get_cached_values(WORKSHEET_NAME, ttl=60)
         reply_messages = []
-        cluster_names = {row[0].strip().upper() for row in all_data[1:] if len(row) > 0 and row[0]}
-        header_row = all_data[0]
-        
-        if user_msg_upper.startswith('ST '):
-            supermarket_code = user_message[3:].strip().upper()
-            found_row = next((row for row in all_data[1:] if row and len(row) > 2 and row[2] and row[2].strip().split(' ')[0] == supermarket_code), None)
-            if found_row:
-                ranking = calculate_ranking(all_data, found_row)
-                competition_results = parse_competition_data(header_row, found_row)
-                reply_messages.append(FlexSendMessage(alt_text=f'Báo cáo ST {supermarket_code}', contents=create_flex_message(found_row, competition_results, ranking)['contents']))
-                cluster_name = (found_row[0] or "").strip().upper()
-                store_channel = (found_row[1] or "").strip()
-                if cluster_name in cluster_names:
-                    for flex_data in create_leaderboard_flex_message(all_data, cluster_name=cluster_name, channel_filter=store_channel):
-                        reply_messages.append(FlexSendMessage(alt_text=flex_data['altText'], contents=flex_data['contents']))
-            else:
-                reply_messages.append(TextSendMessage(text=f'Không tìm thấy dữ liệu cho mã siêu thị: {supermarket_code}'))
-
-        elif user_msg_upper == 'BXH':
-            for flex_data in create_leaderboard_flex_message(all_data):
-                reply_messages.append(FlexSendMessage(alt_text=flex_data['altText'], contents=flex_data['contents']))
-        
-        elif user_msg_upper == 'BXH1':
-            for flex_data in create_leaderboard_flex_message(all_data, channel_filter='dmx'):
-                reply_messages.append(FlexSendMessage(alt_text=flex_data['altText'], contents=flex_data['contents']))
-
-        elif user_msg_upper == 'BXH2':
-            for flex_data in create_leaderboard_flex_message(all_data, channel_filter='tgdd'):
-                reply_messages.append(FlexSendMessage(alt_text=flex_data['altText'], contents=flex_data['contents']))
-        
-        else:
-            parts = user_message.split()
-            if len(parts) == 2 and parts[0].upper() in cluster_names:
-                cluster_name_cmd = parts[0].upper()
-                channel_choice = parts[1]
-                channel_filter = None
-                if channel_choice == '1':
-                    channel_filter = 'dmx'
-                elif channel_choice == '2':
-                    channel_filter = 'tgdd'
-                
-                if channel_filter:
-                    bxh_messages = create_leaderboard_flex_message(all_data, cluster_name=cluster_name_cmd, channel_filter=channel_filter)
-                    if not bxh_messages:
-                         reply_messages.append(TextSendMessage(text=f"Không có dữ liệu cho kênh bạn chọn trong cụm {cluster_name_cmd}."))
-                    else:
-                        for flex_data in bxh_messages:
-                            reply_messages.append(FlexSendMessage(alt_text=flex_data['altText'], contents=flex_data['contents']))
-
-            elif user_msg_upper in cluster_names:
-                for flex_data in create_leaderboard_flex_message(all_data, cluster_name=user_msg_upper):
-                    reply_messages.append(FlexSendMessage(alt_text=flex_data['altText'], contents=flex_data['contents']))
+        if all_data and len(all_data) > 1:
+            cluster_names = {row[0].strip().upper() for row in all_data[1:] if len(row) > 0 and row[0]}
+            header_row = all_data[0]
             
-            else:
-                found_row = next((row for row in all_data[1:] if row and len(row) > 2 and row[2] and row[2].strip().split(' ')[0] == user_msg_upper), None)
+            if user_msg_upper.startswith('ST '):
+                supermarket_code = user_message[3:].strip().upper()
+                found_row = next((row for row in all_data[1:] if row and len(row) > 2 and row[2] and row[2].strip().split(' ')[0] == supermarket_code), None)
                 if found_row:
                     ranking = calculate_ranking(all_data, found_row)
                     competition_results = parse_competition_data(header_row, found_row)
-                    reply_messages.append(FlexSendMessage(alt_text='Báo cáo Realtime', contents=create_flex_message(found_row, competition_results, ranking)['contents']))
-                    summary_message = create_summary_text_message(found_row, competition_results)
-                    if summary_message:
-                        reply_messages.append(summary_message)
+                    reply_messages.append(FlexSendMessage(alt_text=f'Báo cáo ST {supermarket_code}', contents=create_flex_message(found_row, competition_results, ranking)['contents']))
+                    cluster_name = (found_row[0] or "").strip().upper()
+                    store_channel = (found_row[1] or "").strip()
+                    if cluster_name in cluster_names:
+                        for flex_data in create_leaderboard_flex_message(all_data, cluster_name=cluster_name, channel_filter=store_channel):
+                            reply_messages.append(FlexSendMessage(alt_text=flex_data['altText'], contents=flex_data['contents']))
+                else:
+                    reply_messages.append(TextSendMessage(text=f'Không tìm thấy dữ liệu cho mã siêu thị: {supermarket_code}'))
+
+            elif user_msg_upper == 'BXH':
+                for flex_data in create_leaderboard_flex_message(all_data):
+                    reply_messages.append(FlexSendMessage(alt_text=flex_data['altText'], contents=flex_data['contents']))
+            
+            elif user_msg_upper == 'BXH1':
+                for flex_data in create_leaderboard_flex_message(all_data, channel_filter='dmx'):
+                    reply_messages.append(FlexSendMessage(alt_text=flex_data['altText'], contents=flex_data['contents']))
+
+            elif user_msg_upper == 'BXH2':
+                for flex_data in create_leaderboard_flex_message(all_data, channel_filter='tgdd'):
+                    reply_messages.append(FlexSendMessage(alt_text=flex_data['altText'], contents=flex_data['contents']))
+            
+            else:
+                parts = user_message.split()
+                if len(parts) == 2 and parts[0].upper() in cluster_names:
+                    cluster_name_cmd = parts[0].upper()
+                    channel_choice = parts[1]
+                    channel_filter = None
+                    if channel_choice == '1':
+                        channel_filter = 'dmx'
+                    elif channel_choice == '2':
+                        channel_filter = 'tgdd'
+                    
+                    if channel_filter:
+                        bxh_messages = create_leaderboard_flex_message(all_data, cluster_name=cluster_name_cmd, channel_filter=channel_filter)
+                        if not bxh_messages:
+                            reply_messages.append(TextSendMessage(text=f"Không có dữ liệu cho kênh bạn chọn trong cụm {cluster_name_cmd}."))
+                        else:
+                            for flex_data in bxh_messages:
+                                reply_messages.append(FlexSendMessage(alt_text=flex_data['altText'], contents=flex_data['contents']))
+
+                elif user_msg_upper in cluster_names:
+                    for flex_data in create_leaderboard_flex_message(all_data, cluster_name=user_msg_upper):
+                        reply_messages.append(FlexSendMessage(alt_text=flex_data['altText'], contents=flex_data['contents']))
+                
+                else:
+                    found_row = next((row for row in all_data[1:] if row and len(row) > 2 and row[2] and row[2].strip().split(' ')[0] == user_msg_upper), None)
+                    if found_row:
+                        ranking = calculate_ranking(all_data, found_row)
+                        competition_results = parse_competition_data(header_row, found_row)
+                        reply_messages.append(FlexSendMessage(alt_text='Báo cáo Realtime', contents=create_flex_message(found_row, competition_results, ranking)['contents']))
+                        summary_message = create_summary_text_message(found_row, competition_results)
+                        if summary_message:
+                            reply_messages.append(summary_message)
         
         if reply_messages:
-            line_bot_api.reply_message(event.reply_token, reply_messages)
+            reply_with_auto_shift(event.reply_token, reply_messages, group_id=event_group_id)
+            return
 
     except Exception as e:
         print(f"!!! GẶP LỖI NGHIÊM TRỌNG KHI XỬ LÝ BÁO CÁO: {repr(e)}")
 
-# --- ENDPOINTS CRON JOB (ĐÃ CẬP NHẬT GOM TIN) ---
+    # 9. Mục 1: Nếu đây là tin nhắn chat thông thường trong nhóm và ca hiện tại chưa được phát
+    #    Lịch/Checklist -> Dùng ngay reply_token miễn phí của tin nhắn này để phát mở ca!
+    if event_group_id:
+        try:
+            pending_msgs, pending_shift = get_pending_auto_shift_messages(event_group_id)
+            if pending_msgs:
+                mark_shift_broadcast_sent(event_group_id, pending_shift)
+                line_bot_api.reply_message(event.reply_token, pending_msgs[:LINE_MAX_MESSAGES])
+                print(f"[AUTO-TRIGGER] Phát mở ca '{pending_shift}' miễn phí qua tin nhắn đầu ca tại nhóm {event_group_id}.")
+        except Exception as e_auto:
+            print(f"Lỗi auto-trigger cuối handle_message: {e_auto}")
+
+
+# ============================================================================
+# ENDPOINTS CRON JOB (ĐÃ NÂNG CẤP TIẾT KIỆM QUOTA PUSH TỐI ĐA — MỤC 1, 2, 4)
+# ============================================================================
 
 @app.route("/trigger-morning-tasks", methods=['POST'])
 def trigger_morning_tasks():
@@ -1594,47 +2517,51 @@ def trigger_morning_tasks():
     if not CRON_SECRET_KEY or incoming_secret != CRON_SECRET_KEY:
         abort(403)
     
-    print("Cron Job: Bắt đầu tác vụ buổi sáng (GOM TIN)...")
+    print("Cron Job: Bắt đầu tác vụ buổi sáng (Chế độ Tiết Kiệm Quota Push)...")
     try:
-        pg_group_id = os.environ.get('PG_GROUP_ID')
-        employee_group_id = os.environ.get('EMPLOYEE_GROUP_ID')
-        
-        # 1. Gửi Lịch PG vào nhóm PG nếu nhóm PG khác nhóm NV
-        if pg_group_id and pg_group_id != employee_group_id:
-            msg_pg = send_daily_schedule('pg', return_msg_only=True)
-            if msg_pg:
-                line_bot_api.push_message(pg_group_id, msg_pg)
-                print("Đã gửi lịch PG vào nhóm PG.")
+        pg_group_id = (os.environ.get('PG_GROUP_ID') or '').strip()
+        employee_group_id = (os.environ.get('EMPLOYEE_GROUP_ID') or MAIN_CHECKLIST_GROUP_ID or '').strip()
+        force_group_push = (os.environ.get('FORCE_GROUP_PUSH') or '0').strip() == '1'
 
-        # 2. Gửi Lịch NV và Checklist Sáng vào nhóm NV
-        messages_to_send = []
-
-        # Nếu PG và NV chung nhóm thì gửi gộp
-        if pg_group_id and pg_group_id == employee_group_id:
-            msg_pg = send_daily_schedule('pg', return_msg_only=True)
-            if msg_pg:
-                messages_to_send.append(msg_pg)
-
+        # 1. Khởi tạo sẵn dữ liệu công việc ca sáng trong RAM & Sheet
         if employee_group_id:
-            msg_nv = send_daily_schedule('employee', return_msg_only=True)
-            if msg_nv:
-                messages_to_send.append(msg_nv)
+            initialize_daily_tasks(employee_group_id, 'sang')
 
-            msg_check = get_checklist_message('sang', employee_group_id)
-            if msg_check:
-                messages_to_send.append(msg_check)
-        
-        # --- GỬI TIN NHẮN (BATCHING) ---
-        if messages_to_send and employee_group_id:
-            line_bot_api.push_message(employee_group_id, messages_to_send[:5])
-            print(f"Đã gửi gộp {len(messages_to_send)} thông báo sáng vào nhóm NV.")
-        else:
-            print("Không có nội dung nào để gửi sáng nay.")
+        # 2. Kiểm tra xem nhóm đã được Auto-Trigger phát miễn phí qua reply_token chưa
+        if employee_group_id and is_shift_broadcast_sent(employee_group_id, 'sang'):
+            print("Ca sáng đã được phát miễn phí vào nhóm qua Auto-Trigger reply_token. Bỏ qua Push.")
+            return "OK (Already sent via free reply_token)", 200
+
+        # 3. Chuẩn bị danh sách tin nhắn buổi sáng
+        messages_to_send = build_shift_broadcast_messages(employee_group_id, 'sang')
+
+        if force_group_push:
+            if pg_group_id and pg_group_id != employee_group_id and not is_shift_broadcast_sent(pg_group_id, 'sang'):
+                msg_pg = send_daily_schedule('pg', return_msg_only=True)
+                if msg_pg:
+                    line_bot_api.push_message(pg_group_id, msg_pg)
+                    mark_shift_broadcast_sent(pg_group_id, 'sang')
+            if messages_to_send and employee_group_id:
+                line_bot_api.push_message(employee_group_id, messages_to_send[:5])
+                mark_shift_broadcast_sent(employee_group_id, 'sang')
+            return "OK (Group Push)", 200
+
+        # 4. Mục 2: Chế độ Tiết Kiệm (Mặc định) — Chỉ Push 1-1 cho ADMIN_USER_ID (tốn đúng 1 tin thay vì 25-40 tin!)
+        if ADMIN_USER_ID and messages_to_send:
+            notice = TextSendMessage(
+                text="☀️ [BÁO CÁO MỞ CA SÁNG]\n"
+                     "Dữ liệu Lịch & Checklist Ca Sáng đã sẵn sàng.\n"
+                     "💡 Nhóm chat sẽ TỰ ĐỘNG hiện bảng này (miễn phí 0 tốn Push) ngay khi có tin nhắn đầu tiên trong nhóm, hoặc anh gõ `mở ca` trong nhóm."
+            )
+            admin_payload = ([notice] + messages_to_send)[:LINE_MAX_MESSAGES]
+            line_bot_api.push_message(ADMIN_USER_ID, admin_payload)
+            print("Đã gửi 1 tin Push 1-1 cho ADMIN_USER_ID (tiết kiệm 96% quota Push nhóm).")
 
         return "OK", 200
     except Exception as e:
         print(f"Lỗi khi chạy tác vụ buổi sáng: {e}")
         return "Error", 500
+
 
 @app.route("/trigger-afternoon-tasks", methods=['POST'])
 def trigger_afternoon_tasks():
@@ -1642,47 +2569,45 @@ def trigger_afternoon_tasks():
     if not CRON_SECRET_KEY or incoming_secret != CRON_SECRET_KEY:
         abort(403)
     
-    print("Cron Job: Bắt đầu tác vụ buổi chiều (GOM TIN)...")
+    print("Cron Job: Bắt đầu tác vụ buổi chiều (Chế độ Tiết Kiệm Quota Push - Không gửi lặp Lịch)...")
     try:
-        pg_group_id = os.environ.get('PG_GROUP_ID')
-        employee_group_id = os.environ.get('EMPLOYEE_GROUP_ID')
-        
-        # 1. Gửi Lịch PG vào nhóm PG nếu nhóm PG khác nhóm NV
-        if pg_group_id and pg_group_id != employee_group_id:
-            msg_pg = send_daily_schedule('pg', return_msg_only=True)
-            if msg_pg:
-                line_bot_api.push_message(pg_group_id, msg_pg)
-                print("Đã gửi lịch PG vào nhóm PG.")
+        employee_group_id = (os.environ.get('EMPLOYEE_GROUP_ID') or MAIN_CHECKLIST_GROUP_ID or '').strip()
+        force_group_push = (os.environ.get('FORCE_GROUP_PUSH') or '0').strip() == '1'
 
-        # 2. Gửi Lịch NV và Checklist Chiều vào nhóm NV
-        messages_to_send = []
-
-        # Nếu PG và NV chung nhóm thì gửi gộp
-        if pg_group_id and pg_group_id == employee_group_id:
-            msg_pg = send_daily_schedule('pg', return_msg_only=True)
-            if msg_pg:
-                messages_to_send.append(msg_pg)
-
+        # 1. Khởi tạo sẵn dữ liệu công việc ca chiều trong RAM & Sheet
         if employee_group_id:
-            msg_nv = send_daily_schedule('employee', return_msg_only=True)
-            if msg_nv:
-                messages_to_send.append(msg_nv)
+            initialize_daily_tasks(employee_group_id, 'chieu')
 
-            msg_check = get_checklist_message('chieu', employee_group_id)
-            if msg_check:
-                messages_to_send.append(msg_check)
-        
-        # --- GỬI TIN NHẮN (BATCHING) ---
-        if messages_to_send and employee_group_id:
-            line_bot_api.push_message(employee_group_id, messages_to_send[:5])
-            print(f"Đã gửi gộp {len(messages_to_send)} thông báo chiều vào nhóm NV.")
-        else:
-            print("Không có nội dung nào để gửi chiều nay.")
+        # 2. Kiểm tra xem nhóm đã được Auto-Trigger phát miễn phí qua reply_token chưa
+        if employee_group_id and is_shift_broadcast_sent(employee_group_id, 'chieu'):
+            print("Ca chiều đã được phát miễn phí vào nhóm qua Auto-Trigger reply_token. Bỏ qua Push.")
+            return "OK (Already sent via free reply_token)", 200
+
+        # 3. Mục 4: Chỉ lấy Checklist Ca Chiều (cắt bỏ việc gửi lặp Lịch NV & PG buổi chiều)
+        messages_to_send = build_shift_broadcast_messages(employee_group_id, 'chieu')
+
+        if force_group_push:
+            if messages_to_send and employee_group_id:
+                line_bot_api.push_message(employee_group_id, messages_to_send[:5])
+                mark_shift_broadcast_sent(employee_group_id, 'chieu')
+            return "OK (Group Push)", 200
+
+        # 4. Mục 2: Chỉ Push 1-1 cho ADMIN_USER_ID (tốn đúng 1 tin thay vì 25-40 tin)
+        if ADMIN_USER_ID and messages_to_send:
+            notice = TextSendMessage(
+                text="🌙 [BÁO CÁO MỞ CA CHIỀU]\n"
+                     "Checklist Kho Ca Chiều đã sẵn sàng.\n"
+                     "💡 Nhóm chat sẽ TỰ ĐỘNG hiện Checklist Chiều (miễn phí 0 tốn Push) ngay khi có tin nhắn tiếp theo trong nhóm, hoặc anh gõ `mở ca` trong nhóm."
+            )
+            admin_payload = ([notice] + messages_to_send)[:LINE_MAX_MESSAGES]
+            line_bot_api.push_message(ADMIN_USER_ID, admin_payload)
+            print("Đã gửi 1 tin Push 1-1 ca chiều cho ADMIN_USER_ID (tiết kiệm 96% quota Push nhóm).")
 
         return "OK", 200
     except Exception as e:
         print(f"Lỗi khi chạy tác vụ buổi chiều: {e}")
         return "Error", 500
+
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))

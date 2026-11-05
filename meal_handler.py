@@ -7,7 +7,11 @@ import gspread
 from linebot.models import FlexSendMessage
 
 # Import từ file cấu hình trung tâm
-from config import CLIENT, SHEET_NAME, WORKSHEET_SCHEDULES_NAME, WORKSHEET_MEAL_TRACKER_NAME, get_spreadsheet
+from config import (
+    CLIENT, SHEET_NAME, WORKSHEET_SCHEDULES_NAME, WORKSHEET_MEAL_TRACKER_NAME,
+    get_spreadsheet, get_cached_values, get_cached_records,
+    set_cached_values, run_bg_sheet_task, get_worksheet_cached_obj, values_to_records
+)
 
 # Định nghĩa Header chuẩn (8 cột)
 MEAL_HEADERS = ['group_id', 'date', 'session', 'type', 'name', 'status', 'time_clicked', 'clicked_by']
@@ -25,38 +29,13 @@ def get_vietnamese_day_of_week():
     return days[weekday]
 
 def clean_staff_name(name):
-    # Loại bỏ các ký tự thừa
     name = re.sub(r'^\(\d+.*?\):?\s*', '', name)
     name = re.sub(r'^[•\-\+:\.]\s*', '', name)
     return name.strip()
 
 
-# ============================================================================
-# DANH SÁCH NGƯỜI LÀM HÔM NAY — đọc thẳng sheet `schedules` (thêm 21/09/2026)
-# ----------------------------------------------------------------------------
-# Sheet `schedules` đã có lịch làm việc của NV + PG cho cả tuần nên đây mới là
-# nguồn chuẩn. Hàm dưới đọc ô `employee_schedule` + `pg_schedule` của ĐÚNG ngày
-# hôm nay, gộp cả Ca Sáng và Ca Chiều, rồi khử trùng theo tên đã chuẩn hoá
-# (bỏ dấu / emoji / ký hiệu vai trò).
-#
-# ĐỊNH DẠNG Ô — suy ra từ schedule_handler.py dòng 74 và 94:
-#   employee_schedule: "Ca Sáng (8 NV): A (ERP), B, C\nCa Chiều (7 NV): D, E\nNghỉ: ..."
-#       -> tên NV ngăn bằng DẤU PHẨY, có tiền tố "(8 NV): "
-#   pg_schedule:       "Ca Sáng (6): A\nB\nC\nCa Chiều (5): ..."
-#       -> tên PG ngăn bằng XUỐNG DÒNG, có tiền tố "(6): "
-#
-# Vì sao cần khử trùng: cùng một người có thể xuất hiện ở cả ca sáng lẫn ca chiều,
-# hoặc bị ghi ở cả cột NV lẫn cột PG -> nếu không khử sẽ nhận 2-3 dòng việc trùng.
-# ============================================================================
-
 SCHEDULE_KEYWORDS = ["Ca Sáng", "Ca Chiều", "Nghỉ", "Vệ Sinh Kho", "Vệ Sinh"]
 SHIFT_BLOCKS = ("Ca Sáng", "Ca Chiều")
-# GHI CHÚ về "(off ca3)" / "(off ca4)" trong cột chi tiết:
-#   Anh Dương xác nhận 22/09/2026 — đó là người đó NGHỈ CA ĐÓ trong ngày
-#   (ví dụ làm ca 2-4-5-6 thì off ca 3), KHÔNG phải nghỉ cả ngày.
-#   => Vẫn đi làm các ca khác, nên VẪN PHẢI có trong danh sách nhận việc.
-#   Trước đây code loại họ ra là SAI. Đừng thêm lại.
-#   (get_working_staff() cho điểm danh ăn uống vẫn giữ luật riêng của nó.)
 
 _EMOJI_RE = re.compile(
     r"[\U0001F000-\U0001FAFF\u2600-\u27BF\u2B00-\u2BFF\uFE0F\u200D]"
@@ -100,9 +79,6 @@ def normalize_person_key(name):
     s = s.replace("*", " ")
     s = unicodedata.normalize("NFD", s)
     s = "".join(c for c in s if unicodedata.category(c) != "Mn")
-    # BẪeY: 'Đ'/'đ' KHÔNG có phân rã NFD (không phải D + dấu gạch ngang tổ hợp),
-    # nên nếu để nguyên sẽ bị regex [^a-z0-9\s] xoá mất -> "Đỗ Văn Hùng" thành
-    # "o van hung". Phải quy về 'd' thủ công trước khi lọc.
     s = s.replace("đ", "d").replace("Đ", "d")
     s = re.sub(r"[^a-z0-9\s]", " ", s.lower())
     return re.sub(r"\s+", " ", s).strip()
@@ -110,15 +86,11 @@ def normalize_person_key(name):
 
 def get_daily_roster(day_str=None):
     """
-    Danh sách người làm hôm nay lấy từ sheet `schedules`, đã khử trùng.
-
-    Trả về list[dict]: [{'name': 'Nguyễn Văn A', 'role': 'NV', 'shift': 'Ca Sáng'}, ...]
-    Khử trùng theo normalize_person_key.
+    Danh sách người làm hôm nay lấy từ sheet `schedules` (có RAM Cache), đã khử trùng.
     """
     day = day_str or get_vietnamese_day_of_week()
     try:
-        sheet = get_spreadsheet().worksheet(WORKSHEET_SCHEDULES_NAME)
-        records = sheet.get_all_records()
+        records = get_cached_records(WORKSHEET_SCHEDULES_NAME, ttl=300)
     except Exception as e:
         print("Lỗi đọc sheet schedules: %s" % e)
         return []
@@ -149,10 +121,6 @@ def get_daily_roster(day_str=None):
                 seen.add(key)
                 roster.append({"name": name, "role": role, "shift": shift})
 
-    print("[ROSTER] %s: %d người sau khử trùng (%d NV, %d PG)" % (
-        day, len(roster),
-        sum(1 for r in roster if r["role"] == "NV"),
-        sum(1 for r in roster if r["role"] == "PG")))
     return roster
 
 
@@ -161,27 +129,8 @@ def get_daily_roster_names(day_str=None):
     return [r["name"] for r in get_daily_roster(day_str)]
 
 
-# ============================================================================
-# BA NHÓM NGƯỜI NHẬN VIỆC — 3 cột E/F/G của sheet `schedules` (22/09/2026)
-# ----------------------------------------------------------------------------
-# CẤU TRÚC THẬT (đối chiếu file thật 22/09/2026):
-#   A day_of_week | B pg_schedule | C employee_schedule | D (trống)
-#   E PG | F NV | G QL+TC
-#
-#   Dòng 0     = tiêu đề
-#   Dòng 1..7  = Thứ Hai .. Chủ Nhật
-#   Dòng 8+    = cột A TRỐNG, nhưng E/F/G vẫn ghi tiếp tên
-#
-#   => E/F/G là DANH SÁCH DỌC trải nhiều dòng, KHÔNG phải mỗi ngày một ô.
-#      Phải quét HẾT mọi dòng. Lọc theo `day_of_week` sẽ chỉ ra 1 người/nhóm.
-#
-#   Thực tế: E = 12 PG, F = 11 NV, G = 2 QL+TC -> tổng 25 người.
-# ============================================================================
-
 ROSTER_GROUPS = ("PG", "NV", "QL+TC")
-# Cột E, F, G (0-based) — dùng khi dòng tiêu đề bị đổi tên khác
 ROSTER_COL_FALLBACK = {"PG": 4, "NV": 5, "QL+TC": 6}
-
 _PLACEHOLDER_KEYS = ("", "khong co", "khong", "trong", "none", "null", "n a", "na")
 
 
@@ -212,11 +161,7 @@ def _find_day_row(values, day):
 
 
 def _read_roster_columns(values):
-    """
-    Đọc 3 cột E/F/G thành {'PG': [...], 'NV': [...], 'QL+TC': [...]}.
-
-    QUÉT HẾT MỌI DÒNG — không lọc theo day_of_week, vì danh sách nằm dọc.
-    """
+    """Đọc 3 cột E/F/G thành {'PG': [...], 'NV': [...], 'QL+TC': [...]}."""
     from flex_handler import split_names
 
     header, rows = _header_and_rows(values)
@@ -241,13 +186,6 @@ def _read_roster_columns(values):
 
 
 def _names_from_detail(row, col_name):
-    """
-    Bóc tên từ cột chi tiết (gộp Ca Sáng + Ca Chiều). CHỈ dùng làm dự phòng khi
-    cột gọn E/F/G trống hẳn.
-
-    KHÔNG loại người ghi "(off ca3)/(off ca4)": anh Dương xác nhận đó chỉ là
-    ghi chú nghỉ CA ĐÓ trong ngày, người ta vẫn đi làm các ca khác.
-    """
     out, seen = [], set()
     blocks = split_schedule_blocks(row.get(col_name, ""))
     for shift in SHIFT_BLOCKS:
@@ -270,17 +208,12 @@ def _names_from_detail(row, col_name):
 
 def get_task_roster(day_str=None):
     """
-    Danh sách người nhận việc theo 3 nhóm, đọc 3 cột E/F/G của sheet `schedules`.
-
-    Trả về {'PG': [...], 'NV': [...], 'QL+TC': [...]}
-
-    day_str chỉ dùng cho phần DỰ PHÒNG (khi cột gọn trống hẳn).
+    Danh sách người nhận việc theo 3 nhóm, đọc 3 cột E/F/G của sheet `schedules` (từ RAM Cache 5 phút).
     """
     empty = {g: [] for g in ROSTER_GROUPS}
     day = day_str or get_vietnamese_day_of_week()
     try:
-        sheet = get_spreadsheet().worksheet(WORKSHEET_SCHEDULES_NAME)
-        values = sheet.get_all_values()
+        values = get_cached_values(WORKSHEET_SCHEDULES_NAME, ttl=300)
     except Exception as e:
         print("Lỗi đọc sheet schedules: %s" % e)
         return empty
@@ -291,7 +224,6 @@ def get_task_roster(day_str=None):
         print("Lỗi đọc 3 cột PG/NV/QL+TC: %s" % e)
         return empty
 
-    # Dự phòng: nhóm nào TRỐNG HẲN mới bóc tạm từ cột chi tiết của hôm nay.
     if not all(roster[g] for g in ROSTER_GROUPS):
         row = _find_day_row(values, day)
         if row:
@@ -305,8 +237,6 @@ def get_task_roster(day_str=None):
         else:
             print("[ROSTER] không thấy dòng cho %s để dự phòng." % day)
 
-    print("[ROSTER] PG %d | NV %d | QL+TC %d"
-          % (len(roster["PG"]), len(roster["NV"]), len(roster["QL+TC"])))
     return roster
 
 
@@ -316,10 +246,10 @@ def get_working_staff(session_type):
     exclude_pattern = r'off\s*ca\s*3' if session_type == 'ansang' else r'off\s*ca\s*4'
     
     try:
-        sheet = get_spreadsheet().worksheet(WORKSHEET_SCHEDULES_NAME)
-        records = sheet.get_all_records()
+        records = get_cached_records(WORKSHEET_SCHEDULES_NAME, ttl=300)
         today_schedule = next((row for row in records if row.get('day_of_week') == day_str), None)
-        if not today_schedule: return {}
+        if not today_schedule:
+            return {}
 
         results = {'NV': [], 'PG': []}
         
@@ -343,34 +273,36 @@ def get_working_staff(session_type):
         print(f"Lỗi lấy lịch: {e}")
         return {}
 
+
 def sync_meal_sheet(group_id, session_type):
+    """Đồng bộ danh sách ăn trưa/tối sử dụng RAM Cache + Ghi Google Sheets chạy ngầm."""
     try:
-        sheet = get_spreadsheet().worksheet(WORKSHEET_MEAL_TRACKER_NAME)
         tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
         today_str = datetime.now(tz_vietnam).strftime('%Y-%m-%d')
         
-        # 1. Kiểm tra ngày để reset sheet
+        all_values = get_cached_values(WORKSHEET_MEAL_TRACKER_NAME, ttl=60, create_headers=MEAL_HEADERS)
+        if not all_values:
+            all_values = [list(MEAL_HEADERS)]
+
         first_data_date = None
-        try:
-            val = sheet.acell('B2').value 
-            if val: first_data_date = val
-        except: pass
+        if len(all_values) > 1 and len(all_values[1]) > 1:
+            first_data_date = str(all_values[1][1]).strip()
 
+        need_clear_sheet = False
         if first_data_date and first_data_date != today_str:
-            print(f"Ngày mới! Xóa dữ liệu cũ ({first_data_date})...")
-            sheet.clear()
-            sheet.append_row(MEAL_HEADERS)
-            all_records = []
-        else:
-            all_records = sheet.get_all_records()
+            print(f"Ngày mới! Xóa dữ liệu meal cũ ({first_data_date})...")
+            all_values = [list(MEAL_HEADERS)]
+            set_cached_values(WORKSHEET_MEAL_TRACKER_NAME, all_values)
+            need_clear_sheet = True
 
-        # 2. Đồng bộ
+        all_records = values_to_records(all_values)
+
         existing_entries = {}
         for row in all_records:
             key_name = normalize_text(row.get('name'))
-            if (str(row.get('group_id')) == group_id and 
-                row.get('date') == today_str and 
-                row.get('session') == session_type):
+            if (str(row.get('group_id')) == str(group_id) and 
+                str(row.get('date')) == today_str and 
+                str(row.get('session')) == session_type):
                 existing_entries[key_name] = row
 
         staff_lists = get_working_staff(session_type)
@@ -380,35 +312,49 @@ def sync_meal_sheet(group_id, session_type):
         for s_type in ['NV', 'PG']:
             for name in staff_lists.get(s_type, []):
                 norm_name = normalize_text(name)
-                
                 if norm_name in existing_entries:
                     final_data.append(existing_entries[norm_name])
                 else:
-                    # Tạo dòng mới, cột clicked_by để trống
                     entry = {
                         'group_id': group_id, 'date': today_str, 'session': session_type,
                         'type': s_type, 'name': name, 'status': 'waiting', 'time_clicked': '', 'clicked_by': ''
                     }
-                    new_rows.append([group_id, today_str, session_type, s_type, name, 'waiting', '', ''])
+                    new_row = [str(group_id), today_str, session_type, s_type, name, 'waiting', '', '']
+                    new_rows.append(new_row)
+                    all_values.append(new_row)
                     final_data.append(entry)
         
-        if new_rows:
-            sheet.append_rows(new_rows, value_input_option='USER_ENTERED')
+        if need_clear_sheet or new_rows:
+            set_cached_values(WORKSHEET_MEAL_TRACKER_NAME, all_values)
+            rows_snapshot = [list(r) for r in new_rows]
+            def _bg_sync_meal(do_clear, to_append):
+                ws = get_worksheet_cached_obj(WORKSHEET_MEAL_TRACKER_NAME, create_headers=MEAL_HEADERS)
+                if not ws:
+                    return
+                if do_clear:
+                    ws.clear()
+                    ws.append_row(MEAL_HEADERS)
+                if to_append:
+                    ws.append_rows(to_append, value_input_option='USER_ENTERED')
+            run_bg_sheet_task(_bg_sync_meal, need_clear_sheet, rows_snapshot, desc="sync_meal_sheet")
             
         return final_data
 
     except Exception as e:
-        print(f"Lỗi sync sheet: {e}")
+        print(f"Lỗi sync meal sheet: {e}")
         return []
+
 
 def update_meal_status(group_id, session_type, staff_name, clicker_name, target_status='done'):
     """
-    Cập nhật trạng thái và Nick LINE người bấm.
+    Cập nhật trạng thái ăn uống tức thì trong RAM Cache và đẩy lệnh ghi Google Sheets chạy ngầm.
     """
     try:
-        sheet = get_spreadsheet().worksheet(WORKSHEET_MEAL_TRACKER_NAME)
-        all_values = sheet.get_all_values()
-        
+        all_values = get_cached_values(WORKSHEET_MEAL_TRACKER_NAME, ttl=60, create_headers=MEAL_HEADERS)
+        if not all_values or len(all_values) <= 1:
+            sync_meal_sheet(group_id, session_type)
+            all_values = get_cached_values(WORKSHEET_MEAL_TRACKER_NAME, ttl=60, create_headers=MEAL_HEADERS)
+
         tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
         today_str = datetime.now(tz_vietnam).strftime('%Y-%m-%d')
         time_now = datetime.now(tz_vietnam).strftime('%H:%M') if target_status == 'done' else ''
@@ -418,10 +364,9 @@ def update_meal_status(group_id, session_type, staff_name, clicker_name, target_
 
         row_index = -1
         current_status = None
-        # Tìm dòng tương ứng
         for i, row in enumerate(all_values[1:], start=2):
-            if len(row) < 5: continue
-            
+            if len(row) < 5:
+                continue
             row_group = str(row[0]).strip()
             row_date = str(row[1]).strip()
             row_session = str(row[2]).strip()
@@ -437,30 +382,39 @@ def update_meal_status(group_id, session_type, staff_name, clicker_name, target_
                 break
         
         if row_index != -1:
-            # Nếu trạng thái hiện tại đã khớp với mục tiêu, bỏ qua (tránh duplicate)
             if current_status == target_status:
-                print(f"Trạng thái của {staff_name} đã là {target_status} từ trước. Bỏ qua.")
                 return "already", None
 
-            # Ghi dữ liệu vào 3 cột:
-            # Cột 6 (F): Status -> target_status
-            # Cột 7 (G): Time -> Giờ hiện tại hoặc rỗng
-            # Cột 8 (H): Clicked By -> Nick Line hoặc rỗng
-            
             clicked_user = clicker_name if target_status == 'done' else ''
-            cells = [
-                gspread.Cell(row_index, 6, target_status),
-                gspread.Cell(row_index, 7, time_now),
-                gspread.Cell(row_index, 8, clicked_user)
-            ]
-            sheet.update_cells(cells)
+            # Cập nhật ngay trong RAM
+            mem_row = all_values[row_index - 1]
+            while len(mem_row) < 8:
+                mem_row.append('')
+            mem_row[5] = target_status
+            mem_row[6] = time_now
+            mem_row[7] = clicked_user
+            set_cached_values(WORKSHEET_MEAL_TRACKER_NAME, all_values)
+
+            # Đẩy ghi Sheet chạy ngầm
+            def _bg_update_meal(r_idx, st, tm, usr):
+                ws = get_worksheet_cached_obj(WORKSHEET_MEAL_TRACKER_NAME, create_headers=MEAL_HEADERS)
+                if not ws:
+                    return
+                cells = [
+                    gspread.Cell(r_idx, 6, st),
+                    gspread.Cell(r_idx, 7, tm),
+                    gspread.Cell(r_idx, 8, usr)
+                ]
+                ws.update_cells(cells)
+            run_bg_sheet_task(_bg_update_meal, row_index, target_status, time_now, clicked_user, desc="update_meal_status")
             return True, time_now
         
         print(f"Không tìm thấy dòng khớp cho: {staff_name}")
         return False, None
     except Exception as e:
-        print(f"Lỗi update status: {e}")
+        print(f"Lỗi update meal status: {e}")
         return False, None
+
 
 def generate_meal_flex(group_id, session_type):
     data = sync_meal_sheet(group_id, session_type)
@@ -480,7 +434,6 @@ def generate_meal_flex(group_id, session_type):
         time_val = item.get('time_clicked', '')
         name = item.get('name')
         
-        # Cắt tên ngắn gọn (15 ký tự)
         display_name = (name[:15] + '..') if len(name) > 16 else name
 
         left_side = {
@@ -489,7 +442,6 @@ def generate_meal_flex(group_id, session_type):
         }
 
         if is_done:
-            # Nếu đã xong thì hiện giờ (có thể click để hủy)
             right_side = {
                 "type": "text", "text": f"🟢 {time_val}", 
                 "flex": 0, "width": "55px", "align": "end", "size": "xxs", 
@@ -501,7 +453,6 @@ def generate_meal_flex(group_id, session_type):
                 }
             }
         else:
-            # Nút bấm hình bát phở 🍲
             right_side = {
                 "type": "button", "style": "secondary", "height": "sm", 
                 "action": {"type": "postback", "label": "🍲", "data": f"action=meal_checkin&session={session_type}&name={name}&target_status=done"},
@@ -514,7 +465,6 @@ def generate_meal_flex(group_id, session_type):
         if not items: return None
         header = {"type": "text", "text": f"{icon} {title} ({len(items)})", "weight": "bold", "size": "sm", "color": "#555555", "margin": "lg"}
         
-        # Luôn chia tối đa 2 cột nếu số lượng nhiều (> 5) để tránh bị khuất tên
         if len(items) > 5:
             chunk_size = math.ceil(len(items) / 2)
         else:

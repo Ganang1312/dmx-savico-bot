@@ -7,7 +7,11 @@ import gspread
 from linebot.models import FlexSendMessage, TextSendMessage
 
 # Import từ file cấu hình trung tâm
-from config import CLIENT, SHEET_NAME, WORKSHEET_SCHEDULES_NAME, WORKSHEET_VESINH_TRACKER_NAME, get_spreadsheet
+from config import (
+    CLIENT, SHEET_NAME, WORKSHEET_SCHEDULES_NAME, WORKSHEET_VESINH_TRACKER_NAME,
+    get_spreadsheet, get_cached_values, get_cached_records,
+    set_cached_values, run_bg_sheet_task, get_worksheet_cached_obj, values_to_records
+)
 from meal_handler import get_working_staff, normalize_text
 
 VESINH_HEADERS = ['group_id', 'date', 'session', 'type', 'name', 'zone', 'status', 'time_clicked', 'clicked_by']
@@ -21,11 +25,6 @@ ZONES = {
 }
 
 def get_current_vesinh_session(override_session=None):
-    """
-    Xác định ca vệ sinh:
-    - Nếu trước 14h -> Ca Sáng (vesinh_sang)
-    - Nếu từ 14h trở đi -> Ca Chiều (vesinh_chieu)
-    """
     if override_session in ['vesinh_sang', 'vesinh_chieu', 'sang', 'chieu']:
         if override_session in ['vesinh_sang', 'sang']:
             return 'vesinh_sang'
@@ -39,33 +38,21 @@ def get_current_vesinh_session(override_session=None):
         return 'vesinh_chieu'
 
 def allocate_cleaning_zones(nv_list):
-    """
-    Phân bổ 5 khu vực vệ sinh theo đúng quy tắc:
-    1. ERP: Có chữ 'ERP' trong tên -> Phân công Khu 1 (hoặc Khu 1 + 5 nếu < 6 NV)
-    2. Nam: Tên KHÔNG chứa dấu '*' -> Phân công Khu 2 / Khu 4
-    3. GH2: Tên có chữ 'GH2' -> Không phân công vệ sinh
-    4. TH1 (<6 NV): ERP -> Khu 1+5; 2 Nam -> Khu 2 & Khu 4; Còn lại -> Khu 3
-    5. TH2 (>=6 NV): ERP -> Khu 1; 2 Nam -> Khu 2; Còn lại -> Chia đều Khu 3, 4, 5
-    """
     if not nv_list:
         return []
 
-    # Phân loại nhân viên
     gh2_staff = [name for name in nv_list if "GH2" in name.upper()]
     cleaning_nv = [name for name in nv_list if "GH2" not in name.upper()]
     
     total_cleaning = len(cleaning_nv)
     
     erp_staff = [name for name in cleaning_nv if "ERP" in name.upper()]
-    # Nhân viên Nam là nhân viên trong tên không có dấu '*'
     male_staff = [name for name in cleaning_nv if "*" not in name and name not in erp_staff]
     other_staff = [name for name in cleaning_nv if name not in erp_staff and name not in male_staff]
 
-    assignments = [] # List dicts: {'name': str, 'zones': [int], 'zone_desc': str, 'type': 'NV'}
+    assignments = []
 
     if total_cleaning < 6:
-        # --- TH1: THIẾU NHÂN SỰ (< 6 NV) ---
-        # 1. ERP -> Khu 1 và Khu 5
         erp_assigned = False
         if erp_staff:
             for p in erp_staff:
@@ -76,7 +63,6 @@ def allocate_cleaning_zones(nv_list):
                 })
             erp_assigned = True
         
-        # 2. Nam & GH1 -> Nếu có GH1: gộp GH1 + 1 Nam cùng làm Khu 2 & Khu 4
         assigned_males = []
         gh1_in_list = [p for p in male_staff if "GH1" in p.upper()]
         non_gh1_males = [p for p in male_staff if "GH1" not in p.upper()]
@@ -102,7 +88,6 @@ def allocate_cleaning_zones(nv_list):
                 assignments.append({'name': male_staff[0], 'zones': [2, 4], 'zone_desc': f"Khu 2: {ZONES[2]} & Khu 4: {ZONES[4]}"})
                 assigned_males = male_staff[:1]
         
-        # 3. Còn lại -> Khu 3 (và khu 1, 5 nếu chưa có ERP)
         remaining = [p for p in cleaning_nv if p not in erp_staff and p not in assigned_males]
         for p in remaining:
             desc = f"Khu 3: {ZONES[3]}"
@@ -112,8 +97,6 @@ def allocate_cleaning_zones(nv_list):
             assignments.append({'name': p, 'zones': [3], 'zone_desc': desc})
             
     else:
-        # --- TH2: ĐỦ NHÂN SỰ (>= 6 NV) ---
-        # 1. ERP -> Khu 1
         used_staff = set()
         if erp_staff:
             for p in erp_staff:
@@ -125,7 +108,6 @@ def allocate_cleaning_zones(nv_list):
                 assignments.append({'name': p, 'zones': [1], 'zone_desc': f"Khu 1: {ZONES[1]}"})
                 used_staff.add(p)
 
-        # 2. Nam & GH1 -> Nếu có GH1: gộp GH1 + 2 Nam cùng làm Khu 2
         assigned_males = [p for p in male_staff if p not in used_staff]
         gh1_in_list = [p for p in assigned_males if "GH1" in p.upper()]
         non_gh1_males = [p for p in assigned_males if "GH1" not in p.upper()]
@@ -158,7 +140,6 @@ def allocate_cleaning_zones(nv_list):
                 assignments.append({'name': assigned_males[0], 'zones': [2], 'zone_desc': f"Khu 2: {ZONES[2]}"})
                 used_staff.add(assigned_males[0])
 
-        # 3. Nhân viên còn lại -> Chia đều Khu 3, Khu 4, Khu 5
         pool = [p for p in cleaning_nv if p not in used_staff]
         rem_zones = [3, 4, 5]
         
@@ -172,7 +153,6 @@ def allocate_cleaning_zones(nv_list):
                     target_person = assignments[idx % len(assignments)]
                     target_person['zone_desc'] += f" & Khu {z_id}: {ZONES[z_id]}"
 
-    # Ghi nhận các bạn GH2 (không phân chia)
     for p in gh2_staff:
         assignments.append({'name': p, 'zones': [], 'zone_desc': "Bảo lưu / Trực GH2 (Không phân chia vệ sinh)"})
 
@@ -202,7 +182,6 @@ def parse_staff_from_raw(raw_text, target_shift):
                     names.append(cn)
         i += 2
 
-    # Khử trùng lặp danh sách tên
     seen = set()
     unique_names = []
     for n in names:
@@ -225,56 +204,38 @@ def get_working_staff_vesinh(session_type):
     nv_list = staff_lists.get('NV', []) if isinstance(staff_lists, dict) else []
     pg_list = staff_lists.get('PG', []) if isinstance(staff_lists, dict) else []
 
-    if not nv_list:
+    from meal_handler import get_vietnamese_day_of_week
+    day_str = get_vietnamese_day_of_week()
+    records = get_cached_records(WORKSHEET_SCHEDULES_NAME, ttl=300)
+    today_sched = next((row for row in records if row.get('day_of_week') == day_str), None)
+
+    if not nv_list and today_sched:
         try:
-            from meal_handler import get_vietnamese_day_of_week
-            day_str = get_vietnamese_day_of_week()
-            sheet = get_spreadsheet().worksheet(WORKSHEET_SCHEDULES_NAME)
-            records = sheet.get_all_records()
-            today_sched = next((row for row in records if row.get('day_of_week') == day_str), None)
-            if today_sched:
-                nv_raw = today_sched.get('employee_schedule', '')
-                pg_raw = today_sched.get('pg_schedule', '')
-                nv_list = parse_staff_from_raw(nv_raw, target_shift_name)
-                pg_list = parse_staff_from_raw(pg_raw, target_shift_name)
+            nv_raw = today_sched.get('employee_schedule', '')
+            pg_raw = today_sched.get('pg_schedule', '')
+            nv_list = parse_staff_from_raw(nv_raw, target_shift_name)
+            pg_list = parse_staff_from_raw(pg_raw, target_shift_name)
         except Exception as err:
             print(f"Lỗi parse fallback lịch vệ sinh: {err}")
 
-    # Xử lý vệ sinh kho (chỉ lấy cho ca sáng)
     pg_kho_list = []
-    if session_type == 'vesinh_sang':
+    if session_type == 'vesinh_sang' and today_sched:
         try:
-            from meal_handler import get_vietnamese_day_of_week
-            day_str = get_vietnamese_day_of_week()
-            sheet = get_spreadsheet().worksheet(WORKSHEET_SCHEDULES_NAME)
-            records = sheet.get_all_records()
-            today_sched = next((row for row in records if row.get('day_of_week') == day_str), None)
-            if today_sched:
-                pg_raw = today_sched.get('pg_schedule', '')
-                pg_kho_list = parse_staff_from_raw(pg_raw, "Vệ Sinh Kho")
+            pg_raw = today_sched.get('pg_schedule', '')
+            pg_kho_list = parse_staff_from_raw(pg_raw, "Vệ Sinh Kho")
         except Exception as err:
             print(f"Lỗi đọc vệ sinh kho: {err}")
 
-    # Áp dụng quy tắc vệ sinh ca chiều
     if session_type == 'vesinh_chieu':
         try:
-            from meal_handler import get_vietnamese_day_of_week, normalize_text
-            day_str = get_vietnamese_day_of_week()
-            
             if day_str in ["Thứ Bảy", "Chủ Nhật"]:
-                # Thứ 7, Chủ Nhật: Chiều chỉ PG vệ sinh, NV đã vệ sinh sáng
                 nv_list = []
             else:
-                # Thứ 2 - Thứ 6: Loại bỏ NV đã làm Ca Sáng (làm cả ngày)
                 morning_staff = get_working_staff('ansang')
                 morning_nvs = morning_staff.get('NV', []) if isinstance(morning_staff, dict) else []
-                if not morning_nvs:
-                    sheet = get_spreadsheet().worksheet(WORKSHEET_SCHEDULES_NAME)
-                    records = sheet.get_all_records()
-                    today_sched = next((row for row in records if row.get('day_of_week') == day_str), None)
-                    if today_sched:
-                        nv_raw = today_sched.get('employee_schedule', '')
-                        morning_nvs = parse_staff_from_raw(nv_raw, "Ca Sáng")
+                if not morning_nvs and today_sched:
+                    nv_raw = today_sched.get('employee_schedule', '')
+                    morning_nvs = parse_staff_from_raw(nv_raw, "Ca Sáng")
                 
                 morning_nvs_norm = [normalize_text(name) for name in morning_nvs]
                 nv_list = [nv for nv in nv_list if normalize_text(nv) not in morning_nvs_norm]
@@ -285,51 +246,34 @@ def get_working_staff_vesinh(session_type):
 
 def sync_vesinh_sheet(group_id, session_type):
     """
-    Đồng bộ dữ liệu vệ sinh vào Google Sheets 'vesinh_tracker'.
-    Khởi tạo worksheet nếu chưa tồn tại.
+    Đồng bộ dữ liệu vệ sinh sử dụng RAM Cache + Ghi Google Sheets chạy ngầm.
     """
-    sheet = None
-    try:
-        sheet = get_spreadsheet().worksheet(WORKSHEET_VESINH_TRACKER_NAME)
-    except Exception as e:
-        print(f"Chưa tìm thấy worksheet '{WORKSHEET_VESINH_TRACKER_NAME}', đang tạo mới: {e}")
-        try:
-            spreadsheet = get_spreadsheet()
-            sheet = spreadsheet.add_worksheet(title=WORKSHEET_VESINH_TRACKER_NAME, rows=100, cols=10)
-            sheet.append_row(VESINH_HEADERS)
-        except Exception as create_err:
-            print(f"Lỗi khởi tạo worksheet '{WORKSHEET_VESINH_TRACKER_NAME}': {create_err}")
-            sheet = None
-
     tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
     today_str = datetime.now(tz_vietnam).strftime('%Y-%m-%d')
     
-    all_records = []
-    if sheet:
-        try:
-            first_data_date = None
-            try:
-                val = sheet.acell('B2').value 
-                if val: first_data_date = val
-            except: pass
+    all_values = get_cached_values(WORKSHEET_VESINH_TRACKER_NAME, ttl=60, create_headers=VESINH_HEADERS)
+    if not all_values:
+        all_values = [list(VESINH_HEADERS)]
 
-            if first_data_date and first_data_date != today_str:
-                print(f"Ngày mới! Xóa dữ liệu vệ sinh cũ ({first_data_date})...")
-                sheet.clear()
-                sheet.append_row(VESINH_HEADERS)
-                all_records = []
-            else:
-                all_records = sheet.get_all_records()
-        except Exception as sheet_err:
-            print(f"Lỗi đọc dữ liệu từ worksheet vesinh: {sheet_err}")
+    first_data_date = None
+    if len(all_values) > 1 and len(all_values[1]) > 1:
+        first_data_date = str(all_values[1][1]).strip()
+
+    need_clear_sheet = False
+    if first_data_date and first_data_date != today_str:
+        print(f"Ngày mới! Xóa dữ liệu vệ sinh cũ ({first_data_date})...")
+        all_values = [list(VESINH_HEADERS)]
+        set_cached_values(WORKSHEET_VESINH_TRACKER_NAME, all_values)
+        need_clear_sheet = True
+
+    all_records = values_to_records(all_values)
 
     existing_entries = {}
     for row in all_records:
         key_name = normalize_text(row.get('name'))
         if (str(row.get('group_id')) == str(group_id) and 
-            row.get('date') == today_str and 
-            row.get('session') == session_type):
-            # Nếu đã có dòng và dòng hiện tại đã 'done', ưu tiên giữ dòng 'done'
+            str(row.get('date')) == today_str and 
+            str(row.get('session')) == session_type):
             if key_name not in existing_entries or row.get('status') == 'done':
                 existing_entries[key_name] = row
 
@@ -338,7 +282,6 @@ def sync_vesinh_sheet(group_id, session_type):
     raw_pg_list = staff_lists.get('PG', [])
     raw_pg_kho_list = staff_lists.get('PG_KHO', [])
 
-    # Khử trùng lặp danh sách PG Kho
     seen_pg_kho = set()
     pg_kho_list = []
     for name in raw_pg_kho_list:
@@ -347,7 +290,6 @@ def sync_vesinh_sheet(group_id, session_type):
             seen_pg_kho.add(norm)
             pg_kho_list.append(name)
 
-    # Khử trùng lặp danh sách PG Gian hàng & loại bỏ ai đã làm Kho
     seen_pg = set()
     pg_list = []
     for name in raw_pg_list:
@@ -363,7 +305,6 @@ def sync_vesinh_sheet(group_id, session_type):
     new_rows = []
     processed_names = set()
 
-    # 1. Nhân viên NV
     for assign in nv_assignments:
         name = assign['name']
         zone_desc = assign['zone_desc']
@@ -373,7 +314,7 @@ def sync_vesinh_sheet(group_id, session_type):
         processed_names.add(norm_name)
         
         if norm_name in existing_entries:
-            item = existing_entries[norm_name]
+            item = dict(existing_entries[norm_name])
             item['zone'] = zone_desc
             final_data.append(item)
         else:
@@ -382,11 +323,12 @@ def sync_vesinh_sheet(group_id, session_type):
                 'type': 'NV', 'name': name, 'zone': zone_desc, 'status': 'waiting',
                 'time_clicked': '', 'clicked_by': ''
             }
-            new_rows.append([group_id, today_str, session_type, 'NV', name, zone_desc, 'waiting', '', ''])
+            new_row = [str(group_id), today_str, session_type, 'NV', name, zone_desc, 'waiting', '', '']
+            new_rows.append(new_row)
+            all_values.append(new_row)
             existing_entries[norm_name] = entry
             final_data.append(entry)
 
-    # 2. PG Kho
     for name in pg_kho_list:
         norm_name = normalize_text(name)
         if norm_name in processed_names:
@@ -401,11 +343,12 @@ def sync_vesinh_sheet(group_id, session_type):
                 'type': 'PG_KHO', 'name': name, 'zone': zone_desc, 'status': 'waiting',
                 'time_clicked': '', 'clicked_by': ''
             }
-            new_rows.append([group_id, today_str, session_type, 'PG_KHO', name, zone_desc, 'waiting', '', ''])
+            new_row = [str(group_id), today_str, session_type, 'PG_KHO', name, zone_desc, 'waiting', '', '']
+            new_rows.append(new_row)
+            all_values.append(new_row)
             existing_entries[norm_name] = entry
             final_data.append(entry)
 
-    # 3. PG Gian hàng
     for name in pg_list:
         norm_name = normalize_text(name)
         if norm_name in processed_names:
@@ -420,25 +363,37 @@ def sync_vesinh_sheet(group_id, session_type):
                 'type': 'PG', 'name': name, 'zone': zone_desc, 'status': 'waiting',
                 'time_clicked': '', 'clicked_by': ''
             }
-            new_rows.append([group_id, today_str, session_type, 'PG', name, zone_desc, 'waiting', '', ''])
+            new_row = [str(group_id), today_str, session_type, 'PG', name, zone_desc, 'waiting', '', '']
+            new_rows.append(new_row)
+            all_values.append(new_row)
             existing_entries[norm_name] = entry
             final_data.append(entry)
 
-    if new_rows and sheet:
-        try:
-            sheet.append_rows(new_rows, value_input_option='USER_ENTERED')
-        except Exception as append_err:
-            print(f"Lỗi ghi dữ liệu mới vào sheet vesinh: {append_err}")
+    if need_clear_sheet or new_rows:
+        set_cached_values(WORKSHEET_VESINH_TRACKER_NAME, all_values)
+        rows_snapshot = [list(r) for r in new_rows]
+        def _bg_sync_vesinh(do_clear, to_append):
+            ws = get_worksheet_cached_obj(WORKSHEET_VESINH_TRACKER_NAME, create_headers=VESINH_HEADERS, rows=100, cols=10)
+            if not ws:
+                return
+            if do_clear:
+                ws.clear()
+                ws.append_row(VESINH_HEADERS)
+            if to_append:
+                ws.append_rows(to_append, value_input_option='USER_ENTERED')
+        run_bg_sheet_task(_bg_sync_vesinh, need_clear_sheet, rows_snapshot, desc="sync_vesinh_sheet")
 
     return final_data
 
 def update_vesinh_status(group_id, session_type, staff_name, clicker_name, target_status='done'):
     """
-    Cập nhật trạng thái hoàn thành vệ sinh khi bấm nút.
+    Cập nhật trạng thái hoàn thành vệ sinh tức thì trong RAM Cache và đẩy ghi Sheet chạy ngầm.
     """
     try:
-        sheet = get_spreadsheet().worksheet(WORKSHEET_VESINH_TRACKER_NAME)
-        all_values = sheet.get_all_values()
+        all_values = get_cached_values(WORKSHEET_VESINH_TRACKER_NAME, ttl=60, create_headers=VESINH_HEADERS)
+        if not all_values or len(all_values) <= 1:
+            sync_vesinh_sheet(group_id, session_type)
+            all_values = get_cached_values(WORKSHEET_VESINH_TRACKER_NAME, ttl=60, create_headers=VESINH_HEADERS)
         
         tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
         today_str = datetime.now(tz_vietnam).strftime('%Y-%m-%d')
@@ -470,14 +425,31 @@ def update_vesinh_status(group_id, session_type, staff_name, clicker_name, targe
                 return "already", None
 
             clicked_user = clicker_name if target_status == 'done' else ''
-            cells = []
+            row_indices_for_bg = []
             for row_index, _ in matching_rows:
-                cells.extend([
-                    gspread.Cell(row_index, 7, target_status), # Column G: status
-                    gspread.Cell(row_index, 8, time_now),      # Column H: time_clicked
-                    gspread.Cell(row_index, 9, clicked_user)   # Column I: clicked_by
-                ])
-            sheet.update_cells(cells)
+                mem_row = all_values[row_index - 1]
+                while len(mem_row) < 9:
+                    mem_row.append('')
+                mem_row[6] = target_status
+                mem_row[7] = time_now
+                mem_row[8] = clicked_user
+                row_indices_for_bg.append(row_index)
+
+            set_cached_values(WORKSHEET_VESINH_TRACKER_NAME, all_values)
+
+            def _bg_update_vesinh(indices, st, tm, usr):
+                ws = get_worksheet_cached_obj(WORKSHEET_VESINH_TRACKER_NAME, create_headers=VESINH_HEADERS, rows=100, cols=10)
+                if not ws:
+                    return
+                cells = []
+                for r_idx in indices:
+                    cells.extend([
+                        gspread.Cell(r_idx, 7, st),
+                        gspread.Cell(r_idx, 8, tm),
+                        gspread.Cell(r_idx, 9, usr)
+                    ])
+                ws.update_cells(cells)
+            run_bg_sheet_task(_bg_update_vesinh, row_indices_for_bg, target_status, time_now, clicked_user, desc="update_vesinh_status")
             return True, time_now
         
         return False, None
@@ -488,7 +460,6 @@ def update_vesinh_status(group_id, session_type, staff_name, clicker_name, targe
 def generate_vesinh_flex(group_id, session_type=None):
     """
     Tạo Flex Message giao diện Phân Công & Theo Dõi Vệ Sinh.
-    Thiết kế mới: Gom nhóm theo Khu (Zone Header ở trên, danh sách nhân viên & nút hoàn tất bên phải ở dưới).
     """
     if not session_type:
         session_type = get_current_vesinh_session()
@@ -508,7 +479,6 @@ def generate_vesinh_flex(group_id, session_type=None):
 
     body_contents = []
 
-    # --- NHÂN VIÊN SECTION ---
     if nv_data:
         body_contents.append({
             "type": "text",
@@ -519,7 +489,6 @@ def generate_vesinh_flex(group_id, session_type=None):
             "margin": "xs"
         })
 
-        # Gom nhóm NV theo Khu (zone)
         zone_groups = {}
         for item in nv_data:
             z_desc = item.get('zone', 'Khu vực khác')
@@ -623,7 +592,6 @@ def generate_vesinh_flex(group_id, session_type=None):
             }
             body_contents.append(zone_card)
 
-    # --- PG SECTION ---
     if pg_data or pg_kho_data:
         body_contents.append({
             "type": "separator",
@@ -642,7 +610,6 @@ def generate_vesinh_flex(group_id, session_type=None):
 
         pg_box_contents = []
 
-        # Render PG KHO trước
         if pg_kho_data:
             pg_box_contents.append({
                 "type": "text",
@@ -714,7 +681,6 @@ def generate_vesinh_flex(group_id, session_type=None):
                     ]
                 })
 
-        # Render PG gian hàng
         if pg_data:
             if pg_kho_data:
                 pg_box_contents.append({"type": "separator", "margin": "md"})

@@ -3830,6 +3830,8 @@ def build_help_commands_flex():
         {"cmd": "việc", "desc": "Giao việc — mỗi việc 1 dòng bắt đầu bằng dấu gạch, dấu @ đặt đâu cũng được. Dòng đầu CHỈ CẦN chữ việc, không bắt buộc tag. VD:\nviệc\n- Giá Tivi @tuấn @linh\n- giá tủ lạnh @linh\nMuốn giao cho CẢ NHÓM thì ghi tag ở dòng đầu: việc @all\nGõ nhanh 1 dòng: việc @Khánh: dọn kho", "color": "#8b5cf6"},
         {"cmd": "@all @nv @pg @st", "desc": "Đích giao việc: @all = ĐỦ cả siêu thị (PG+NV+QL+TC, hiện 25 người, không lọc theo lịch hôm nay) · @nv = nhân viên · @pg = PG · @st = NV+QL+TC. Nhóm lấy từ sheet schedules cột E/F/G. Gọi đích danh (@tuan, @156494) thì ghi nguyên văn, không cần có trong sheet.", "color": "#7c3aed"},
         {"cmd": "hủy việc", "desc": "Hủy nhóm việc vừa giao trong hôm nay", "color": "#dc2626"},
+        {"cmd": "app / liff", "desc": "Mở Giao diện Web App (LINE LIFF) quản lý checklist & tick chọn giao việc nhanh", "color": "#0284c7"},
+        {"cmd": "mở ca", "desc": "Phát trọn bộ Lịch làm việc & Checklist Ca hiện tại (miễn phí 100% không tốn Push)", "color": "#0d9488"},
         {"cmd": "id", "desc": "Tra cứu Mã User ID cá nhân & Group ID nhóm chat", "color": "#64748b"},
         {"cmd": "#lenh", "desc": "Hiển thị Bảng Hướng Dẫn Danh Sách Tất Cả Cú Pháp Lệnh Hỗ Trợ", "color": "#0f172a"}
     ]

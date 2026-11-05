@@ -4,7 +4,7 @@ Module quản lý mã giảm giá (GVGS - Giá vạn người say / Coupon) cho 
 Hỗ trợ:
   - Nạp mã tự động từ văn bản hàng tuần
   - Xem danh sách mã theo ngành hàng (Tivi, Tủ lạnh, Máy giặt...)
-  - Cấp mã 1 chạm (Claim coupon) kèm nút sao chép (Clipboard action)
+  - Cấp mã 1 chạm (Claim coupon) tốc độ cao qua RAM Cache + Ghi Sheet chạy ngầm
   - Khóa mã đã dùng, chống cấp trùng lặp
 """
 
@@ -12,52 +12,37 @@ import re
 import os
 import pytz
 from datetime import datetime
+from config import (
+    get_worksheet_cached_obj, get_cached_values, set_cached_values, run_bg_sheet_task
+)
 
-_coupons_sheet_cache = None
+COUPON_HEADERS = [
+    'date', 'category', 'product_name', 'coupon_code',
+    'status', 'used_by', 'used_at', 'created_at'
+]
+
 
 def get_or_create_coupons_worksheet():
     """Lấy hoặc tạo worksheet 'coupons' trên Google Spreadsheet."""
-    global _coupons_sheet_cache
-    if _coupons_sheet_cache is not None:
-        return _coupons_sheet_cache
-
-    try:
-        import gspread
-        from config import get_spreadsheet
-        spreadsheet = get_spreadsheet()
-        try:
-            _coupons_sheet_cache = spreadsheet.worksheet('coupons')
-        except gspread.exceptions.WorksheetNotFound:
-            headers = [
-                'date', 'category', 'product_name', 'coupon_code',
-                'status', 'used_by', 'used_at', 'created_at'
-            ]
-            _coupons_sheet_cache = spreadsheet.add_worksheet(title='coupons', rows="1000", cols="10")
-            _coupons_sheet_cache.append_row(headers)
-            print("Đã tạo mới worksheet: coupons")
-        return _coupons_sheet_cache
-    except Exception as e:
-        print(f"Lỗi khi mở worksheet coupons: {e}")
-        _coupons_sheet_cache = None
-        return None
+    return get_worksheet_cached_obj('coupons', create_headers=COUPON_HEADERS, rows="1000", cols="10")
 
 
 def clear_all_coupons():
     """
     Xóa toàn bộ mã giảm giá trong sheet 'coupons', chỉ giữ lại hàng tiêu đề (header).
-    Trả về (True, message) hoặc (False, error_msg).
     """
     sheet = get_or_create_coupons_worksheet()
     if not sheet:
         return False, "Không thể kết nối với cơ sở dữ liệu phiếu giảm giá."
 
     try:
-        headers = [
-            'date', 'category', 'product_name', 'coupon_code',
-            'status', 'used_by', 'used_at', 'created_at'
-        ]
-        sheet.clear()
-        sheet.append_row(headers)
+        set_cached_values('coupons', [list(COUPON_HEADERS)])
+        def _bg_clear_coupons():
+            ws = get_or_create_coupons_worksheet()
+            if ws:
+                ws.clear()
+                ws.append_row(COUPON_HEADERS)
+        run_bg_sheet_task(_bg_clear_coupons, desc="clear_all_coupons")
         return True, "🗑️ Đã xóa sạch toàn bộ mã giảm giá (GVGS) trong hệ thống!\nKho phiếu đã được làm mới, bạn có thể nạp mã mới bằng lệnh `ADD COUPON:`."
     except Exception as e:
         print(f"Lỗi khi xóa sạch coupons: {e}")
@@ -65,33 +50,17 @@ def clear_all_coupons():
 
 
 def detect_category(product_name):
-    """
-    Tự động phân loại ngành hàng từ tên sản phẩm.
-    Hỗ trợ chuẩn xác các nhóm ngành hàng Điện Máy XANH theo yêu cầu:
-      1. Máy Giặt
-      2. Tủ Lạnh
-      3. Tủ Đông
-      4. Máy lọc nước
-      5. Loa Karaoke
-      6. Loa Thanh
-      7. Tivi
-      Và các nhóm phụ: Máy lạnh, Gia dụng, Điện thoại, Khác.
-    """
     p_lower = str(product_name).lower()
 
-    # 1. Tủ Đông (kiểm tra trước Tủ Lạnh)
     if any(k in p_lower for k in ['tủ đông', 'tu dong', 'tudong', 'freezer']):
         return 'Tủ Đông', '❄️'
 
-    # 2. Tủ Lạnh
     if any(k in p_lower for k in ['tủ lạnh', 'tu lanh', 'tulanh', 'fridge']):
         return 'Tủ Lạnh', '🧊'
 
-    # 3. Máy lọc nước (kiểm tra trước Gia dụng)
     if any(k in p_lower for k in ['máy lọc nước', 'may loc nuoc', 'lọc nước', 'loc nuoc', 'ro nóng lạnh', 'water purifier']):
         return 'Máy lọc nước', '💧'
 
-    # 4. Loa Thanh & Loa Karaoke
     if any(k in p_lower for k in ['loa thanh', 'soundbar', 'sound bar']):
         return 'Loa Thanh', '🔊'
     if any(k in p_lower for k in ['loa karaoke', 'karaoke', 'loa kéo', 'loa keo', 'dalton']):
@@ -99,23 +68,18 @@ def detect_category(product_name):
     if 'loa ' in p_lower or p_lower.startswith('loa'):
         return 'Loa Karaoke', '🎤'
 
-    # 5. Máy Giặt / Sấy
     if any(k in p_lower for k in ['máy giặt', 'may giat', 'máy sấy', 'may say', 'giặt sấy', 'giat say', 'washer', 'dryer']):
         return 'Máy Giặt', '🧺'
 
-    # 6. Tivi
     if any(k in p_lower for k in ['tivi', 'tv', 'tivi ', 'smart tv', 'qned', 'oled', 'qled', 'bravia', 'mini led']):
         return 'Tivi', '📺'
 
-    # 7. Máy lạnh / Điều hòa
     if any(k in p_lower for k in ['máy lạnh', 'may lanh', 'điều hòa', 'dieu hoa', 'air conditioner']):
         return 'Máy lạnh', '❄️'
 
-    # 8. Gia dụng
     if any(k in p_lower for k in ['nồi cơm', 'noi com', 'nồi chiên', 'noi chien', 'quạt', 'quat', 'bếp', 'bep', 'lò vi sóng', 'lo vi song', 'máy ép', 'may ep', 'máy xay', 'may xay', 'ấm siêu tốc', 'am sieu toc']):
         return 'Gia dụng', '🍳'
 
-    # 9. Điện thoại / Tablet
     if any(k in p_lower for k in ['điện thoại', 'dien thoai', 'smartphone', 'iphone', 'ipad', 'galaxy z', 'galaxy s']):
         return 'Điện thoại', '📱'
 
@@ -123,18 +87,10 @@ def detect_category(product_name):
 
 
 def parse_coupons_text(raw_text):
-    """
-    Phân tích văn bản nạp coupon hàng tuần dạng:
-    'Ngày 25/09/2026 : Mã Coupon 1 - dùng cho Tủ lạnh Panasonic NR-DZ601VGKV: DMX22BV33RMK962'
-    Trả về danh sách dict: [{date, category, product_name, coupon_code}]
-    """
     results = []
-    # Chuẩn hóa khoảng trắng unicode (non-breaking space), dấu hai chấm fullwidth, dấu gạch ngang
     clean_text = raw_text.replace('\u00a0', ' ').replace('：', ':').replace('–', '-').replace('—', '-')
     lines = [line.strip() for line in clean_text.split('\n') if line.strip()]
 
-    # Pattern chuẩn: Ngày dd/mm/yyyy : ... dùng cho <tên sp>: <mã coupon>
-    # Hoặc: dd/mm/yyyy : <tên sp> : <mã coupon>
     pattern = re.compile(
         r"(?:Ngày\s*)?(\d{1,2}/\d{1,2}/\d{4})\s*:\s*(?:Mã\s*Coupon\s*\d*\s*-\s*)?(?:dùng\s*cho\s*)?([^:]+?)\s*:\s*([A-Za-z0-9_-]+)",
         re.IGNORECASE
@@ -157,7 +113,6 @@ def parse_coupons_text(raw_text):
                 'coupon_code': code
             })
         else:
-            # Dự phòng: Tách theo dấu ':' nếu dòng có từ 2 dấu hai chấm trở lên
             parts = [p.strip() for p in line.split(':') if p.strip()]
             if len(parts) >= 3:
                 date_match = re.search(r"(\d{1,2}/\d{1,2}/\d{4})", parts[0])
@@ -178,25 +133,18 @@ def parse_coupons_text(raw_text):
 
 
 def import_coupons_from_text(raw_text):
-    """
-    Nạp danh sách mã giảm giá từ văn bản vào Google Sheet.
-    Hỗ trợ nạp nối tiếp nhiều lần (không ghi đè, không nhảy hàng trống).
-    Tự động lọc bỏ các mã đã tồn tại trên hệ thống (chống trùng lặp).
-    Trả về (số_mã_nạp_mới, danh_sách_sản_phẩm, số_mã_trùng)
-    """
     parsed = parse_coupons_text(raw_text)
     if not parsed:
-        return 0, [], 0
-
-    sheet = get_or_create_coupons_worksheet()
-    if not sheet:
         return 0, [], 0
 
     tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
     created_at = datetime.now(tz_vietnam).strftime('%Y-%m-%d %H:%M:%S')
 
     try:
-        all_values = sheet.get_all_values()
+        all_values = get_cached_values('coupons', ttl=60, create_headers=COUPON_HEADERS)
+        if not all_values:
+            all_values = [list(COUPON_HEADERS)]
+
         existing_codes = set()
         if len(all_values) > 1:
             for row in all_values[1:]:
@@ -214,7 +162,7 @@ def import_coupons_from_text(raw_text):
                 continue
 
             existing_codes.add(code)
-            rows_to_add.append([
+            new_row = [
                 item['date'],
                 item['category'],
                 item['product_name'],
@@ -223,19 +171,18 @@ def import_coupons_from_text(raw_text):
                 '',
                 '',
                 created_at
-            ])
+            ]
+            rows_to_add.append(new_row)
+            all_values.append(new_row)
             added_products.append(item['product_name'])
 
         if rows_to_add:
-            next_row = len(all_values) + 1
-            end_row = next_row + len(rows_to_add) - 1
-            range_to_update = f"A{next_row}:H{end_row}"
-
-            try:
-                sheet.update(range_name=range_to_update, values=rows_to_add, value_input_option='USER_ENTERED')
-            except TypeError:
-                sheet.update(range_to_update, rows_to_add, value_input_option='USER_ENTERED')
-
+            set_cached_values('coupons', all_values)
+            def _bg_import_coupons(to_add):
+                ws = get_or_create_coupons_worksheet()
+                if ws:
+                    ws.append_rows(to_add, value_input_option='USER_ENTERED')
+            run_bg_sheet_task(_bg_import_coupons, rows_to_add, desc="import_coupons")
             unique_products = list(dict.fromkeys(added_products))
             return len(rows_to_add), unique_products, dup_count
 
@@ -246,20 +193,12 @@ def import_coupons_from_text(raw_text):
 
 
 def get_available_coupons_today(target_date_str=None):
-    """
-    Lấy toàn bộ phiếu còn hiệu lực hôm nay (status == 'available').
-    Nếu hôm nay chưa có mã riêng, fallback lấy các mã 'available' chưa dùng trong kho.
-    """
-    sheet = get_or_create_coupons_worksheet()
-    if not sheet:
-        return []
-
     if not target_date_str:
         tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
         target_date_str = datetime.now(tz_vietnam).strftime('%d/%m/%Y')
 
     try:
-        all_values = sheet.get_all_values()
+        all_values = get_cached_values('coupons', ttl=60, create_headers=COUPON_HEADERS)
         if len(all_values) <= 1:
             return []
 
@@ -269,7 +208,6 @@ def get_available_coupons_today(target_date_str=None):
                 continue
             r_date = str(row[0]).strip()
             r_prod = str(row[2]).strip()
-            # Tự động chuẩn hóa ngành hàng theo tên sản phẩm
             r_cat_auto, _ = detect_category(r_prod)
             r_cat = r_cat_auto if r_cat_auto != 'Khác' else (str(row[1]).strip() or 'Khác')
             r_code = str(row[3]).strip()
@@ -284,7 +222,6 @@ def get_available_coupons_today(target_date_str=None):
                     'status': r_status
                 })
 
-        # Fallback nếu hôm nay chưa có mã riêng nhưng trong kho có mã còn trống
         if not valid:
             for row in all_values[1:]:
                 if len(row) < 5:
@@ -311,10 +248,6 @@ def get_available_coupons_today(target_date_str=None):
 
 
 def get_coupons_summary_by_category(target_date_str=None):
-    """
-    Tổng hợp số lượng mã còn lại theo từng ngành hàng và sản phẩm trong ngày.
-    Trả về dict: { category: { 'icon': ..., 'count': ..., 'products': { prod_name: count } } }
-    """
     valid_coupons = get_available_coupons_today(target_date_str)
     summary = {}
 
@@ -339,22 +272,15 @@ def get_coupons_summary_by_category(target_date_str=None):
 
 def claim_coupon_for_user(product_name, user_display_name, target_date_str=None):
     """
-    Cấp 1 mã giảm giá của sản phẩm cho nhân viên:
-      - Tìm mã 'available' đầu tiên của sản phẩm trong kho
-      - Đánh dấu 'used', ghi nhận user_display_name và thời gian
-      - Trả về (True, coupon_code, remaining_count, category) hoặc (False, error_msg, 0, category)
+    Cấp 1 mã giảm giá của sản phẩm cho nhân viên (cập nhật RAM tức thì chống trùng + ghi Sheet chạy ngầm).
     """
-    sheet = get_or_create_coupons_worksheet()
-    if not sheet:
-        return False, "Không thể kết nối cơ sở dữ liệu phiếu.", 0, ""
-
     tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
     if not target_date_str:
         target_date_str = datetime.now(tz_vietnam).strftime('%d/%m/%Y')
     time_str = datetime.now(tz_vietnam).strftime('%H:%M %d/%m/%Y')
 
     try:
-        all_values = sheet.get_all_values()
+        all_values = get_cached_values('coupons', ttl=60, create_headers=COUPON_HEADERS)
         if len(all_values) <= 1:
             cat_guess, _ = detect_category(product_name)
             return False, "Hiện chưa có phiếu giảm giá nào trong hệ thống.", 0, cat_guess
@@ -363,7 +289,6 @@ def claim_coupon_for_user(product_name, user_display_name, target_date_str=None)
         available_indices = []
         category_found = ""
 
-        # Cột: 0: date, 1: category, 2: product_name, 3: coupon_code, 4: status, 5: used_by, 6: used_at
         for row_idx, row in enumerate(all_values[1:], start=2):
             if len(row) < 5:
                 continue
@@ -379,7 +304,6 @@ def claim_coupon_for_user(product_name, user_display_name, target_date_str=None)
                 if r_status == 'available' and (r_date == target_date_str or not r_date):
                     available_indices.append((row_idx, r_code))
 
-        # Nếu không tìm thấy mã theo ngày hôm nay, tìm mã available của model này trong toàn bộ sheet
         if not available_indices:
             for row_idx, row in enumerate(all_values[1:], start=2):
                 if len(row) < 5:
@@ -403,14 +327,27 @@ def claim_coupon_for_user(product_name, user_display_name, target_date_str=None)
         target_row_idx, chosen_code = available_indices[0]
         remaining_count = len(available_indices) - 1
 
-        # Cập nhật: Cột E: status, F: used_by, G: used_at
-        range_update = f'E{target_row_idx}:G{target_row_idx}'
-        vals = [['used', user_display_name, time_str]]
-        try:
-            sheet.update(range_name=range_update, values=vals)
-        except TypeError:
-            sheet.update(range_update, vals)
+        # Khóa mã ngay trong RAM
+        mem_row = all_values[target_row_idx - 1]
+        while len(mem_row) < 7:
+            mem_row.append('')
+        mem_row[4] = 'used'
+        mem_row[5] = user_display_name
+        mem_row[6] = time_str
+        set_cached_values('coupons', all_values)
 
+        def _bg_claim_coupon(r_idx, usr, tm):
+            ws = get_or_create_coupons_worksheet()
+            if not ws:
+                return
+            range_update = f'E{r_idx}:G{r_idx}'
+            vals = [['used', usr, tm]]
+            try:
+                ws.update(range_name=range_update, values=vals)
+            except TypeError:
+                ws.update(range_update, vals)
+
+        run_bg_sheet_task(_bg_claim_coupon, target_row_idx, user_display_name, time_str, desc=f"claim_coupon_{chosen_code}")
         return True, chosen_code, remaining_count, category_found
     except Exception as e:
         print(f"Lỗi khi cấp coupon: {e}")
@@ -421,9 +358,6 @@ def claim_coupon_for_user(product_name, user_display_name, target_date_str=None)
 # ==================== CÁC HÀM SINH FLEX MESSAGE ====================
 
 def build_category_menu_flex(target_date_str=None):
-    """
-    Thẻ Flex Menu danh mục ngành hàng khi gõ lệnh 'gvgs'.
-    """
     tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
     if not target_date_str:
         target_date_str = datetime.now(tz_vietnam).strftime('%d/%m/%Y')
@@ -592,9 +526,6 @@ def build_category_menu_flex(target_date_str=None):
 
 
 def build_product_list_flex(category, target_date_str=None):
-    """
-    Thẻ Flex danh sách sản phẩm thuộc một ngành hàng kèm nút [ 🎟️ Lấy mã ].
-    """
     tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
     if not target_date_str:
         target_date_str = datetime.now(tz_vietnam).strftime('%d/%m/%Y')
@@ -663,7 +594,6 @@ def build_product_list_flex(category, target_date_str=None):
 
     prod_components = []
     for prod_name, count in cat_info['products'].items():
-        # Rút ngắn tên hiển thị nếu quá dài
         prod_box = {
             "type": "box",
             "layout": "vertical",
@@ -773,12 +703,6 @@ def build_product_list_flex(category, target_date_str=None):
 
 
 def build_claimed_coupon_flex(product_name, coupon_code, remaining_count, user_display_name):
-    """
-    Thẻ Flex trao mã coupon cho nhân viên:
-      - Hiển thị to rõ ràng mã Coupon
-      - Thông báo kho phiếu đã trừ 1 phiếu và còn lại bao nhiêu
-      - Có nút dán mã ra khung chat an toàn 100% với LINE SDK
-    """
     _, icon = detect_category(product_name)
 
     flex_content = {
@@ -787,7 +711,7 @@ def build_claimed_coupon_flex(product_name, coupon_code, remaining_count, user_d
         "header": {
             "type": "box",
             "layout": "vertical",
-            "backgroundColor": "#00884A",  # Màu xanh lá nhận diện Điện Máy XANH
+            "backgroundColor": "#00884A",
             "paddingTop": "16px",
             "paddingBottom": "16px",
             "paddingStart": "20px",
@@ -873,7 +797,7 @@ def build_claimed_coupon_flex(product_name, coupon_code, remaining_count, user_d
                     "contents": [
                         {
                             "type": "text",
-                            "text": f"📉 Đã trừ 1 phiếu khỏi kho chung.",
+                            "text": "📉 Đã trừ 1 phiếu khỏi kho chung.",
                             "size": "xs",
                             "color": "#DC2626",
                             "weight": "bold"
