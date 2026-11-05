@@ -1480,6 +1480,85 @@ def _render_assignees_ui(assignees_list, indent_px="0px"):
     return ui_boxes
 
 
+CATEGORY_THEMES = [
+    {
+        "keywords": ["dien thoai", "phone", "iphone", "samsung", "oppo", "xiaomi"],
+        "icon": "📱",
+        "bg": "#EFF6FF",       # Blue pastel
+        "border": "#93C5FD",   # Blue border
+        "accent": "#2563EB",   # Vibrant Blue
+        "text": "#1D4ED8"
+    },
+    {
+        "keywords": ["pkti", "it", "vi tinh", "laptop", "loa", "phu kien", "am thanh"],
+        "icon": "💻",
+        "bg": "#FAF5FF",       # Purple pastel
+        "border": "#D8B4FE",   # Purple border
+        "accent": "#9333EA",   # Vibrant Purple
+        "text": "#6B21A8"
+    },
+    {
+        "keywords": ["may giat", "giat", "say", "may say"],
+        "icon": "🌀",
+        "bg": "#F0FDF4",       # Mint pastel
+        "border": "#86EFAC",   # Green border
+        "accent": "#16A34A",   # Vibrant Green
+        "text": "#15803D"
+    },
+    {
+        "keywords": ["tu lanh", "dien lanh", "may lanh", "dieu hoa"],
+        "icon": "❄️",
+        "bg": "#ECFEFF",       # Cyan pastel
+        "border": "#A5F3FC",   # Cyan border
+        "accent": "#0891B2",   # Vibrant Cyan
+        "text": "#0E7490"
+    },
+    {
+        "keywords": ["dien gia dung", "gia dung", "bep", "noi", "ld"],
+        "icon": "⚡",
+        "bg": "#FFF7ED",       # Orange pastel
+        "border": "#FDBA74",   # Orange border
+        "accent": "#EA580C",   # Vibrant Orange
+        "text": "#C2410C"
+    },
+    {
+        "keywords": ["tivi", "tv", "dien tu", "man hinh"],
+        "icon": "📺",
+        "bg": "#FEF3C7",       # Amber pastel
+        "border": "#FCD34D",   # Amber border
+        "accent": "#D97706",   # Vibrant Amber
+        "text": "#92400E"
+    },
+    {
+        "keywords": ["wearable", "dong ho", "watch"],
+        "icon": "⌚",
+        "bg": "#FDF2F8",       # Rose pastel
+        "border": "#FBCFE8",   # Rose border
+        "accent": "#DB2777",   # Vibrant Rose
+        "text": "#9D174D"
+    },
+]
+
+FALLBACK_PALETTES = [
+    {"icon": "🏷️", "bg": "#EFF6FF", "border": "#BFDBFE", "accent": "#3B82F6", "text": "#1D4ED8"},
+    {"icon": "🏷️", "bg": "#FFF7ED", "border": "#FED7AA", "accent": "#F97316", "text": "#C2410C"},
+    {"icon": "🏷️", "bg": "#F0FDF4", "border": "#BBF7D0", "accent": "#22C55E", "text": "#15803D"},
+    {"icon": "🏷️", "bg": "#FAF5FF", "border": "#E9D5FF", "accent": "#A855F7", "text": "#6B21A8"},
+    {"icon": "🏷️", "bg": "#ECFEFF", "border": "#A5F3FC", "accent": "#06B6D4", "text": "#0E7490"},
+    {"icon": "🏷️", "bg": "#FEF2F2", "border": "#FECACA", "accent": "#EF4444", "text": "#B91C1C"},
+]
+
+
+def _get_category_theme(sub_name, index=0):
+    raw = str(sub_name or "").strip()
+    norm = normalize_person_key(raw).lower()
+    for theme in CATEGORY_THEMES:
+        for kw in theme["keywords"]:
+            if kw in norm:
+                return theme
+    return FALLBACK_PALETTES[index % len(FALLBACK_PALETTES)]
+
+
 def generate_today_adhoc_flex(group_id):
     """
     Tạo Flex Bubble hiển thị TỔNG HỢP toàn bộ công việc giao thêm trong ngày hôm nay của nhóm.
@@ -1647,36 +1726,78 @@ def generate_today_adhoc_flex(group_id):
 
                 card_contents.append({"type": "separator", "color": "#E2E8F0", "margin": "xs"})
 
-                for sub_name, b_assignees in item['branches'].items():
+                for sub_idx, (sub_name, b_assignees) in enumerate(item['branches'].items()):
                     sub_complete = all(a.get('status') == 'complete' for a in b_assignees)
-                    sub_text_col = "#64748B" if sub_complete else "#1E293B"
                     sub_text_dec = "line-through" if sub_complete else "none"
+                    theme = _get_category_theme(sub_name, sub_idx)
+                    cnt_assignees = len(b_assignees)
+                    people_tag = f"{cnt_assignees} người" if cnt_assignees > 1 else "1 người"
 
                     card_contents.append({
                         "type": "box",
                         "layout": "horizontal",
-                        "spacing": "xs",
+                        "spacing": "sm",
                         "alignItems": "center",
                         "margin": "md",
-                        "backgroundColor": "#F1F5F9",
-                        "borderColor": "#E2E8F0",
+                        "backgroundColor": theme["bg"],
+                        "borderColor": theme["border"],
                         "borderWidth": "1px",
-                        "cornerRadius": "sm",
+                        "cornerRadius": "md",
                         "paddingStart": "8px",
                         "paddingEnd": "8px",
-                        "paddingTop": "4px",
-                        "paddingBottom": "4px",
+                        "paddingTop": "5px",
+                        "paddingBottom": "5px",
                         "contents": [
-                            {"type": "text", "text": "🏷️", "size": "xs", "flex": 0},
+                            # Vạch chỉ thị màu thương hiệu ngành hàng (Accent bar)
+                            {
+                                "type": "box",
+                                "layout": "vertical",
+                                "width": "4px",
+                                "height": "16px",
+                                "backgroundColor": theme["accent"],
+                                "cornerRadius": "xs",
+                                "flex": 0
+                            },
+                            # Icon ngành hàng sinh động
                             {
                                 "type": "text",
-                                "text": sub_name,
+                                "text": theme["icon"],
+                                "size": "sm",
+                                "flex": 0
+                            },
+                            # Tên đầu mục công việc nổi bật
+                            {
+                                "type": "text",
+                                "text": sub_name.strip(),
                                 "weight": "bold",
                                 "size": "xs",
-                                "color": sub_text_col,
+                                "color": theme["text"] if not sub_complete else "#64748B",
                                 "decoration": sub_text_dec,
                                 "flex": 1,
                                 "wrap": True
+                            },
+                            # Badge số người phụ trách
+                            {
+                                "type": "box",
+                                "layout": "vertical",
+                                "backgroundColor": "#FFFFFF",
+                                "borderColor": theme["border"],
+                                "borderWidth": "1px",
+                                "cornerRadius": "sm",
+                                "paddingStart": "5px",
+                                "paddingEnd": "5px",
+                                "paddingTop": "1px",
+                                "paddingBottom": "1px",
+                                "flex": 0,
+                                "contents": [
+                                    {
+                                        "type": "text",
+                                        "text": people_tag,
+                                        "size": "xxs",
+                                        "color": theme["text"],
+                                        "weight": "bold"
+                                    }
+                                ]
                             }
                         ]
                     })
