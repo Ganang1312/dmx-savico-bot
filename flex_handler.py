@@ -2013,9 +2013,32 @@ def _mention_code(display, code_set):
     return None
 
 
+def merge_broken_task_lines(raw_lines):
+    """
+    Gộp các dòng người nhận/thông tin bổ trợ bị xuống dòng
+    vào dòng gạch đầu dòng (-) trước đó.
+    """
+    merged = []
+    for l in raw_lines:
+        line_clean = l.strip()
+        if not line_clean:
+            continue
+        if not merged:
+            merged.append(line_clean)
+        elif line_clean[0] in BULLETS or line_clean.lower().startswith("việc") or line_clean.lower().startswith("viec"):
+            merged.append(line_clean)
+        else:
+            merged[-1] += " " + line_clean
+    return merged
+
+
 def resolve_mentions(raw_text, mentionees, roster_names=None):
     if not mentionees or not raw_text:
         return raw_text
+
+    all_roster = []
+    if roster_names and isinstance(roster_names, dict):
+        all_roster = [nm for grp in roster_names.values() for nm in grp]
 
     utf16_to_char = {}
     current_utf16 = 0
@@ -2056,7 +2079,22 @@ def resolve_mentions(raw_text, mentionees, roster_names=None):
         if str(m.get("type", "user")).lower() == "all":
             token = "all"
         else:
-            token = display.replace(" ", MENTION_SPACE).strip() or "?"
+            # Thông minh: nếu nick LINE chứa mã NV thì thay bằng mã NV
+            matched_code = None
+            clean_disp = display.replace("\n", " ").strip()
+            for code_match in re.finditer(r"(\d{4,8})", clean_disp):
+                c = code_match.group(1)
+                for r in all_roster:
+                    if c in r:
+                        matched_code = c
+                        break
+                if matched_code:
+                    break
+
+            if matched_code:
+                token = matched_code
+            else:
+                token = display.replace(" ", MENTION_SPACE).strip() or "?"
 
         out = out[:char_start] + "@" + token + overflow + out[char_end:]
 
@@ -2136,7 +2174,8 @@ def parse_work_command(lines, roster_names):
     known = build_known_tokens(index)
     known_norm = {normalize_person_key(t) for t in known}
 
-    lines = _expand_one_line([l.strip() for l in lines if l.strip()])
+    lines = merge_broken_task_lines([l.strip() for l in lines if l.strip()])
+    lines = _expand_one_line(lines)
 
     header = (lines[0] if lines else "").strip()
     header_body = re.sub(r"^(việc|viec)\b", "", header, flags=re.IGNORECASE).strip()
@@ -2168,7 +2207,13 @@ def parse_work_command(lines, roster_names):
         if not body:
             continue
 
-        text, tokens = split_line(body, known, known_norm)
+        # Tự động nhận diện tên nhân viên kể cả khi không có dấu @
+        processed_body = body
+        for tok, _ in index:
+            if not tok.isdigit() and len(tok) >= 2:
+                processed_body = re.sub(r'(?<!@)\b' + re.escape(tok) + r'\b', '@' + tok, processed_body, flags=re.IGNORECASE)
+
+        text, tokens = split_line(processed_body, known, known_norm)
 
         names = []
         _seen_n = set()
@@ -2192,10 +2237,14 @@ def parse_work_command(lines, roster_names):
             errors.append("Dòng “%s”: chưa chỉ định ai làm." % s)
             continue
 
+        clean_t = re.sub(r"\b\d{4,8}\b", " ", text)
+        clean_t = re.sub(r"[\s,;:\-_–—]+$", "", clean_t)
+        clean_t = re.sub(r"\s+", " ", clean_t).strip(" ,;:-_–—")
+
         if job:
-            task = ("%s | %s" % (job, text)) if text else job
+            task = ("%s | %s" % (job, clean_t)) if clean_t else job
         else:
-            task = text
+            task = clean_t
         if not task:
             errors.append("Dòng “%s”: thiếu nội dung công việc." % s)
             continue
