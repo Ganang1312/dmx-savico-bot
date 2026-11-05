@@ -1774,7 +1774,9 @@ def generate_today_adhoc_flex(group_id):
                     {
                         "type": "box",
                         "layout": "vertical",
-                        "backgroundColor": "rgba(255, 255, 255, 0.2)",
+                        "backgroundColor": "#075985",
+                        "borderColor": "#38BDF8",
+                        "borderWidth": "1px",
                         "cornerRadius": "xs",
                         "paddingStart": "8px",
                         "paddingEnd": "8px",
@@ -1786,7 +1788,7 @@ def generate_today_adhoc_flex(group_id):
                                 "type": "text",
                                 "text": "⚡ SAVICO OPERATION",
                                 "size": "xxs",
-                                "color": "#FFFFFF",
+                                "color": "#E0F2FE",
                                 "weight": "bold"
                             }
                         ]
