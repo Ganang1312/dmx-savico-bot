@@ -2,6 +2,7 @@ from datetime import datetime
 import pytz
 import uuid
 import re
+import unicodedata
 import gspread
 
 # Import từ file cấu hình trung tâm
@@ -1166,16 +1167,41 @@ def add_all_adhoc_tasks(group_id, members, task_name):
         return None
 
 
+AVATAR_PALETTES = [
+    {"bg": "#EFF6FF", "border": "#BFDBFE", "text": "#1D4ED8"},  # Blue pastel
+    {"bg": "#F0FDF4", "border": "#BBF7D0", "text": "#15803D"},  # Emerald pastel
+    {"bg": "#FEF3C7", "border": "#FDE68A", "text": "#B45309"},  # Amber pastel
+    {"bg": "#FDF2F8", "border": "#FBCFE8", "text": "#BE185D"},  # Rose pastel
+    {"bg": "#F5F3FF", "border": "#DDD6FE", "text": "#6D28D9"},  # Purple pastel
+    {"bg": "#ECFEFF", "border": "#A5F3FC", "text": "#0E7490"},  # Cyan pastel
+]
+
+
+def _get_avatar_style(name):
+    clean = str(name or "").strip()
+    idx = sum(ord(c) for c in clean) % len(AVATAR_PALETTES)
+    return AVATAR_PALETTES[idx]
+
+
+def _parse_assignee_components(assignee_str):
+    raw = str(assignee_str or "").strip()
+    if not raw:
+        return "NV", "", "N"
+    parts = re.split(r"[-–_\s]+", raw)
+    first_name = parts[0].strip() if parts else raw
+    sub_code = " • ".join(p.strip() for p in parts[1:] if p.strip())
+    initial = first_name[0].upper() if first_name else "N"
+    return first_name, sub_code, initial
+
+
 def _render_assignees_ui(assignees_list, indent_px="0px"):
     """
-    Render danh sách người nhận việc hiện đại (Mục 8 & Mục 9):
-      - Những người CHƯA XONG (pending):
-          + Nếu <= 3 người: hiển thị từng dòng ngang rõ ràng kèm nút [Hoàn tất].
-          + Nếu >= 4 người (nhóm đông @all, @nv, @pg): tự động chia Grid 2 cột ngang gọn gàng,
-            chạm vào ô tên là đánh dấu hoàn tất ngay!
-      - Những người ĐÃ XONG (completed):
-          + Gom gọn vào một khung xanh lá nhạt bên dưới kèm thời gian hoàn thành (✓ Tên • HH:MM).
-          + Vẫn gắn postback hoàn tác (target_status=incomplete) trên từng tên để bấm nhầm có thể hủy.
+    Render danh sách người nhận việc cao cấp chuẩn Mobile App UI:
+      - Loại bỏ icon bóng người đen xấu (bust in silhouette).
+      - Thay bằng Avatar Initial Badge tròn nền pastel sang trọng.
+      - Tách rõ Tên nhân viên (đậm nét) và Mã nhân viên (màu xám thanh lịch bên dưới).
+      - Nút [Hoàn tất] màu xanh ngọc Emerald (#10B981) thanh thoát.
+      - Nhóm đông (>= 4 người): Tự động chia Grid 2 cột chạm để Hoàn tất.
     """
     pending_list = [a for a in assignees_list if a.get('status') != 'complete']
     completed_list = [a for a in assignees_list if a.get('status') == 'complete']
@@ -1187,37 +1213,81 @@ def _render_assignees_ui(assignees_list, indent_px="0px"):
             for a in pending_list:
                 t_id = a.get('task_id')
                 assignee = a.get('assignee', '')
+                first_name, sub_code, initial = _parse_assignee_components(assignee)
+                palette = _get_avatar_style(first_name)
+
                 row_box = {
                     "type": "box",
                     "layout": "horizontal",
-                    "spacing": "sm",
+                    "spacing": "md",
                     "alignItems": "center",
                     "backgroundColor": "#FFFFFF",
                     "borderColor": "#E2E8F0",
                     "borderWidth": "1px",
-                    "cornerRadius": "sm",
+                    "cornerRadius": "md",
                     "paddingAll": "xs",
                     "paddingStart": "8px",
+                    "paddingEnd": "8px",
                     "margin": "xs",
                     "contents": [
+                        # Avatar tròn Initial Badge sang trọng
                         {
-                            "type": "text",
-                            "text": f"👤 {assignee}",
-                            "color": "#0F172A",
-                            "size": "xs",
-                            "weight": "bold",
-                            "flex": 1,
-                            "wrap": True
+                            "type": "box",
+                            "layout": "vertical",
+                            "width": "28px",
+                            "height": "28px",
+                            "cornerRadius": "14px",
+                            "backgroundColor": palette["bg"],
+                            "borderColor": palette["border"],
+                            "borderWidth": "1px",
+                            "justifyContent": "center",
+                            "alignItems": "center",
+                            "flex": 0,
+                            "contents": [
+                                {
+                                    "type": "text",
+                                    "text": initial,
+                                    "size": "xs",
+                                    "weight": "bold",
+                                    "color": palette["text"],
+                                    "align": "center"
+                                }
+                            ]
                         },
+                        # Tên nhân viên & Mã
+                        {
+                            "type": "box",
+                            "layout": "vertical",
+                            "flex": 1,
+                            "spacing": "none",
+                            "contents": [
+                                {
+                                    "type": "text",
+                                    "text": first_name,
+                                    "color": "#0F172A",
+                                    "size": "sm",
+                                    "weight": "bold"
+                                },
+                                *(
+                                    [{
+                                        "type": "text",
+                                        "text": f"Mã: {sub_code}",
+                                        "color": "#64748B",
+                                        "size": "xxs"
+                                    }] if sub_code else []
+                                )
+                            ]
+                        },
+                        # Nút bấm Hoàn tất
                         {
                             "type": "button",
                             "action": {
                                 "type": "postback",
-                                "label": "Hoàn tất",
+                                "label": "✓ Hoàn tất",
                                 "data": f"action=complete_adhoc_task&task_id={t_id}&assignee={assignee}&target_status=complete"
                             },
                             "style": "primary",
-                            "color": "#00B33C",
+                            "color": "#10B981",
                             "height": "sm",
                             "flex": 0
                         }
@@ -1225,7 +1295,7 @@ def _render_assignees_ui(assignees_list, indent_px="0px"):
                 }
                 ui_boxes.append(row_box)
         else:
-            # Mục 9: Chia Grid 2 cột cho danh sách đông người (@all, @nv, @pg)
+            # Chia Grid 2 cột cho danh sách đông người (@all, @nv, @pg)
             ui_boxes.append({
                 "type": "text",
                 "text": f"⏳ Chờ thực hiện ({len(pending_list)} người) — Chạm tên để Hoàn tất:",
@@ -1240,7 +1310,11 @@ def _render_assignees_ui(assignees_list, indent_px="0px"):
                 for a in pair:
                     t_id = a.get('task_id')
                     assignee = a.get('assignee', '')
-                    disp_name = _short_assignee_display(assignee, max_len=15)
+                    first_name, sub_code, initial = _parse_assignee_components(assignee)
+                    palette = _get_avatar_style(first_name)
+                    disp_label = f"{first_name}-{sub_code}" if sub_code else first_name
+                    disp_label = _short_assignee_display(disp_label, max_len=14)
+
                     cell = {
                         "type": "box",
                         "layout": "horizontal",
@@ -1248,8 +1322,10 @@ def _render_assignees_ui(assignees_list, indent_px="0px"):
                         "backgroundColor": "#FFFFFF",
                         "borderColor": "#CBD5E1",
                         "borderWidth": "1px",
-                        "cornerRadius": "sm",
+                        "cornerRadius": "md",
                         "paddingAll": "xs",
+                        "paddingStart": "6px",
+                        "paddingEnd": "6px",
                         "alignItems": "center",
                         "spacing": "xs",
                         "action": {
@@ -1259,18 +1335,41 @@ def _render_assignees_ui(assignees_list, indent_px="0px"):
                         },
                         "contents": [
                             {
+                                "type": "box",
+                                "layout": "vertical",
+                                "width": "22px",
+                                "height": "22px",
+                                "cornerRadius": "11px",
+                                "backgroundColor": palette["bg"],
+                                "borderColor": palette["border"],
+                                "borderWidth": "1px",
+                                "justifyContent": "center",
+                                "alignItems": "center",
+                                "flex": 0,
+                                "contents": [
+                                    {
+                                        "type": "text",
+                                        "text": initial,
+                                        "size": "xxs",
+                                        "weight": "bold",
+                                        "color": palette["text"],
+                                        "align": "center"
+                                    }
+                                ]
+                            },
+                            {
                                 "type": "text",
-                                "text": disp_name,
+                                "text": disp_label,
                                 "size": "xxs",
                                 "weight": "bold",
                                 "color": "#0F172A",
                                 "flex": 1,
-                                "wrap": True
+                                "wrap": False
                             },
                             {
                                 "type": "box",
                                 "layout": "vertical",
-                                "backgroundColor": "#00B33C",
+                                "backgroundColor": "#10B981",
                                 "cornerRadius": "xs",
                                 "paddingAll": "2px",
                                 "paddingStart": "4px",
@@ -1299,7 +1398,7 @@ def _render_assignees_ui(assignees_list, indent_px="0px"):
                     "contents": row_cells
                 })
 
-    # 2. Hiển thị gọn gàng những người ĐÃ HOÀN TẤT kèm giờ hoàn thành (Mục 8 & Mục 9)
+    # 2. Hiển thị gọn gàng những người ĐÃ HOÀN TẤT kèm giờ hoàn thành
     if completed_list:
         comp_rows = [
             {
@@ -1317,16 +1416,17 @@ def _render_assignees_ui(assignees_list, indent_px="0px"):
                 t_id = a.get('task_id')
                 assignee = a.get('assignee', '')
                 comp_at = a.get('completed_at', '')
-                disp_name = _short_assignee_display(assignee, max_len=13)
+                first_name, sub_code, initial = _parse_assignee_components(assignee)
                 time_suffix = f" • {comp_at}" if comp_at else ""
+                disp_chip = f"✓ {first_name}{time_suffix}"
                 chip = {
                     "type": "box",
                     "layout": "horizontal",
                     "flex": 1,
-                    "backgroundColor": "#FFFFFF",
+                    "backgroundColor": "#DCFCE7",
                     "borderColor": "#86EFAC",
                     "borderWidth": "1px",
-                    "cornerRadius": "xs",
+                    "cornerRadius": "sm",
                     "paddingAll": "xs",
                     "alignItems": "center",
                     "action": {
@@ -1337,12 +1437,13 @@ def _render_assignees_ui(assignees_list, indent_px="0px"):
                     "contents": [
                         {
                             "type": "text",
-                            "text": f"✓ {disp_name}{time_suffix}",
+                            "text": disp_chip,
                             "size": "xxs",
                             "color": "#15803D",
                             "weight": "bold",
                             "wrap": True,
-                            "flex": 1
+                            "flex": 1,
+                            "align": "center"
                         }
                     ]
                 }
@@ -1360,8 +1461,10 @@ def _render_assignees_ui(assignees_list, indent_px="0px"):
         ui_boxes.append({
             "type": "box",
             "layout": "vertical",
-            "backgroundColor": "#DCFCE7",
-            "cornerRadius": "sm",
+            "backgroundColor": "#F0FDF4",
+            "borderColor": "#BBF7D0",
+            "borderWidth": "1px",
+            "cornerRadius": "md",
             "paddingAll": "xs",
             "margin": "xs",
             "contents": comp_rows
@@ -1554,9 +1657,17 @@ def generate_today_adhoc_flex(group_id):
                         "layout": "horizontal",
                         "spacing": "xs",
                         "alignItems": "center",
-                        "margin": "sm",
+                        "margin": "md",
+                        "backgroundColor": "#F1F5F9",
+                        "borderColor": "#E2E8F0",
+                        "borderWidth": "1px",
+                        "cornerRadius": "sm",
+                        "paddingStart": "8px",
+                        "paddingEnd": "8px",
+                        "paddingTop": "4px",
+                        "paddingBottom": "4px",
                         "contents": [
-                            {"type": "text", "text": "🔹", "size": "xs", "flex": 0},
+                            {"type": "text", "text": "🏷️", "size": "xs", "flex": 0},
                             {
                                 "type": "text",
                                 "text": sub_name,
@@ -1657,15 +1768,42 @@ def generate_today_adhoc_flex(group_id):
 
         header_contents = [
             {
+                "type": "box",
+                "layout": "horizontal",
+                "contents": [
+                    {
+                        "type": "box",
+                        "layout": "vertical",
+                        "backgroundColor": "rgba(255, 255, 255, 0.2)",
+                        "cornerRadius": "xs",
+                        "paddingStart": "8px",
+                        "paddingEnd": "8px",
+                        "paddingTop": "2px",
+                        "paddingBottom": "2px",
+                        "flex": 0,
+                        "contents": [
+                            {
+                                "type": "text",
+                                "text": "⚡ SAVICO OPERATION",
+                                "size": "xxs",
+                                "color": "#FFFFFF",
+                                "weight": "bold"
+                            }
+                        ]
+                    }
+                ]
+            },
+            {
                 "type": "text",
                 "text": "📋 BẢNG CÔNG VIỆC GIAO THÊM",
                 "weight": "bold",
                 "size": "md",
-                "color": "#FFFFFF"
+                "color": "#FFFFFF",
+                "margin": "xs"
             },
             {
                 "type": "text",
-                "text": f"📅 Ngày: {today_display_str}  •  Tổng: {len(ordered_tasks)} đầu việc",
+                "text": f"📅 Hôm nay, {today_display_str}  •  {len(ordered_tasks)} đầu việc",
                 "size": "xxs",
                 "color": "#E0F2FE",
                 "margin": "xs"
@@ -1678,7 +1816,7 @@ def generate_today_adhoc_flex(group_id):
             "header": {
                 "type": "box",
                 "layout": "vertical",
-                "backgroundColor": "#0284C7",
+                "backgroundColor": "#0369A1",
                 "paddingTop": "14px",
                 "paddingBottom": "14px",
                 "paddingStart": "16px",
@@ -2101,31 +2239,51 @@ def resolve_mentions(raw_text, mentionees, roster_names=None):
     return out
 
 
+RETAIL_STOPWORDS = {
+    "gia dung", "dien gia dung", "dung cu", "su dung", "tac dung", "noi dung",
+    "cong viec", "cham cong", "thi cong", "thanh cong", "cong cu", "phan cong",
+    "toan bo", "an toan", "hoan toan",
+    "thang loi", "chien thang",
+    "long lanh", "chien luoc",
+    "thao luan", "soan thao",
+    "huong duong", "thai duong",
+    "tu lanh", "may giat", "tivi", "dien thoai", "vi tinh", "loa", "phu kien"
+}
+
+
 def build_roster_indexes(roster_dict):
     """
     Tạo các bảng tra cứu từ roster:
     - code_map: ánh xạ mã nhân viên (4-8 số) -> tên đầy đủ trong danh sách.
-    - alias_map: ánh xạ tên gọi (viết thường, không dấu) -> danh sách người có tên đó.
+    - alias_exact_map: ánh xạ tên gọi có dấu (viết thường NFC) -> danh sách người có tên đó.
+    - alias_norm_map: ánh xạ tên gọi không dấu (viết thường) -> danh sách người có tên đó.
     """
     all_names = [nm for grp in roster_dict.values() for nm in grp]
     code_map = {}
-    alias_map = {}
+    alias_exact_map = {}
+    alias_norm_map = {}
     for nm in all_names:
         for c in re.findall(r"(\d{4,8})", nm):
             code_map[c] = nm
         first_alias = re.split(r"[-–_\s]", nm)[0].strip()
-        a_norm = normalize_person_key(first_alias)
-        if len(a_norm) >= 2:
-            alias_map.setdefault(a_norm, []).append(nm)
-    return all_names, code_map, alias_map
+        if len(first_alias) >= 2:
+            exact = unicodedata.normalize('NFC', first_alias.lower())
+            alias_exact_map.setdefault(exact, []).append(nm)
+            norm = normalize_person_key(first_alias)
+            alias_norm_map.setdefault(norm, []).append(nm)
+    return all_names, code_map, alias_exact_map, alias_norm_map
 
 
-def extract_assignees_smart(line_str, roster_dict, code_map, alias_map):
+def extract_assignees_smart(line_str, roster_dict, code_map, alias_exact_map, alias_norm_map):
     """
     Nhận diện người nhận việc thông minh và an toàn:
     1. Nhóm từ khóa: @all, @nv, @pg, @st, @ql...
     2. Mã nhân viên thực tế: dãy 4-8 số có trong code_map.
-    3. Tên nhân viên: nếu duy nhất 1 người trùng tên trong ca thì gán.
+    3. Thẻ @mention theo tên (@Khánh, @Công, @Huy, @dung...)
+    4. Tên nhân viên KHÔNG CÓ @:
+       - Phải khớp chính xác dấu tiếng Việt (NFC): ví dụ 'dũng' != 'dụng', 'công' != 'cộng'.
+       - Loại trừ các thuật ngữ ngành hàng (RETAIL_STOPWORDS) như 'gia dụng', 'công việc'...
+       - Chỉ gán khi trong ca trực duy nhất 1 người có tên đó.
     Tuyệt đối không lấy token rác (SVC, AIO, v.v.) làm người nhận.
     """
     assigned = []
@@ -2137,21 +2295,41 @@ def extract_assignees_smart(line_str, roster_dict, code_map, alias_map):
             assigned.append(nm)
 
     low = line_str.lower()
+    # 1. Quét từ khóa nhóm (@all, @nv, @pg...)
     for kw, grps in GROUP_KEYWORDS.items():
         if re.search(r"@" + re.escape(kw) + r"\b", low):
             for g in grps:
                 for nm in roster_dict.get(g, []):
                     add_nm(nm)
 
+    # 2. Quét tất cả mã nhân viên (dãy 4-8 chữ số)
     for c in re.findall(r"(\d{4,8})", line_str):
         if c in code_map:
             add_nm(code_map[c])
 
-    norm_text = normalize_person_key(line_str)
-    tokens = norm_text.split()
-    for tok in tokens:
-        if tok in alias_map:
-            cands = alias_map[tok]
+    # 3. Quét các thẻ @mention theo tên (@Khánh, @Công, @Huy, @dung...)
+    for m in re.finditer(r"@([^\s,;:()]+)", line_str):
+        tag = m.group(1).strip()
+        tag_exact = unicodedata.normalize('NFC', tag.lower())
+        tag_norm = normalize_person_key(tag)
+        if tag_exact in alias_exact_map and len(alias_exact_map[tag_exact]) == 1:
+            add_nm(alias_exact_map[tag_exact][0])
+        elif tag_norm in alias_norm_map and len(alias_norm_map[tag_norm]) == 1:
+            add_nm(alias_norm_map[tag_norm][0])
+
+    # 4. Quét tên nhân viên KHÔNG CÓ DẤU @ (ví dụ đứng cuối dòng: '- wearable, đồng hồ thời trang Công')
+    # Loại bỏ các thẻ @... và các cụm thuật ngữ ngành hàng trước khi quét từ
+    clean_no_mentions = re.sub(r"@[^\s@]+", " ", line_str)
+    check_text = clean_no_mentions
+    for term in RETAIL_STOPWORDS:
+        check_text = re.sub(r"\b" + re.escape(term) + r"\b", " ", check_text, flags=re.IGNORECASE)
+
+    # BẮT BUỘC so sánh chính xác CẢ DẤU TIẾNG VIỆT (NFC)
+    words = re.findall(r"\b[a-zA-ZÀ-ỹ]+\b", check_text)
+    for w in words:
+        w_exact = unicodedata.normalize('NFC', w.lower())
+        if w_exact in alias_exact_map:
+            cands = alias_exact_map[w_exact]
             if len(cands) == 1:
                 add_nm(cands[0])
 
@@ -2176,7 +2354,7 @@ def clean_task_desc(line_str, assigned_names):
 
 
 def parse_work_command(lines, roster_names):
-    all_names, code_map, alias_map = build_roster_indexes(roster_names)
+    all_names, code_map, alias_exact_map, alias_norm_map = build_roster_indexes(roster_names)
 
     lines = merge_broken_task_lines([l.strip() for l in lines if l.strip()])
     lines = _expand_one_line(lines)
@@ -2185,7 +2363,7 @@ def parse_work_command(lines, roster_names):
 
     header = (lines[0] if lines else "").strip()
     header_body = re.sub(r"^(việc|viec)\b", "", header, flags=re.IGNORECASE).strip(" :;-")
-    header_names = extract_assignees_smart(header_body, roster_names, code_map, alias_map)
+    header_names = extract_assignees_smart(header_body, roster_names, code_map, alias_exact_map, alias_norm_map)
     header_task = clean_task_desc(header_body, header_names)
     job = header_task or (header_body if not header_names else None)
 
@@ -2200,7 +2378,7 @@ def parse_work_command(lines, roster_names):
         if not body:
             continue
 
-        names = extract_assignees_smart(s, roster_names, code_map, alias_map)
+        names = extract_assignees_smart(s, roster_names, code_map, alias_exact_map, alias_norm_map)
         if not names:
             names = list(header_names)
         if not names:
