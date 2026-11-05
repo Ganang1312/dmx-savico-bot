@@ -2101,103 +2101,96 @@ def resolve_mentions(raw_text, mentionees, roster_names=None):
     return out
 
 
-def resolve_target(token, roster_names, index):
-    t = str(token).strip().replace(MENTION_SPACE, " ")
-    low = t.lower()
-
-    if low in GROUP_KEYWORDS:
-        out = []
-        for grp in GROUP_KEYWORDS[low]:
-            for nm in roster_names.get(grp, []):
-                if nm not in out:
-                    out.append(nm)
-        return (out, None) if out else ([], "empty")
-
-    if re.fullmatch(r"\d{2,8}", t):
-        cand = []
-        for tok, nm in index:
-            if tok == t and nm not in cand:
-                cand.append(nm)
-        if len(cand) == 1:
-            return (cand, None)
-
-    return ([t], None) if t else ([], None)
+def build_roster_indexes(roster_dict):
+    """
+    Tạo các bảng tra cứu từ roster:
+    - code_map: ánh xạ mã nhân viên (4-8 số) -> tên đầy đủ trong danh sách.
+    - alias_map: ánh xạ tên gọi (viết thường, không dấu) -> danh sách người có tên đó.
+    """
+    all_names = [nm for grp in roster_dict.values() for nm in grp]
+    code_map = {}
+    alias_map = {}
+    for nm in all_names:
+        for c in re.findall(r"(\d{4,8})", nm):
+            code_map[c] = nm
+        first_alias = re.split(r"[-–_\s]", nm)[0].strip()
+        a_norm = normalize_person_key(first_alias)
+        if len(a_norm) >= 2:
+            alias_map.setdefault(a_norm, []).append(nm)
+    return all_names, code_map, alias_map
 
 
-def split_line(line, known_tokens, known_norm=None, allow_colon=False):
-    if known_norm is None:
-        known_norm = {normalize_person_key(t) for t in known_tokens}
+def extract_assignees_smart(line_str, roster_dict, code_map, alias_map):
+    """
+    Nhận diện người nhận việc thông minh và an toàn:
+    1. Nhóm từ khóa: @all, @nv, @pg, @st, @ql...
+    2. Mã nhân viên thực tế: dãy 4-8 số có trong code_map.
+    3. Tên nhân viên: nếu duy nhất 1 người trùng tên trong ca thì gán.
+    Tuyệt đối không lấy token rác (SVC, AIO, v.v.) làm người nhận.
+    """
+    assigned = []
+    _seen = set()
 
-    spans, tokens = [], []
-    i = 0
-    while True:
-        at = line.find("@", i)
-        if at == -1:
-            break
-        rest = line[at + 1:]
+    def add_nm(nm):
+        if nm and nm not in _seen:
+            _seen.add(nm)
+            assigned.append(nm)
 
-        best = ""
-        words = re.split(r"\s+", rest)
-        for n in range(min(4, len(words)), 0, -1):
-            cand = " ".join(words[:n]).rstrip(",;:.")
-            if cand and normalize_person_key(cand) in known_norm:
-                best = cand
-                break
+    low = line_str.lower()
+    for kw, grps in GROUP_KEYWORDS.items():
+        if re.search(r"@" + re.escape(kw) + r"\b", low):
+            for g in grps:
+                for nm in roster_dict.get(g, []):
+                    add_nm(nm)
 
-        if not best and allow_colon:
-            colon = rest.find(":")
-            nxt = rest.find("@")
-            if colon != -1 and (nxt == -1 or colon < nxt):
-                cand = rest[:colon].strip()
-                if cand:
-                    best = cand
+    for c in re.findall(r"(\d{4,8})", line_str):
+        if c in code_map:
+            add_nm(code_map[c])
 
-        if not best:
-            m = re.match(r"[^\s,;:@]+", rest)
-            best = m.group(0) if m else ""
+    norm_text = normalize_person_key(line_str)
+    tokens = norm_text.split()
+    for tok in tokens:
+        if tok in alias_map:
+            cands = alias_map[tok]
+            if len(cands) == 1:
+                add_nm(cands[0])
 
-        spans.append((at, at + 1 + len(best)))
-        tokens.append(best)
-        i = at + 1 + len(best)
+    return assigned
 
-    text = line
-    for a, b in reversed(spans):
-        text = text[:a] + " " + text[b:]
-    text = re.sub(r"[:;,\-–—•+]+", " ", text)
-    text = re.sub(r"\s+", " ", text).strip()
-    return text, [t for t in tokens if t]
+
+def clean_task_desc(line_str, assigned_names):
+    """
+    Dọn dẹp chuỗi mô tả công việc, loại bỏ token tag, mã nhân viên và tên người nhận đã gán.
+    """
+    s = re.sub(r"^[-*•+–—]\s*", "", line_str).strip()
+    s = re.sub(r"@[^\s@]+", " ", s)
+    s = re.sub(r"\b\d{4,8}\b", " ", s)
+    s = re.sub(r"\b(SVC|AIO|AIOvn|vn)\b", " ", s, flags=re.IGNORECASE)
+    for nm in assigned_names:
+        first = re.split(r"[-–_\s]", nm)[0].strip()
+        s = re.sub(r"\b" + re.escape(first) + r"\b", " ", s, flags=re.IGNORECASE)
+        s = re.sub(r"\b" + re.escape(nm) + r"\b", " ", s, flags=re.IGNORECASE)
+    s = re.sub(r"[\s,;:\-_–—]+$", "", s)
+    s = re.sub(r"\s+", " ", s).strip(" ,;:-_–—")
+    return s
 
 
 def parse_work_command(lines, roster_names):
-    index = build_token_index(
-        [nm for grp in roster_names.values() for nm in grp])
-    known = build_known_tokens(index)
-    known_norm = {normalize_person_key(t) for t in known}
+    all_names, code_map, alias_map = build_roster_indexes(roster_names)
 
     lines = merge_broken_task_lines([l.strip() for l in lines if l.strip()])
     lines = _expand_one_line(lines)
+    if not lines:
+        return {"job": None, "header_names": [], "assignments": [], "errors": ["Không có nội dung tin nhắn."]}
 
     header = (lines[0] if lines else "").strip()
-    header_body = re.sub(r"^(việc|viec)\b", "", header, flags=re.IGNORECASE).strip()
-    header_text, header_tokens = split_line(header_body, known, known_norm,
-                                            allow_colon=True)
+    header_body = re.sub(r"^(việc|viec)\b", "", header, flags=re.IGNORECASE).strip(" :;-")
+    header_names = extract_assignees_smart(header_body, roster_names, code_map, alias_map)
+    header_task = clean_task_desc(header_body, header_names)
+    job = header_task or (header_body if not header_names else None)
 
-    header_names, errors = [], []
-    _seen_h = set()
-    for t in header_tokens:
-        names, err = resolve_target(t, roster_names, index)
-        if err:
-            errors.append("Dòng đầu: không hiểu “@%s”.%s" % (t, hint(err, names)))
-            continue
-        for nm in names:
-            k = normalize_person_key(nm) or nm.lower().strip()
-            if not k or k in _seen_h:
-                continue
-            _seen_h.add(k)
-            header_names.append(nm)
-
-    job = header_text or None
     assignments = []
+    errors = []
 
     for raw in lines[1:]:
         s = raw.strip()
@@ -2207,49 +2200,19 @@ def parse_work_command(lines, roster_names):
         if not body:
             continue
 
-        # Tự động nhận diện tên nhân viên kể cả khi không có dấu @
-        processed_body = body
-        for tok, _ in index:
-            if not tok.isdigit() and len(tok) >= 2:
-                processed_body = re.sub(r'(?<!@)\b' + re.escape(tok) + r'\b', '@' + tok, processed_body, flags=re.IGNORECASE)
-
-        text, tokens = split_line(processed_body, known, known_norm)
-
-        names = []
-        _seen_n = set()
-        for t in tokens:
-            rn, err = resolve_target(t, roster_names, index)
-            if err:
-                errors.append("Dòng “%s”: không hiểu “@%s”.%s" % (s, t, hint(err, rn)))
-                continue
-            for nm in rn:
-                k = normalize_person_key(nm) or nm.lower().strip()
-                if not k or k in _seen_n:
-                    continue
-                _seen_n.add(k)
-                names.append(nm)
-
+        names = extract_assignees_smart(s, roster_names, code_map, alias_map)
         if not names:
-            if tokens:
-                continue
             names = list(header_names)
         if not names:
             errors.append("Dòng “%s”: chưa chỉ định ai làm." % s)
             continue
 
-        clean_t = re.sub(r"\b\d{4,8}\b", " ", text)
-        clean_t = re.sub(r"[\s,;:\-_–—]+$", "", clean_t)
-        clean_t = re.sub(r"\s+", " ", clean_t).strip(" ,;:-_–—")
+        task_text = clean_task_desc(s, names)
+        if not task_text:
+            task_text = job or "Công việc giao thêm"
 
-        if job:
-            task = ("%s | %s" % (job, clean_t)) if clean_t else job
-        else:
-            task = clean_t
-        if not task:
-            errors.append("Dòng “%s”: thiếu nội dung công việc." % s)
-            continue
-
-        assignments.append((task, names))
+        full_task = ("%s | %s" % (job, task_text)) if job else task_text
+        assignments.append((full_task, names))
 
     if not assignments and not errors and job and header_names:
         assignments.append((job, list(header_names)))
@@ -2258,8 +2221,12 @@ def parse_work_command(lines, roster_names):
     if not assignments and not errors:
         errors.append("Chưa có dòng công việc nào (mỗi việc bắt đầu bằng dấu “-”).")
 
-    return {"job": job, "header_names": header_names,
-            "assignments": assignments, "errors": errors}
+    return {
+        "job": job,
+        "header_names": header_names,
+        "assignments": assignments,
+        "errors": errors
+    }
 
 
 def plan_assignments(parsed):
