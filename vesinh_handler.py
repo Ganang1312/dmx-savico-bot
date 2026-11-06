@@ -10,7 +10,8 @@ from linebot.models import FlexSendMessage, TextSendMessage
 from config import (
     CLIENT, SHEET_NAME, WORKSHEET_SCHEDULES_NAME, WORKSHEET_VESINH_TRACKER_NAME,
     get_spreadsheet, get_cached_values, get_cached_records,
-    set_cached_values, run_bg_sheet_task, get_worksheet_cached_obj, values_to_records
+    set_cached_values, run_bg_sheet_task, get_worksheet_cached_obj, values_to_records,
+    is_date_today, sync_table_to_sheet_bg
 )
 from meal_handler import (
     get_working_staff, normalize_text, match_staff_name,
@@ -249,7 +250,7 @@ def get_working_staff_vesinh(session_type):
 
 def sync_vesinh_sheet(group_id, session_type):
     """
-    Đồng bộ dữ liệu vệ sinh sử dụng RAM Cache + Ghi Google Sheets chạy ngầm.
+    Đồng bộ dữ liệu vệ sinh sử dụng RAM/IPC Cache + Ghi Google Sheets nguyên khối chạy ngầm.
     """
     tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
     today_str = datetime.now(tz_vietnam).strftime('%Y-%m-%d')
@@ -258,23 +259,32 @@ def sync_vesinh_sheet(group_id, session_type):
     if not all_values:
         all_values = [list(VESINH_HEADERS)]
 
-    # Dọn dẹp dữ liệu ngày cũ, chỉ giữ lại header và các dòng của ngày hôm nay
-    today_rows = [r for r in all_values[1:] if len(r) > 1 and str(r[1]).strip() == today_str]
+    # Dọn dẹp dữ liệu ngày cũ (dùng is_date_today để không bao giờ xóa nhầm ngày hôm nay)
+    today_rows = []
     need_clear_sheet = False
-    if len(all_values) > 1 and len(today_rows) < (len(all_values) - 1):
-        print(f"Ngày mới! Dọn dẹp dữ liệu vệ sinh cũ...")
+    for r in all_values[1:]:
+        if not any(str(c).strip() for c in r):
+            continue
+        if len(r) > 1 and is_date_today(r[1], today_str):
+            row_copy = list(r)
+            row_copy[1] = today_str
+            today_rows.append(row_copy)
+        else:
+            need_clear_sheet = True
+
+    if need_clear_sheet:
+        print("Ngày mới! Dọn dẹp dữ liệu vệ sinh cũ...")
         all_values = [list(VESINH_HEADERS)] + today_rows
         set_cached_values(WORKSHEET_VESINH_TRACKER_NAME, all_values)
-        need_clear_sheet = True
 
     all_records = values_to_records(all_values)
 
     existing_entries = {}
     for row in all_records:
-        r_date = str(row.get('date')).strip()
-        r_session = str(row.get('session')).strip()
+        r_date = str(row.get('date', '')).strip()
+        r_session = str(row.get('session', '')).strip()
         r_name = str(row.get('name', '')).strip()
-        if r_date == today_str and r_session == session_type:
+        if is_date_today(r_date, today_str) and r_session == session_type:
             k_norm = normalize_text(r_name)
             k_key = normalize_person_key(r_name)
             if k_norm and (k_norm not in existing_entries or row.get('status') == 'done'):
@@ -388,23 +398,13 @@ def sync_vesinh_sheet(group_id, session_type):
 
     if need_clear_sheet or new_rows:
         set_cached_values(WORKSHEET_VESINH_TRACKER_NAME, all_values)
-        rows_snapshot = [list(r) for r in new_rows]
-        def _bg_sync_vesinh(do_clear, to_append):
-            ws = get_worksheet_cached_obj(WORKSHEET_VESINH_TRACKER_NAME, create_headers=VESINH_HEADERS, rows=100, cols=10)
-            if not ws:
-                return
-            if do_clear:
-                ws.clear()
-                ws.append_row(VESINH_HEADERS)
-            if to_append:
-                ws.append_rows(to_append, value_input_option='USER_ENTERED')
-        run_bg_sheet_task(_bg_sync_vesinh, need_clear_sheet, rows_snapshot, desc="sync_vesinh_sheet")
+        sync_table_to_sheet_bg(WORKSHEET_VESINH_TRACKER_NAME, create_headers=VESINH_HEADERS, clear_tail=need_clear_sheet)
 
     return final_data
 
 def update_vesinh_status(group_id, session_type, staff_name, clicker_name, target_status='done'):
     """
-    Cập nhật trạng thái hoàn thành vệ sinh tức thì trong RAM Cache và đẩy ghi Sheet chạy ngầm.
+    Cập nhật trạng thái hoàn thành vệ sinh tức thì trong RAM/IPC Cache và đẩy ghi Sheet chạy ngầm.
     Tự động đồng bộ nếu ca/ngày hôm nay chưa có dòng trong bảng, so khớp thông minh bằng match_staff_name
     và tự động bổ sung dòng hoàn tất cứu hộ nếu dữ liệu lịch bị thiếu sót.
     """
@@ -423,7 +423,7 @@ def update_vesinh_status(group_id, session_type, staff_name, clicker_name, targe
         has_session_today = False
         if all_values and len(all_values) > 1:
             for r in all_values[1:]:
-                if len(r) > 2 and str(r[1]).strip() == today_str and str(r[2]).strip() == session_type:
+                if len(r) > 2 and is_date_today(r[1], today_str) and str(r[2]).strip() == session_type:
                     has_session_today = True
                     break
 
@@ -445,7 +445,7 @@ def update_vesinh_status(group_id, session_type, staff_name, clicker_name, targe
                 r_date = str(row[1]).strip()
                 r_session = str(row[2]).strip()
                 r_name = str(row[4]).strip()
-                if r_date == today_str and r_session == session_type and r_group == target_gid:
+                if is_date_today(r_date, today_str) and r_session == session_type and r_group == target_gid:
                     if match_staff_name(r_name, staff_name):
                         matching_rows.append((i, row))
                         if len(row) < 7 or row[6].strip() != target_status:
@@ -458,7 +458,7 @@ def update_vesinh_status(group_id, session_type, staff_name, clicker_name, targe
                 r_date = str(row[1]).strip()
                 r_session = str(row[2]).strip()
                 r_name = str(row[4]).strip()
-                if r_date == today_str and r_session == session_type:
+                if is_date_today(r_date, today_str) and r_session == session_type:
                     if match_staff_name(r_name, staff_name):
                         matching_rows.append((i, row))
                         if len(row) < 7 or row[6].strip() != target_status:
@@ -470,7 +470,7 @@ def update_vesinh_status(group_id, session_type, staff_name, clicker_name, targe
                 if len(row) < 5: continue
                 r_date = str(row[1]).strip()
                 r_name = str(row[4]).strip()
-                if r_date == today_str and match_staff_name(r_name, staff_name):
+                if is_date_today(r_date, today_str) and match_staff_name(r_name, staff_name):
                     matching_rows.append((i, row))
                     if len(row) < 7 or row[6].strip() != target_status:
                         already_done = False
@@ -481,31 +481,17 @@ def update_vesinh_status(group_id, session_type, staff_name, clicker_name, targe
         clicked_user = clicker_name if target_status == 'done' else ''
 
         if matching_rows:
-            row_indices_for_bg = []
             for row_index, _ in matching_rows:
                 mem_row = all_values[row_index - 1]
                 while len(mem_row) < 9:
                     mem_row.append('')
+                mem_row[1] = today_str
                 mem_row[6] = target_status
                 mem_row[7] = time_now
                 mem_row[8] = clicked_user
-                row_indices_for_bg.append(row_index)
 
             set_cached_values(WORKSHEET_VESINH_TRACKER_NAME, all_values)
-
-            def _bg_update_vesinh(indices, st, tm, usr):
-                ws = get_worksheet_cached_obj(WORKSHEET_VESINH_TRACKER_NAME, create_headers=VESINH_HEADERS, rows=100, cols=10)
-                if not ws:
-                    return
-                cells = []
-                for r_idx in indices:
-                    cells.extend([
-                        gspread.Cell(r_idx, 7, st),
-                        gspread.Cell(r_idx, 8, tm),
-                        gspread.Cell(r_idx, 9, usr)
-                    ])
-                ws.update_cells(cells)
-            run_bg_sheet_task(_bg_update_vesinh, row_indices_for_bg, target_status, time_now, clicked_user, desc="update_vesinh_status")
+            sync_table_to_sheet_bg(WORKSHEET_VESINH_TRACKER_NAME, create_headers=VESINH_HEADERS)
             return True, time_now
 
         # Bước 4: Fallback cứu hộ an toàn tuyệt đối (Không bao giờ báo lỗi cho người dùng)
@@ -522,12 +508,7 @@ def update_vesinh_status(group_id, session_type, staff_name, clicker_name, targe
         ]
         all_values.append(new_row)
         set_cached_values(WORKSHEET_VESINH_TRACKER_NAME, all_values)
-
-        def _bg_append_vesinh(to_append):
-            ws = get_worksheet_cached_obj(WORKSHEET_VESINH_TRACKER_NAME, create_headers=VESINH_HEADERS, rows=100, cols=10)
-            if ws:
-                ws.append_rows([to_append], value_input_option='USER_ENTERED')
-        run_bg_sheet_task(_bg_append_vesinh, new_row, desc=f"fallback_add_vesinh_{staff_name}")
+        sync_table_to_sheet_bg(WORKSHEET_VESINH_TRACKER_NAME, create_headers=VESINH_HEADERS)
         return True, time_now
 
     except Exception as e:
@@ -537,7 +518,7 @@ def update_vesinh_status(group_id, session_type, staff_name, clicker_name, targe
 def generate_vesinh_flex(group_id, session_type=None):
     """
     Tạo Flex Message giao diện Phân Công & Theo Dõi Vệ Sinh.
-    Tối ưu siêu tốc độ: Lấy trực tiếp từ RAM Cache khi đã có sẵn dữ liệu hôm nay.
+    Tối ưu siêu tốc độ: Lấy trực tiếp từ RAM/IPC Cache khi đã có sẵn dữ liệu hôm nay.
     """
     if not session_type:
         session_type = get_current_vesinh_session()
@@ -545,12 +526,15 @@ def generate_vesinh_flex(group_id, session_type=None):
     tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
     today_str = datetime.now(tz_vietnam).strftime('%Y-%m-%d')
 
-    # Tối ưu siêu tốc độ phản hồi: Lấy trực tiếp từ RAM Cache (0ms)
+    # Tối ưu siêu tốc độ phản hồi: Lấy trực tiếp từ RAM/IPC Cache (0ms)
     all_values = get_cached_values(WORKSHEET_VESINH_TRACKER_NAME, ttl=300, create_headers=VESINH_HEADERS)
     data = []
     if all_values and len(all_values) > 1:
         all_records = values_to_records(all_values)
-        data = [r for r in all_records if str(r.get('date')).strip() == today_str and str(r.get('session')).strip() == session_type]
+        data = [
+            r for r in all_records
+            if is_date_today(r.get('date'), today_str) and str(r.get('session')).strip() == session_type
+        ]
 
     if not data:
         data = sync_vesinh_sheet(group_id, session_type)

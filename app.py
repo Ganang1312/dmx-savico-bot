@@ -2018,11 +2018,8 @@ def handle_message(event):
         return
 
     # 4.5. Checklist hình ảnh (VS)
-    if user_msg_upper == 'VS':
-        group_id = event_group_id
-        if not group_id:
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="Lệnh này chỉ hoạt động trong nhóm chat."))
-            return
+    if user_msg_upper in ['VS', 'HÌNH ẢNH', 'HINH ANH', 'CHECKLIST VS']:
+        group_id = event_group_id or os.environ.get('EMPLOYEE_GROUP_ID') or MAIN_CHECKLIST_GROUP_ID
         try:
             initialize_daily_tasks(group_id, 'vs')
             flex_content = generate_checklist_flex(group_id, 'vs')
@@ -2033,6 +2030,7 @@ def handle_message(event):
                 line_bot_api.reply_message(event.reply_token, TextSendMessage(text="Không thể tạo checklist hình ảnh."))
         except Exception as e:
             print(f"Lỗi khi xử lý lệnh checklist VS: {e}")
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"⚠️ Gặp lỗi khi tạo checklist hình ảnh: {e}"))
         return
 
     # === 5. XỬ LÝ LỆNH ĂN UỐNG ===
@@ -2092,22 +2090,25 @@ def handle_message(event):
                 print(f"Lỗi tạo vesinh flex: {e}")
         return
 
-    # 6. Checklist công việc (Sang/Chieu)
-    if user_msg_upper in ['SANG', 'CHIEU']:
-        shift_type = 'sang' if user_msg_upper == 'SANG' else 'chieu'
-        group_id = event_group_id
-        
-        if not group_id:
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="Lệnh này chỉ hoạt động trong nhóm chat."))
-            return
+    # 6. Checklist công việc (Sang/Chieu/Kho)
+    is_sang = user_msg_upper in ['SANG', 'SÁNG', 'CA SANG', 'CA SÁNG', 'CHECKLIST SANG', 'CHECKLIST SÁNG', 'KHO SANG', 'KHO SÁNG']
+    is_chieu = user_msg_upper in ['CHIEU', 'CHIỀU', 'CA CHIEU', 'CA CHIỀU', 'CHECKLIST CHIEU', 'CHECKLIST CHIỀU', 'KHO CHIEU', 'KHO CHIỀU']
+    is_kho = user_msg_upper in ['KHO', 'CHECKLIST KHO', 'CHECKLIST']
+
+    if is_sang or is_chieu or is_kho:
+        if is_sang:
+            shift_type = 'sang'
+        elif is_chieu:
+            shift_type = 'chieu'
+        else:
+            tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
+            shift_type = 'sang' if datetime.now(tz_vietnam).hour < 15 else 'chieu'
+
+        group_id = event_group_id or os.environ.get('EMPLOYEE_GROUP_ID') or MAIN_CHECKLIST_GROUP_ID
         try:
             initialize_daily_tasks(group_id, shift_type)
-            if str(group_id).strip() == str(MAIN_CHECKLIST_GROUP_ID).strip():
-                flex_content = generate_combined_work_flex(group_id, shift_type)
-                alt_text = f"📋 Checklist ca {shift_type} & Việc giao thêm"
-            else:
-                flex_content = generate_checklist_flex(group_id, shift_type)
-                alt_text = f"Checklist công việc ca {shift_type}"
+            flex_content = generate_combined_work_flex(group_id, shift_type)
+            alt_text = f"📋 Checklist ca {shift_type} & Việc giao thêm"
             
             mark_shift_broadcast_sent(group_id, shift_type)
             if flex_content:
@@ -2118,6 +2119,7 @@ def handle_message(event):
 
         except Exception as e:
             print(f"Lỗi khi xử lý lệnh checklist '{shift_type}': {e}")
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"⚠️ Gặp lỗi khi tạo checklist ca {shift_type}: {e}"))
         return
 
     # === DMX SAVICO CODES: LK1, NV1, RT1 & CAO ===
@@ -2495,18 +2497,6 @@ def handle_message(event):
 
     except Exception as e:
         print(f"!!! GẶP LỖI NGHIÊM TRỌNG KHI XỬ LÝ BÁO CÁO: {repr(e)}")
-
-    # 9. Mục 1: Nếu đây là tin nhắn chat thông thường trong nhóm và ca hiện tại chưa được phát
-    #    Lịch/Checklist -> Dùng ngay reply_token miễn phí của tin nhắn này để phát mở ca!
-    if event_group_id:
-        try:
-            pending_msgs, pending_shift = get_pending_auto_shift_messages(event_group_id)
-            if pending_msgs:
-                mark_shift_broadcast_sent(event_group_id, pending_shift)
-                line_bot_api.reply_message(event.reply_token, pending_msgs[:LINE_MAX_MESSAGES])
-                print(f"[AUTO-TRIGGER] Phát mở ca '{pending_shift}' miễn phí qua tin nhắn đầu ca tại nhóm {event_group_id}.")
-        except Exception as e_auto:
-            print(f"Lỗi auto-trigger cuối handle_message: {e_auto}")
 
 
 # ============================================================================

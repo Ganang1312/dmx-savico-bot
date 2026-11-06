@@ -10,7 +10,8 @@ from config import (
     CLIENT, SHEET_NAME, WORKSHEET_TRACKER_NAME, WORKSHEET_ADHOC_TASKS,
     get_spreadsheet, MAIN_CHECKLIST_GROUP_ID, get_liff_url,
     get_cached_values, get_cached_records, set_cached_values,
-    run_bg_sheet_task, get_worksheet_cached_obj, values_to_records
+    run_bg_sheet_task, get_worksheet_cached_obj, values_to_records,
+    is_date_today, sync_table_to_sheet_bg
 )
 
 TRACKER_HEADERS = ['group_id', 'date', 'task_id', 'name', 'time', 'status', 'user_name']
@@ -161,32 +162,20 @@ def _short_assignee_display(name, max_len=16):
     return s[:max_len - 1] + "…"
 
 
-def _is_date_today(date_str, today_str):
-    """So khớp ngày an toàn, chấp nhận cả định dạng YYYY-MM-DD và DD/MM/YYYY."""
-    d = str(date_str or '').strip()
-    t = str(today_str or '').strip()
-    if not d or not t:
-        return False
-    if d == t:
-        return True
-    try:
-        parts_d = [p.zfill(2) for p in re.split(r'[-/]', d) if p]
-        parts_t = [p.zfill(2) for p in re.split(r'[-/]', t) if p]
-        if len(parts_d) == 3 and len(parts_t) == 3:
-            return sorted(parts_d) == sorted(parts_t)
-    except:
-        pass
-    return False
+def _is_date_today(date_str, today_str=None):
+    """So khớp ngày an toàn, chấp nhận mọi định dạng YYYY-MM-DD, DD/MM/YYYY từ Google Sheets."""
+    return is_date_today(date_str, today_str)
 
 
 # ============================================================================
-# PHẦN 1: CHECKLIST KHO CA SÁNG / CA CHIỀU / HÌNH ẢNH (CÓ RAM CACHE & CARD UI)
+# PHẦN 1: CHECKLIST KHO CA SÁNG / CA CHIỀU / HÌNH ẢNH (CÓ RAM/IPC CACHE & CARD UI)
 # ============================================================================
 
 def initialize_daily_tasks(group_id, shift_type, force=False):
     """
-    Khởi tạo lại danh sách công việc cho ca cụ thể trong RAM Cache & đồng bộ ngầm lên Sheet.
-    Nếu ca hôm nay đã có dữ liệu trong Sheet/Cache thì TUYỆT ĐỐI KHÔNG ghi đè/reset.
+    Khởi tạo danh sách công việc cho ca cụ thể trong RAM/IPC Cache & đồng bộ ngầm lên Sheet.
+    Cơ chế cộng dồn an toàn: Giữ nguyên 100% các mục đã có trong ngày hôm nay (đặc biệt các mục đã complete),
+    chỉ bổ sung các task_id còn thiếu của ca và dọn dẹp dòng của ngày cũ.
     """
     print(f"Bắt đầu khởi tạo công việc ca {shift_type} cho group {group_id} (force={force})...")
     try:
@@ -195,48 +184,46 @@ def initialize_daily_tasks(group_id, shift_type, force=False):
         tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
         today_str = datetime.now(tz_vietnam).strftime('%Y-%m-%d')
         
-        has_today_tasks = False
-        rows_to_keep = []
+        today_rows = []
+        existing_shift_tids = set()
+        need_clean_old = False
         
         if all_values:
             headers = all_values[0] if all_values[0] else list(TRACKER_HEADERS)
             for row in all_values[1:]:
+                if not any(str(c).strip() for c in row):
+                    continue
                 if len(row) < 3:
+                    need_clean_old = True
                     continue
                 r_date = str(row[1]).strip()
                 r_task_id = str(row[2]).strip()
                 
-                # Khớp ngày hôm nay (dù định dạng Y-m-d hay d/m/Y) và khớp ca
-                if _is_date_today(r_date, today_str) and r_task_id.startswith(shift_type):
-                    has_today_tasks = True
-                
-                # Giữ lại các dòng khác ca/ngày
-                if not (_is_date_today(r_date, today_str) and r_task_id.startswith(shift_type)):
-                    rows_to_keep.append(list(row))
+                if _is_date_today(r_date, today_str):
+                    row_copy = list(row)
+                    row_copy[1] = today_str
+                    if force and r_task_id.startswith(shift_type):
+                        need_clean_old = True
+                        continue
+                    today_rows.append(row_copy)
+                    if r_task_id.startswith(shift_type):
+                        existing_shift_tids.add(r_task_id)
+                else:
+                    need_clean_old = True
         
-        # Nếu ca hôm nay ĐÃ CÓ task rồi và không force, giữ nguyên 100% không reset!
-        if has_today_tasks and not force:
-            return True
-            
         tasks_to_add = []
+        target_gid = str(group_id or 'default').strip()
         for task in TASKS.get(shift_type, []):
-            new_row = [str(group_id or 'default').strip(), today_str, task['id'], task['name'], task['time'], 'incomplete', '']
-            tasks_to_add.append(new_row)
+            if task['id'] not in existing_shift_tids:
+                new_row = [target_gid, today_str, task['id'], task['name'], task['time'], 'incomplete', '']
+                tasks_to_add.append(new_row)
 
-        new_all_values = [list(headers)] + rows_to_keep + tasks_to_add
+        if not need_clean_old and not tasks_to_add:
+            return True
+
+        new_all_values = [list(headers)] + today_rows + tasks_to_add
         set_cached_values(WORKSHEET_TRACKER_NAME, new_all_values)
-
-        def _bg_init_tracker(hdrs, keep_rows, add_rows):
-            ws = get_worksheet_cached_obj(WORKSHEET_TRACKER_NAME, create_headers=TRACKER_HEADERS)
-            if not ws:
-                return
-            ws.clear()
-            ws.append_row(hdrs)
-            combined = keep_rows + add_rows
-            if combined:
-                ws.append_rows(combined, value_input_option='USER_ENTERED')
-
-        run_bg_sheet_task(_bg_init_tracker, list(headers), rows_to_keep, tasks_to_add, desc=f"init_tasks_{shift_type}")
+        sync_table_to_sheet_bg(WORKSHEET_TRACKER_NAME, create_headers=TRACKER_HEADERS, clear_tail=need_clean_old)
         return True
     except Exception as e:
         print(f"Lỗi khi khởi tạo công việc: {e}")
@@ -245,7 +232,7 @@ def initialize_daily_tasks(group_id, shift_type, force=False):
 
 def update_shift_task_status(group_id, task_id, shift_type, target_status, user_name):
     """
-    Cập nhật trạng thái công việc Checklist Kho tức thì trong RAM Cache và đẩy ghi Google Sheets chạy ngầm.
+    Cập nhật trạng thái công việc Checklist Kho tức thì trong RAM/IPC Cache và đẩy ghi Google Sheets chạy ngầm.
     Trả về danh sách records mới nhất trong RAM để vẽ Flex ngay lập tức.
     """
     if target_status == 'incomplete':
@@ -255,6 +242,9 @@ def update_shift_task_status(group_id, task_id, shift_type, target_status, user_
     today_str = datetime.now(tz_vietnam).strftime('%Y-%m-%d')
     time_str = datetime.now(tz_vietnam).strftime('%H:%M')
     new_user = f"{user_name} lúc {time_str}" if target_status == 'complete' else ''
+
+    # Đảm bảo ca hôm nay đã có đủ danh sách công việc trong bảng trước khi cập nhật
+    initialize_daily_tasks(group_id, shift_type)
 
     all_values = get_cached_values(WORKSHEET_TRACKER_NAME, ttl=60, create_headers=TRACKER_HEADERS)
     if not all_values:
@@ -303,21 +293,11 @@ def update_shift_task_status(group_id, task_id, shift_type, target_status, user_
             mem_row = all_values[r_num - 1]
             while len(mem_row) < 7:
                 mem_row.append('')
+            mem_row[1] = today_str
             mem_row[5] = target_status
             mem_row[6] = new_user
         set_cached_values(WORKSHEET_TRACKER_NAME, all_values)
-
-        def _bg_batch_update_tracker(r_nums, st, usr):
-            ws = get_worksheet_cached_obj(WORKSHEET_TRACKER_NAME, create_headers=TRACKER_HEADERS)
-            if not ws:
-                return
-            batch_updates = [
-                {'range': f'F{rn}:G{rn}', 'values': [[st, usr]]}
-                for rn in r_nums
-            ]
-            ws.batch_update(batch_updates, value_input_option='USER_ENTERED')
-
-        run_bg_sheet_task(_bg_batch_update_tracker, list(matched_row_nums), target_status, new_user, desc=f"update_tracker_{clean_tid}")
+        sync_table_to_sheet_bg(WORKSHEET_TRACKER_NAME, create_headers=TRACKER_HEADERS)
     else:
         task_name_val = clean_tid
         task_time_val = ''
@@ -329,13 +309,7 @@ def update_shift_task_status(group_id, task_id, shift_type, target_status, user_
         new_row = [target_gid, today_str, clean_tid, task_name_val, task_time_val, target_status, new_user]
         all_values.append(new_row)
         set_cached_values(WORKSHEET_TRACKER_NAME, all_values)
-
-        def _bg_append_tracker(row_data):
-            ws = get_worksheet_cached_obj(WORKSHEET_TRACKER_NAME, create_headers=TRACKER_HEADERS)
-            if ws:
-                ws.append_row(row_data, value_input_option='USER_ENTERED')
-
-        run_bg_sheet_task(_bg_append_tracker, list(new_row), desc=f"append_tracker_{clean_tid}")
+        sync_table_to_sheet_bg(WORKSHEET_TRACKER_NAME, create_headers=TRACKER_HEADERS)
 
     return values_to_records(all_values), target_gid
 
@@ -693,7 +667,7 @@ def _build_adhoc_row(headers, group_id, date_str, assignee, task_id, task_name, 
 
 
 def _ensure_clean_adhoc_ram():
-    """Đảm bảo dữ liệu adhoc_tasks trong RAM đã lọc bỏ ngày cũ và trả về all_values hiện tại."""
+    """Đảm bảo dữ liệu adhoc_tasks trong RAM/IPC đã lọc bỏ ngày cũ và trả về all_values hiện tại."""
     global _last_clean_date
     tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
     today_str = datetime.now(tz_vietnam).strftime('%Y-%m-%d')
@@ -713,8 +687,12 @@ def _ensure_clean_adhoc_ram():
     rows_to_keep = []
     has_old_rows = False
     for row in all_values[1:]:
-        if len(row) > i_date and str(row[i_date]).strip() == today_str:
-            rows_to_keep.append(list(row))
+        if not any(str(c).strip() for c in row):
+            continue
+        if len(row) > i_date and _is_date_today(row[i_date], today_str):
+            row_copy = list(row)
+            row_copy[i_date] = today_str
+            rows_to_keep.append(row_copy)
         else:
             has_old_rows = True
 
@@ -722,15 +700,7 @@ def _ensure_clean_adhoc_ram():
     if has_old_rows:
         cleaned_values = [list(headers)] + rows_to_keep
         set_cached_values(WORKSHEET_ADHOC_TASKS, cleaned_values)
-        def _bg_clean_adhoc(hdrs, keep):
-            ws = get_or_create_adhoc_worksheet()
-            if not ws:
-                return
-            ws.clear()
-            ws.append_row(hdrs)
-            if keep:
-                ws.append_rows(keep, value_input_option='USER_ENTERED')
-        run_bg_sheet_task(_bg_clean_adhoc, list(headers), rows_to_keep, desc="clean_old_adhoc_tasks")
+        sync_table_to_sheet_bg(WORKSHEET_ADHOC_TASKS, create_headers=ADHOC_HEADERS, clear_tail=True)
         return cleaned_values
 
     return all_values
@@ -741,7 +711,7 @@ def clean_old_adhoc_tasks(sheet=None):
 
 
 def add_adhoc_tasks(group_id, assignee, tasks_list):
-    """Thêm danh sách công việc phát sinh cho 1 nhân viên vào RAM Cache & ghi Sheet chạy ngầm."""
+    """Thêm danh sách công việc phát sinh cho 1 nhân viên vào RAM/IPC Cache & ghi Sheet chạy ngầm."""
     if not group_id or not tasks_list:
         return False
 
@@ -773,11 +743,7 @@ def add_adhoc_tasks(group_id, assignee, tasks_list):
 
         if rows_to_add:
             set_cached_values(WORKSHEET_ADHOC_TASKS, all_values)
-            def _bg_add_adhoc(to_add):
-                ws = get_or_create_adhoc_worksheet()
-                if ws:
-                    ws.append_rows(to_add, value_input_option='USER_ENTERED')
-            run_bg_sheet_task(_bg_add_adhoc, rows_to_add, desc="add_adhoc_tasks")
+            sync_table_to_sheet_bg(WORKSHEET_ADHOC_TASKS, create_headers=ADHOC_HEADERS)
             return True
         return False
     except Exception as e:
@@ -890,7 +856,7 @@ def find_latest_task_token(group_id):
 
         rows = [r for r in all_values[1:]
                 if len(r) > max(i_gid, i_date, i_tid)
-                and str(r[i_gid]).strip() == target_gid and str(r[i_date]).strip() == today_str]
+                and str(r[i_gid]).strip() == target_gid and _is_date_today(r[i_date], today_str)]
         if not rows:
             return (None, None, 0)
 
@@ -905,7 +871,7 @@ def find_latest_task_token(group_id):
 
 
 def cancel_task_group(group_id, token):
-    """Xoá toàn bộ dòng việc thuộc một nhóm trong HÔM NAY (cập nhật RAM tức thì + ghi Sheet ngầm)."""
+    """Xoá toàn bộ dòng việc thuộc một nhóm trong HÔM NAY (cập nhật RAM/IPC tức thì + ghi Sheet ngầm)."""
     if not group_id or not token:
         return (0, [])
     try:
@@ -924,7 +890,7 @@ def cancel_task_group(group_id, token):
             r_gid = str(r[i_gid]).strip()
             r_date = str(r[i_date]).strip()
             tid = str(r[i_tid]).strip()
-            hit = (r_gid == target_gid and r_date == today_str
+            hit = ((not target_gid or r_gid == target_gid) and _is_date_today(r_date, today_str)
                    and (tid == token or tid.startswith(token + "_")
                         or task_group_token(tid) == token))
             if hit:
@@ -939,17 +905,7 @@ def cancel_task_group(group_id, token):
 
         headers = list(all_values[0])
         set_cached_values(WORKSHEET_ADHOC_TASKS, [headers] + keep)
-
-        def _bg_cancel_adhoc(hdrs, keep_rows):
-            ws = get_or_create_adhoc_worksheet()
-            if not ws:
-                return
-            ws.clear()
-            ws.append_row(hdrs)
-            if keep_rows:
-                ws.append_rows(keep_rows, value_input_option='USER_ENTERED')
-
-        run_bg_sheet_task(_bg_cancel_adhoc, headers, keep, desc=f"cancel_task_{token}")
+        sync_table_to_sheet_bg(WORKSHEET_ADHOC_TASKS, create_headers=ADHOC_HEADERS, clear_tail=True)
         return (removed, names)
     except Exception as e:
         print(f"Lỗi hủy nhóm việc: {e}")
@@ -958,7 +914,7 @@ def cancel_task_group(group_id, token):
 
 def update_adhoc_task_status(group_id, task_id, target_status, completed_by):
     """
-    Cập nhật trạng thái của adhoc task tức thì trong RAM Cache và đẩy ghi Google Sheets chạy ngầm.
+    Cập nhật trạng thái của adhoc task tức thì trong RAM/IPC Cache và đẩy ghi Google Sheets chạy ngầm.
     """
     if not task_id:
         return False, None, None
@@ -1038,30 +994,7 @@ def update_adhoc_task_status(group_id, task_id, target_status, completed_by):
                 mem_row[i_comp_at] = comp_at
 
             set_cached_values(WORKSHEET_ADHOC_TASKS, all_values)
-
-            def _bg_update_adhoc(indices, st_col, by_col, at_col, st_val, by_val, at_val):
-                ws = get_or_create_adhoc_worksheet()
-                if not ws:
-                    return
-                import gspread.utils
-                batch_data = []
-                for r_idx in indices:
-                    c_st = gspread.utils.rowcol_to_a1(r_idx, st_col + 1)
-                    c_by = gspread.utils.rowcol_to_a1(r_idx, by_col + 1)
-                    c_at = gspread.utils.rowcol_to_a1(r_idx, at_col + 1)
-                    batch_data.extend([
-                        {'range': c_st, 'values': [[st_val]]},
-                        {'range': c_by, 'values': [[by_val]]},
-                        {'range': c_at, 'values': [[at_val]]},
-                    ])
-                ws.batch_update(batch_data, value_input_option='USER_ENTERED')
-
-            run_bg_sheet_task(
-                _bg_update_adhoc, list(row_indices),
-                i_status, i_comp_by, i_comp_at,
-                target_status, comp_by, comp_at,
-                desc=f"update_adhoc_{clean_tid}"
-            )
+            sync_table_to_sheet_bg(WORKSHEET_ADHOC_TASKS, create_headers=ADHOC_HEADERS)
             return True, assignee, task_group_hash
 
         return False, None, None
@@ -1283,11 +1216,7 @@ def add_all_adhoc_tasks(group_id, members, task_name):
 
         if rows_to_add:
             set_cached_values(WORKSHEET_ADHOC_TASKS, all_values)
-            def _bg_add_all(to_add):
-                ws = get_or_create_adhoc_worksheet()
-                if ws:
-                    ws.append_rows(to_add, value_input_option='USER_ENTERED')
-            run_bg_sheet_task(_bg_add_all, rows_to_add, desc=f"add_all_{task_group_hash}")
+            sync_table_to_sheet_bg(WORKSHEET_ADHOC_TASKS, create_headers=ADHOC_HEADERS)
             return task_group_hash
         return None
     except Exception as e:
@@ -2174,11 +2103,7 @@ def add_multi_adhoc_tasks(group_id, job_name, task_assignments):
             
         if rows_to_add:
             set_cached_values(WORKSHEET_ADHOC_TASKS, all_values)
-            def _bg_add_multi(to_add):
-                ws = get_or_create_adhoc_worksheet()
-                if ws:
-                    ws.append_rows(to_add, value_input_option='USER_ENTERED')
-            run_bg_sheet_task(_bg_add_multi, rows_to_add, desc=f"add_multi_{task_group_hash}")
+            sync_table_to_sheet_bg(WORKSHEET_ADHOC_TASKS, create_headers=ADHOC_HEADERS)
             return task_group_hash
         return None
     except Exception as e:
