@@ -478,6 +478,46 @@ def generate_checklist_flex(group_id, shift_type, all_records_prefetched=None):
         main_text_color = "#64748B" if is_complete else "#0F172A"
         deadline_color = "#94A3B8" if is_complete else "#DC2626"
 
+        info_contents = [
+            {
+                "type": "text",
+                "text": task['name'],
+                "wrap": True,
+                "weight": "bold",
+                "size": "sm",
+                "color": main_text_color,
+                "decoration": text_decoration
+            },
+            {
+                "type": "box",
+                "layout": "horizontal",
+                "spacing": "xs",
+                "alignItems": "center",
+                "margin": "xs",
+                "contents": [
+                    {
+                        "type": "text",
+                        "text": f"⏰ Hạn: {task['time']}",
+                        "color": deadline_color,
+                        "weight": "bold",
+                        "size": "xxs",
+                        "flex": 0
+                    }
+                ]
+            }
+        ]
+
+        if is_complete:
+            info_contents.append({
+                "type": "text",
+                "text": _format_completed_badge(completed_by),
+                "color": "#15803D",
+                "weight": "bold",
+                "size": "xxs",
+                "margin": "xs",
+                "wrap": True
+            })
+
         # Action component bên phải: Nếu đã xong thì hiện badge tĩnh không thể bấm lại
         if is_complete:
             action_component = {
