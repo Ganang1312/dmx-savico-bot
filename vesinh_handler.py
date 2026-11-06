@@ -413,7 +413,11 @@ def update_vesinh_status(group_id, session_type, staff_name, clicker_name, targe
         today_str = datetime.now(tz_vietnam).strftime('%Y-%m-%d')
         time_now = datetime.now(tz_vietnam).strftime('%H:%M') if target_status == 'done' else ''
 
-        all_values = get_cached_values(WORKSHEET_VESINH_TRACKER_NAME, ttl=60, create_headers=VESINH_HEADERS)
+        if target_status == 'waiting':
+            # Bấm 1 lần xong là chốt luôn, khóa vĩnh viễn không hoàn lại thao tác
+            return "already", None
+
+        all_values = get_cached_values(WORKSHEET_VESINH_TRACKER_NAME, ttl=300, create_headers=VESINH_HEADERS)
         
         # 1. Tự động kiểm tra xem ngày hôm nay và ca này đã được khởi tạo trong cache chưa
         has_session_today = False
@@ -425,7 +429,7 @@ def update_vesinh_status(group_id, session_type, staff_name, clicker_name, targe
 
         if not has_session_today:
             sync_vesinh_sheet(group_id, session_type)
-            all_values = get_cached_values(WORKSHEET_VESINH_TRACKER_NAME, ttl=60, create_headers=VESINH_HEADERS)
+            all_values = get_cached_values(WORKSHEET_VESINH_TRACKER_NAME, ttl=300, create_headers=VESINH_HEADERS)
             if not all_values:
                 all_values = [list(VESINH_HEADERS)]
 
@@ -533,11 +537,24 @@ def update_vesinh_status(group_id, session_type, staff_name, clicker_name, targe
 def generate_vesinh_flex(group_id, session_type=None):
     """
     Tạo Flex Message giao diện Phân Công & Theo Dõi Vệ Sinh.
+    Tối ưu siêu tốc độ: Lấy trực tiếp từ RAM Cache khi đã có sẵn dữ liệu hôm nay.
     """
     if not session_type:
         session_type = get_current_vesinh_session()
 
-    data = sync_vesinh_sheet(group_id, session_type)
+    tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
+    today_str = datetime.now(tz_vietnam).strftime('%Y-%m-%d')
+
+    # Tối ưu siêu tốc độ phản hồi: Lấy trực tiếp từ RAM Cache (0ms)
+    all_values = get_cached_values(WORKSHEET_VESINH_TRACKER_NAME, ttl=300, create_headers=VESINH_HEADERS)
+    data = []
+    if all_values and len(all_values) > 1:
+        all_records = values_to_records(all_values)
+        data = [r for r in all_records if str(r.get('date')).strip() == today_str and str(r.get('session')).strip() == session_type]
+
+    if not data:
+        data = sync_vesinh_sheet(group_id, session_type)
+
     if not data:
         return None
 
@@ -635,19 +652,42 @@ def generate_vesinh_flex(group_id, session_type=None):
                 }
 
                 if not is_gh2:
-                    staff_row["contents"].append({
-                        "type": "button",
-                        "action": {
-                            "type": "postback",
-                            "label": btn_label,
-                            "data": f"action=complete_vesinh&session={session_type}&name={name}&target_status={next_status}"
-                        },
-                        "style": "primary",
-                        "color": btn_color,
-                        "size": "xs",
-                        "height": "sm",
-                        "flex": 4
-                    })
+                    if is_done:
+                        staff_row["contents"].append({
+                            "type": "box",
+                            "layout": "vertical",
+                            "flex": 4,
+                            "backgroundColor": "#DCFCE7",
+                            "borderColor": "#86EFAC",
+                            "borderWidth": "1px",
+                            "cornerRadius": "sm",
+                            "paddingAll": "xs",
+                            "alignItems": "center",
+                            "justifyContent": "center",
+                            "contents": [
+                                {
+                                    "type": "text",
+                                    "text": "✓ Đã xong",
+                                    "weight": "bold",
+                                    "size": "xs",
+                                    "color": "#15803D"
+                                }
+                            ]
+                        })
+                    else:
+                        staff_row["contents"].append({
+                            "type": "button",
+                            "action": {
+                                "type": "postback",
+                                "label": "Hoàn tất",
+                                "data": f"action=complete_vesinh&session={session_type}&name={name}&target_status=done"
+                            },
+                            "style": "primary",
+                            "color": "#0284c7",
+                            "size": "xs",
+                            "height": "sm",
+                            "flex": 4
+                        })
 
                 zone_box_contents.append(staff_row)
                 global_nv_idx += 1
@@ -739,17 +779,38 @@ def generate_vesinh_flex(group_id, session_type=None):
                             ]
                         },
                         {
-                            "type": "button",
-                            "action": {
-                                "type": "postback",
-                                "label": btn_label,
-                                "data": f"action=complete_vesinh&session={session_type}&name={name}&target_status={next_status}"
-                            },
-                            "style": "primary",
-                            "color": btn_color,
-                            "size": "xs",
-                            "height": "sm",
-                            "flex": 4
+                            "type": "box" if is_done else "button",
+                            **({
+                                "layout": "vertical",
+                                "flex": 4,
+                                "backgroundColor": "#DCFCE7",
+                                "borderColor": "#86EFAC",
+                                "borderWidth": "1px",
+                                "cornerRadius": "sm",
+                                "paddingAll": "xs",
+                                "alignItems": "center",
+                                "justifyContent": "center",
+                                "contents": [
+                                    {
+                                        "type": "text",
+                                        "text": "✓ Đã xong",
+                                        "weight": "bold",
+                                        "size": "xs",
+                                        "color": "#15803D"
+                                    }
+                                ]
+                            } if is_done else {
+                                "action": {
+                                    "type": "postback",
+                                    "label": "Hoàn tất",
+                                    "data": f"action=complete_vesinh&session={session_type}&name={name}&target_status=done"
+                                },
+                                "style": "primary",
+                                "color": "#0284c7",
+                                "size": "xs",
+                                "height": "sm",
+                                "flex": 4
+                            })
                         }
                     ]
                 })
@@ -813,17 +874,38 @@ def generate_vesinh_flex(group_id, session_type=None):
                             ]
                         },
                         {
-                            "type": "button",
-                            "action": {
-                                "type": "postback",
-                                "label": btn_label,
-                                "data": f"action=complete_vesinh&session={session_type}&name={name}&target_status={next_status}"
-                            },
-                            "style": "primary",
-                            "color": btn_color,
-                            "size": "xs",
-                            "height": "sm",
-                            "flex": 4
+                            "type": "box" if is_done else "button",
+                            **({
+                                "layout": "vertical",
+                                "flex": 4,
+                                "backgroundColor": "#DCFCE7",
+                                "borderColor": "#86EFAC",
+                                "borderWidth": "1px",
+                                "cornerRadius": "sm",
+                                "paddingAll": "xs",
+                                "alignItems": "center",
+                                "justifyContent": "center",
+                                "contents": [
+                                    {
+                                        "type": "text",
+                                        "text": "✓ Đã xong",
+                                        "weight": "bold",
+                                        "size": "xs",
+                                        "color": "#15803D"
+                                    }
+                                ]
+                            } if is_done else {
+                                "action": {
+                                    "type": "postback",
+                                    "label": "Hoàn tất",
+                                    "data": f"action=complete_vesinh&session={session_type}&name={name}&target_status=done"
+                                },
+                                "style": "primary",
+                                "color": "#0284c7",
+                                "size": "xs",
+                                "height": "sm",
+                                "flex": 4
+                            })
                         }
                     ]
                 })

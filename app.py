@@ -87,18 +87,27 @@ _USER_PROFILE_CACHE = {}  # {(group_id_or_empty, user_id): (display_name, ts)}
 def get_cached_user_display_name(group_id, user_id, fallback="Nhân viên"):
     if not user_id:
         return fallback
-    key = (str(group_id or ''), str(user_id))
     now = time.time()
-    cached = _USER_PROFILE_CACHE.get(key)
-    if cached and (now - cached[1]) < 3600:
+    user_key = str(user_id)
+    # 1. Kiểm tra cache tức thì theo user_id (0ms)
+    cached_user = _USER_PROFILE_CACHE.get(user_key)
+    if cached_user and (now - cached_user[1]) < 86400:
+        return cached_user[0]
+
+    gid = str(group_id or '').strip()
+    group_key = (gid, user_key)
+    cached = _USER_PROFILE_CACHE.get(group_key)
+    if cached and (now - cached[1]) < 86400:
         return cached[0]
+
     try:
-        if group_id:
-            profile = line_bot_api.get_group_member_profile(group_id, user_id)
+        if gid and (gid.startswith('C') or gid.startswith('R')):
+            profile = line_bot_api.get_group_member_profile(gid, user_id)
         else:
             profile = line_bot_api.get_profile(user_id)
         if profile and profile.display_name:
-            _USER_PROFILE_CACHE[key] = (profile.display_name, now)
+            _USER_PROFILE_CACHE[group_key] = (profile.display_name, now)
+            _USER_PROFILE_CACHE[user_key] = (profile.display_name, now)
             return profile.display_name
     except Exception:
         pass
@@ -360,7 +369,7 @@ def keep_alive():
     while True:
         try: requests.get(ping_url.rstrip('/') + "/ping", timeout=10)
         except: pass
-        time.sleep(600)
+        time.sleep(300)
 
 def update_expiration_in_sheet(target_id, expiration_date_str):
     sheet = get_spreadsheet().worksheet(WORKSHEET_NAME_USERS)
@@ -1578,10 +1587,9 @@ def handle_postback(event):
         if status_code is True:
             updated_flex = generate_meal_flex(group_id, session_type)
             if updated_flex:
-                reply_with_auto_shift(
+                line_bot_api.reply_message(
                     event.reply_token,
-                    FlexSendMessage(alt_text=f"Checklist ăn {session_type} updated", contents=updated_flex),
-                    group_id=group_id
+                    FlexSendMessage(alt_text=f"Checklist ăn {session_type} updated", contents=updated_flex)
                 )
         elif status_code == "already":
             return
@@ -1602,10 +1610,9 @@ def handle_postback(event):
         if status_code is True:
             updated_flex = generate_vesinh_flex(group_id, session_type)
             if updated_flex:
-                reply_with_auto_shift(
+                line_bot_api.reply_message(
                     event.reply_token,
-                    FlexSendMessage(alt_text=f"Bảng phân công vệ sinh {session_type} updated", contents=updated_flex),
-                    group_id=group_id
+                    FlexSendMessage(alt_text=f"Bảng phân công vệ sinh {session_type} updated", contents=updated_flex)
                 )
         elif status_code == "already":
             return

@@ -120,7 +120,7 @@ def get_worksheet_cached_obj(worksheet_name, create_headers=None, rows="1000", c
         return None
 
 
-def get_cached_values(worksheet_name, ttl=60, force_refresh=False, create_headers=None):
+def get_cached_values(worksheet_name, ttl=300, force_refresh=False, create_headers=None):
     """
     Đọc toàn bộ dữ liệu dạng mảng 2 chiều (get_all_values) từ RAM Cache.
     Nếu đang trong thời gian chờ ghi ngầm (dirty_until > now), luôn ưu tiên bản RAM mới nhất.

@@ -229,6 +229,10 @@ def update_shift_task_status(group_id, task_id, shift_type, target_status, user_
     Cập nhật trạng thái công việc Checklist Kho tức thì trong RAM Cache và đẩy ghi Google Sheets chạy ngầm.
     Trả về danh sách records mới nhất trong RAM để vẽ Flex ngay lập tức.
     """
+    if target_status == 'incomplete':
+        # Bấm 1 lần xong là xong, không hoàn lại thao tác
+        all_values = get_cached_values(WORKSHEET_TRACKER_NAME, ttl=300, create_headers=TRACKER_HEADERS)
+        return all_values, group_id
     tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
     today_str = datetime.now(tz_vietnam).strftime('%Y-%m-%d')
     time_str = datetime.now(tz_vietnam).strftime('%H:%M')
@@ -871,6 +875,9 @@ def update_adhoc_task_status(group_id, task_id, target_status, completed_by):
     """
     if not task_id:
         return False, None, None
+    if target_status == 'incomplete':
+        # Bấm 1 lần xong là xong, khóa vĩnh viễn trạng thái hoàn tất
+        return True, None, None
     
     try:
         all_values = get_cached_values(WORKSHEET_ADHOC_TASKS, ttl=60, create_headers=ADHOC_HEADERS)
@@ -1002,7 +1009,7 @@ def generate_adhoc_flex(group_id, assignee, tasks_data=None):
         
         button_color = "#94A3B8" if is_complete else "#00B33C"
         button_label = "✓ Xong" if is_complete else "Hoàn tất"
-        target_status_param = "incomplete" if is_complete else "complete"
+        target_status_param = "complete"
         
         task_info_contents = [
             {
@@ -1429,11 +1436,6 @@ def _render_assignees_ui(assignees_list, indent_px="0px"):
                     "cornerRadius": "sm",
                     "paddingAll": "xs",
                     "alignItems": "center",
-                    "action": {
-                        "type": "postback",
-                        "label": "Hủy",
-                        "data": f"action=complete_adhoc_task&task_id={t_id}&assignee={assignee}&target_status=incomplete"
-                    },
                     "contents": [
                         {
                             "type": "text",

@@ -402,11 +402,15 @@ def update_meal_status(group_id, session_type, staff_name, clicker_name, target_
     và tự động bổ sung dòng hoàn tất cứu hộ nếu dữ liệu lịch bị thiếu sót.
     """
     try:
+        if target_status == 'waiting':
+            # Bấm 1 lần xong là chốt luôn, khóa vĩnh viễn không hoàn lại thao tác
+            return "already", None
+
         tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
         today_str = datetime.now(tz_vietnam).strftime('%Y-%m-%d')
         time_now = datetime.now(tz_vietnam).strftime('%H:%M') if target_status == 'done' else ''
 
-        all_values = get_cached_values(WORKSHEET_MEAL_TRACKER_NAME, ttl=60, create_headers=MEAL_HEADERS)
+        all_values = get_cached_values(WORKSHEET_MEAL_TRACKER_NAME, ttl=300, create_headers=MEAL_HEADERS)
         
         # 1. Tự động kiểm tra xem ngày hôm nay và ca này đã được khởi tạo trong cache chưa
         has_session_today = False
@@ -418,7 +422,7 @@ def update_meal_status(group_id, session_type, staff_name, clicker_name, target_
 
         if not has_session_today:
             sync_meal_sheet(group_id, session_type)
-            all_values = get_cached_values(WORKSHEET_MEAL_TRACKER_NAME, ttl=60, create_headers=MEAL_HEADERS)
+            all_values = get_cached_values(WORKSHEET_MEAL_TRACKER_NAME, ttl=300, create_headers=MEAL_HEADERS)
             if not all_values:
                 all_values = [list(MEAL_HEADERS)]
 
@@ -520,7 +524,18 @@ def update_meal_status(group_id, session_type, staff_name, clicker_name, target_
 
 
 def generate_meal_flex(group_id, session_type):
-    data = sync_meal_sheet(group_id, session_type)
+    tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
+    today_str = datetime.now(tz_vietnam).strftime('%Y-%m-%d')
+
+    # Tối ưu siêu tốc độ phản hồi: Lấy trực tiếp từ RAM Cache (0ms)
+    all_values = get_cached_values(WORKSHEET_MEAL_TRACKER_NAME, ttl=300, create_headers=MEAL_HEADERS)
+    data = []
+    if all_values and len(all_values) > 1:
+        all_records = values_to_records(all_values)
+        data = [r for r in all_records if str(r.get('date')).strip() == today_str and str(r.get('session')).strip() == session_type]
+
+    if not data:
+        data = sync_meal_sheet(group_id, session_type)
     if not data: return None
 
     is_lunch = (session_type == 'ansang')
@@ -545,15 +560,11 @@ def generate_meal_flex(group_id, session_type):
         }
 
         if is_done:
+            # Bấm 1 lần xong là xong: hiển thị badge tĩnh, không có postback action để không bị hoàn tác
             right_side = {
                 "type": "text", "text": f"🟢 {time_val}", 
                 "flex": 0, "width": "55px", "align": "end", "size": "xxs", 
-                "color": "#2E7D32", "gravity": "center", "weight": "bold",
-                "action": {
-                    "type": "postback",
-                    "label": "Hủy",
-                    "data": f"action=meal_checkin&session={session_type}&name={name}&target_status=waiting"
-                }
+                "color": "#2E7D32", "gravity": "center", "weight": "bold"
             }
         else:
             right_side = {
