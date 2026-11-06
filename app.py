@@ -235,8 +235,8 @@ def get_pending_auto_shift_messages(group_id):
 
 def reply_with_auto_shift(reply_token, primary_messages, group_id=None):
     """
-    Gửi `reply_message` (MIỄN PHÍ 100%) và tự động đính kèm thông báo Lịch/Checklist đầu ca
-    nếu ca đó hôm nay chưa được phát trong nhóm và tổng số message <= 5.
+    Gửi reply_message an toàn cho LINE.
+    Không tự ý đính kèm Lịch làm việc PG / Nhân viên khi người dùng đang giao việc hoặc thao tác.
     """
     if primary_messages is None:
         msg_list = []
@@ -245,18 +245,12 @@ def reply_with_auto_shift(reply_token, primary_messages, group_id=None):
     else:
         msg_list = [primary_messages]
 
-    if group_id:
-        try:
-            pending_msgs, pending_shift = get_pending_auto_shift_messages(group_id)
-            if pending_msgs and (len(msg_list) + len(pending_msgs)) <= LINE_MAX_MESSAGES:
-                mark_shift_broadcast_sent(group_id, pending_shift)
-                msg_list.extend(pending_msgs)
-                print(f"[AUTO-TRIGGER] Đã đính kèm thông báo ca '{pending_shift}' miễn phí qua reply_token cho nhóm {group_id}.")
-        except Exception as e:
-            print(f"Lỗi kiểm tra auto-shift: {e}")
-
-    if msg_list:
+    if not msg_list:
+        return
+    try:
         line_bot_api.reply_message(reply_token, msg_list[:LINE_MAX_MESSAGES])
+    except Exception as e:
+        print(f"Lỗi gửi reply_message: {e}")
 
 
 def build_scrape_pending_flex(scrape_type_val, req_time_str=""):
@@ -1450,6 +1444,9 @@ def handle_postback(event):
         shift_type = data.get('shift', 'sang')
         target_status = data.get('target_status', 'complete')
         
+        if target_status == 'incomplete':
+            return
+
         group_id = str(
             event_group_id
             or data.get('group_id')
@@ -1462,6 +1459,9 @@ def handle_postback(event):
             all_records, resolved_gid = update_shift_task_status(
                 group_id, task_id, shift_type, target_status, user_name
             )
+            if all_records == "already":
+                return
+
             if resolved_gid:
                 group_id = resolved_gid
 
@@ -1505,10 +1505,15 @@ def handle_postback(event):
         shift_type = data.get('shift')
         group_id = event_group_id or os.environ.get('EMPLOYEE_GROUP_ID') or MAIN_CHECKLIST_GROUP_ID
 
+        if target_status == 'incomplete':
+            return
+
         try:
             user_name = get_cached_user_display_name(event_group_id, user_id, fallback=assignee or "Nhân viên")
             success, resolved_assignee, task_group_hash = update_adhoc_task_status(group_id, task_id, target_status, user_name)
             
+            if success == "already":
+                return
             if success:
                 if not shift_type:
                     tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
@@ -1516,13 +1521,10 @@ def handle_postback(event):
                     shift_type = 'sang' if current_hour < 15 else 'chieu'
 
                 mode = 'all' if (task_id and str(task_id).startswith('all_')) else 'multi'
-                if str(group_id).strip() == str(MAIN_CHECKLIST_GROUP_ID).strip():
-                    updated_flex_content = generate_combined_work_flex(
-                        group_id, shift_type, adhoc_hash=task_group_hash, adhoc_mode=mode
-                    )
-                else:
-                    updated_flex_content = generate_today_adhoc_flex(group_id)
-                alt_text = "📋 Cập nhật công việc giao thêm"
+                updated_flex_content = generate_combined_work_flex(
+                    group_id, shift_type, adhoc_hash=task_group_hash, adhoc_mode=mode
+                )
+                alt_text = f"📋 Checklist ca {shift_type} & Cập nhật công việc giao thêm"
 
                 if updated_flex_content:
                     reply_with_auto_shift(
@@ -1749,14 +1751,10 @@ def handle_message(event):
                     text="❌ Có lỗi xảy ra khi lưu công việc."))
                 return
 
-            if str(group_id).strip() == str(MAIN_CHECKLIST_GROUP_ID).strip():
-                flex_content = generate_combined_work_flex(
-                    group_id, current_shift, adhoc_hash=last_hash, adhoc_mode=plan['mode']
-                )
-                alt_text = f"📋 Checklist ca {current_shift} & Công việc giao thêm"
-            else:
-                flex_content = generate_today_adhoc_flex(group_id)
-                alt_text = "📋 Công việc giao thêm"
+            flex_content = generate_combined_work_flex(
+                group_id, current_shift, adhoc_hash=last_hash, adhoc_mode=plan['mode']
+            )
+            alt_text = f"📋 Checklist ca {current_shift} & Công việc giao thêm"
 
             if flex_content:
                 reply_with_auto_shift(

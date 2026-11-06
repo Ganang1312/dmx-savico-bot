@@ -161,13 +161,32 @@ def _short_assignee_display(name, max_len=16):
     return s[:max_len - 1] + "…"
 
 
+def _is_date_today(date_str, today_str):
+    """So khớp ngày an toàn, chấp nhận cả định dạng YYYY-MM-DD và DD/MM/YYYY."""
+    d = str(date_str or '').strip()
+    t = str(today_str or '').strip()
+    if not d or not t:
+        return False
+    if d == t:
+        return True
+    try:
+        parts_d = [p.zfill(2) for p in re.split(r'[-/]', d) if p]
+        parts_t = [p.zfill(2) for p in re.split(r'[-/]', t) if p]
+        if len(parts_d) == 3 and len(parts_t) == 3:
+            return sorted(parts_d) == sorted(parts_t)
+    except:
+        pass
+    return False
+
+
 # ============================================================================
 # PHẦN 1: CHECKLIST KHO CA SÁNG / CA CHIỀU / HÌNH ẢNH (CÓ RAM CACHE & CARD UI)
 # ============================================================================
 
 def initialize_daily_tasks(group_id, shift_type, force=False):
     """
-    Reset và khởi tạo lại danh sách công việc cho ca cụ thể trong RAM Cache & đồng bộ ngầm lên Sheet.
+    Khởi tạo lại danh sách công việc cho ca cụ thể trong RAM Cache & đồng bộ ngầm lên Sheet.
+    Nếu ca hôm nay đã có dữ liệu trong Sheet/Cache thì TUYỆT ĐỐI KHÔNG ghi đè/reset.
     """
     print(f"Bắt đầu khởi tạo công việc ca {shift_type} cho group {group_id} (force={force})...")
     try:
@@ -184,24 +203,24 @@ def initialize_daily_tasks(group_id, shift_type, force=False):
             for row in all_values[1:]:
                 if len(row) < 3:
                     continue
-                r_group = str(row[0]).strip()
                 r_date = str(row[1]).strip()
                 r_task_id = str(row[2]).strip()
                 
-                if r_date == today_str and r_group == str(group_id).strip() and r_task_id.startswith(shift_type):
+                # Khớp ngày hôm nay (dù định dạng Y-m-d hay d/m/Y) và khớp ca
+                if _is_date_today(r_date, today_str) and r_task_id.startswith(shift_type):
                     has_today_tasks = True
                 
-                if r_date == today_str:
-                    if r_group == str(group_id).strip() and r_task_id.startswith(shift_type):
-                        continue
+                # Giữ lại các dòng khác ca/ngày
+                if not (_is_date_today(r_date, today_str) and r_task_id.startswith(shift_type)):
                     rows_to_keep.append(list(row))
         
+        # Nếu ca hôm nay ĐÃ CÓ task rồi và không force, giữ nguyên 100% không reset!
         if has_today_tasks and not force:
             return True
             
         tasks_to_add = []
         for task in TASKS.get(shift_type, []):
-            new_row = [str(group_id).strip(), today_str, task['id'], task['name'], task['time'], 'incomplete', '']
+            new_row = [str(group_id or 'default').strip(), today_str, task['id'], task['name'], task['time'], 'incomplete', '']
             tasks_to_add.append(new_row)
 
         new_all_values = [list(headers)] + rows_to_keep + tasks_to_add
@@ -230,9 +249,8 @@ def update_shift_task_status(group_id, task_id, shift_type, target_status, user_
     Trả về danh sách records mới nhất trong RAM để vẽ Flex ngay lập tức.
     """
     if target_status == 'incomplete':
-        # Bấm 1 lần xong là xong, không hoàn lại thao tác
-        all_values = get_cached_values(WORKSHEET_TRACKER_NAME, ttl=300, create_headers=TRACKER_HEADERS)
-        return all_values, group_id
+        # Bấm 1 lần xong là xong, khóa vĩnh viễn trạng thái hoàn tất
+        return "already", group_id
     tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
     today_str = datetime.now(tz_vietnam).strftime('%Y-%m-%d')
     time_str = datetime.now(tz_vietnam).strftime('%H:%M')
@@ -254,7 +272,7 @@ def update_shift_task_status(group_id, task_id, shift_type, target_status, user_
         r_gid = str(row[0]).strip()
         r_date = str(row[1]).strip()
         r_tid = str(row[2]).strip()
-        if r_date == today_str and r_tid == clean_tid and (not target_gid or r_gid == target_gid):
+        if _is_date_today(r_date, today_str) and r_tid == clean_tid and (not target_gid or r_gid == target_gid):
             matched_row_nums.append(idx + 1)  # 1-based sheet row
 
     # 2. Fallback nếu lệch group_id
@@ -265,11 +283,22 @@ def update_shift_task_status(group_id, task_id, shift_type, target_status, user_
                 continue
             r_date = str(row[1]).strip()
             r_tid = str(row[2]).strip()
-            if r_date == today_str and r_tid == clean_tid:
+            if _is_date_today(r_date, today_str) and r_tid == clean_tid:
                 matched_row_nums.append(idx + 1)
                 target_gid = str(row[0]).strip()
 
     if matched_row_nums:
+        # Nếu task đã hoàn tất trước đó rồi, không gửi lại tin nhắn mới
+        all_already_done = True
+        for r_num in matched_row_nums:
+            mem_row = all_values[r_num - 1]
+            curr_st = str(mem_row[5]).strip() if len(mem_row) > 5 else ''
+            if curr_st != 'complete':
+                all_already_done = False
+                break
+        if all_already_done:
+            return "already", target_gid
+
         for r_num in matched_row_nums:
             mem_row = all_values[r_num - 1]
             while len(mem_row) < 7:
@@ -315,6 +344,9 @@ def get_tasks_status_from_sheet(group_id, shift_type, all_records=None):
     try:
         if all_records is None:
             all_records = get_cached_records(WORKSHEET_TRACKER_NAME, ttl=60, create_headers=TRACKER_HEADERS)
+        elif all_records and len(all_records) > 0 and isinstance(all_records[0], list):
+            # Phòng thủ nếu truyền nhầm 2D values (list of lists) thay vì records (list of dicts)
+            all_records = values_to_records(all_records)
         
         tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
         today_str = datetime.now(tz_vietnam).strftime('%Y-%m-%d')
@@ -325,13 +357,25 @@ def get_tasks_status_from_sheet(group_id, shift_type, all_records=None):
         for record in all_records:
             r_gid = str(record.get('group_id', '')).strip()
             r_date = str(record.get('date', '')).strip()
-            if (not target_gid or r_gid == target_gid) and r_date == today_str:
+            if (not target_gid or r_gid == target_gid) and _is_date_today(r_date, today_str):
                 task_id = str(record.get('task_id', '')).strip()
                 if task_id and task_id.startswith(shift_type):
                     task_statuses[task_id] = {
                         'status': str(record.get('status', 'incomplete')).strip(),
                         'user_name': str(record.get('user_name', '')).strip()
                     }
+
+        # Fallback an toàn: nếu không tìm thấy theo target_gid (do lệch group_id giữa các môi trường), lấy theo ngày hôm nay
+        if not task_statuses:
+            for record in all_records:
+                r_date = str(record.get('date', '')).strip()
+                if _is_date_today(r_date, today_str):
+                    task_id = str(record.get('task_id', '')).strip()
+                    if task_id and task_id.startswith(shift_type):
+                        task_statuses[task_id] = {
+                            'status': str(record.get('status', 'incomplete')).strip(),
+                            'user_name': str(record.get('user_name', '')).strip()
+                        }
         return task_statuses
     except Exception as e:
         print(f"Lỗi khi lấy trạng thái công việc: {e}")
@@ -434,50 +478,45 @@ def generate_checklist_flex(group_id, shift_type, all_records_prefetched=None):
         main_text_color = "#64748B" if is_complete else "#0F172A"
         deadline_color = "#94A3B8" if is_complete else "#DC2626"
 
-        button_color = "#94A3B8" if is_complete else "#0284C7"
-        button_label = "✓ Xong" if is_complete else "Hoàn tất"
-        target_status_param = "incomplete" if is_complete else "complete"
-
-        info_contents = [
-            {
-                "type": "text",
-                "text": task['name'],
-                "wrap": True,
-                "weight": "bold",
-                "size": "sm",
-                "color": main_text_color,
-                "decoration": text_decoration
-            },
-            {
+        # Action component bên phải: Nếu đã xong thì hiện badge tĩnh không thể bấm lại
+        if is_complete:
+            action_component = {
                 "type": "box",
-                "layout": "horizontal",
-                "spacing": "xs",
+                "layout": "vertical",
+                "backgroundColor": "#DCFCE7",
+                "borderColor": "#86EFAC",
+                "borderWidth": "1px",
+                "cornerRadius": "md",
+                "paddingStart": "10px",
+                "paddingEnd": "10px",
+                "paddingTop": "6px",
+                "paddingBottom": "6px",
+                "justifyContent": "center",
                 "alignItems": "center",
-                "margin": "xs",
                 "contents": [
                     {
                         "type": "text",
-                        "text": f"⏰ Hạn: {task['time']}",
-                        "color": deadline_color,
+                        "text": "✓ Xong",
+                        "color": "#15803D",
                         "weight": "bold",
-                        "size": "xxs",
-                        "flex": 0
+                        "size": "xs"
                     }
-                ]
+                ],
+                "flex": 0
             }
-        ]
-
-        # Mục 8: Hiển thị rõ ai đã làm & lúc mấy giờ
-        if is_complete:
-            info_contents.append({
-                "type": "text",
-                "text": _format_completed_badge(completed_by),
-                "color": "#15803D",
-                "weight": "bold",
-                "size": "xxs",
-                "margin": "xs",
-                "wrap": True
-            })
+        else:
+            action_component = {
+                "type": "button",
+                "action": {
+                    "type": "postback",
+                    "label": "Hoàn tất",
+                    "data": f"action=complete_task&task_id={task['id']}&shift={shift_type}&target_status=complete&group_id={group_id}"
+                },
+                "style": "primary",
+                "color": "#0284C7",
+                "height": "sm",
+                "flex": 0
+            }
 
         task_card = {
             "type": "box",
@@ -503,18 +542,7 @@ def generate_checklist_flex(group_id, shift_type, all_records_prefetched=None):
                     "flex": 1,
                     "contents": info_contents
                 },
-                {
-                    "type": "button",
-                    "action": {
-                        "type": "postback",
-                        "label": button_label,
-                        "data": f"action=complete_task&task_id={task['id']}&shift={shift_type}&target_status={target_status_param}&group_id={group_id}"
-                    },
-                    "style": "primary",
-                    "color": button_color,
-                    "height": "sm",
-                    "flex": 0
-                }
+                action_component
             ]
         }
         task_components.append(task_card)
@@ -749,7 +777,7 @@ def get_adhoc_tasks_for_group_today(group_id):
             row_gid = str(row[i_gid]).strip()
             row_date = str(row[i_date]).strip()
 
-            if row_gid == target_gid and row_date == today_str:
+            if (not target_gid or row_gid == target_gid) and _is_date_today(row_date, today_str):
                 filtered_tasks.append({
                     'group_id': row_gid,
                     'date': row_date,
@@ -761,6 +789,25 @@ def get_adhoc_tasks_for_group_today(group_id):
                     'completed_at': str(row[i_comp_at]).strip() if len(row) > i_comp_at else '',
                     'created_at': str(row[i_created_at]).strip() if len(row) > i_created_at else ''
                 })
+
+        # Fallback an toàn nếu lệch group_id
+        if not filtered_tasks and target_gid:
+            for row in all_values[1:]:
+                if len(row) <= max(i_gid, i_date):
+                    continue
+                row_date = str(row[i_date]).strip()
+                if _is_date_today(row_date, today_str):
+                    filtered_tasks.append({
+                        'group_id': str(row[i_gid]).strip(),
+                        'date': row_date,
+                        'assignee': str(row[i_assignee]).strip() if len(row) > i_assignee else '',
+                        'task_id': str(row[i_tid]).strip() if len(row) > i_tid else '',
+                        'task_name': str(row[i_name]).strip() if len(row) > i_name else '',
+                        'status': str(row[i_status]).strip() if len(row) > i_status else 'incomplete',
+                        'completed_by': str(row[i_comp_by]).strip() if len(row) > i_comp_by else '',
+                        'completed_at': str(row[i_comp_at]).strip() if len(row) > i_comp_at else '',
+                        'created_at': str(row[i_created_at]).strip() if len(row) > i_created_at else ''
+                    })
         return filtered_tasks
     except Exception as e:
         print(f"Lỗi khi lấy adhoc tasks của nhóm hôm nay: {e}")
@@ -877,7 +924,7 @@ def update_adhoc_task_status(group_id, task_id, target_status, completed_by):
         return False, None, None
     if target_status == 'incomplete':
         # Bấm 1 lần xong là xong, khóa vĩnh viễn trạng thái hoàn tất
-        return True, None, None
+        return "already", None, None
     
     try:
         all_values = get_cached_values(WORKSHEET_ADHOC_TASKS, ttl=60, create_headers=ADHOC_HEADERS)
@@ -928,6 +975,16 @@ def update_adhoc_task_status(group_id, task_id, target_status, completed_by):
                             task_group_hash = parts[1]
 
         if row_indices:
+            # Nếu công việc này đã hoàn tất trước đó rồi, không gửi lại tin nhắn mới
+            all_already_complete = True
+            for r_idx in row_indices:
+                mem_row = all_values[r_idx - 1]
+                current_st = str(mem_row[i_status]).strip() if len(mem_row) > i_status else ''
+                if current_st != 'complete':
+                    all_already_complete = False
+                    break
+            if all_already_complete:
+                return "already", assignee, task_group_hash
             comp_by = completed_by if target_status == 'complete' else ''
             comp_at = time_str if target_status == 'complete' else ''
 
@@ -1006,11 +1063,7 @@ def generate_adhoc_flex(group_id, assignee, tasks_data=None):
         card_border = "#BBF7D0" if is_complete else "#E2E8F0"
         text_decoration = "line-through" if is_complete else "none"
         main_text_color = "#64748B" if is_complete else "#0F172A"
-        
-        button_color = "#94A3B8" if is_complete else "#00B33C"
-        button_label = "✓ Xong" if is_complete else "Hoàn tất"
-        target_status_param = "complete"
-        
+
         task_info_contents = [
             {
                 "type": "text",
@@ -1045,6 +1098,45 @@ def generate_adhoc_flex(group_id, assignee, tasks_data=None):
                 "margin": "xs",
                 "wrap": True
             })
+        
+        if is_complete:
+            btn_component = {
+                "type": "box",
+                "layout": "vertical",
+                "backgroundColor": "#DCFCE7",
+                "borderColor": "#86EFAC",
+                "borderWidth": "1px",
+                "cornerRadius": "md",
+                "paddingStart": "10px",
+                "paddingEnd": "10px",
+                "paddingTop": "6px",
+                "paddingBottom": "6px",
+                "justifyContent": "center",
+                "alignItems": "center",
+                "contents": [
+                    {
+                        "type": "text",
+                        "text": "✓ Xong",
+                        "color": "#15803D",
+                        "weight": "bold",
+                        "size": "xs"
+                    }
+                ],
+                "flex": 0
+            }
+        else:
+            btn_component = {
+                "type": "button",
+                "action": {
+                    "type": "postback",
+                    "label": "Hoàn tất",
+                    "data": f"action=complete_adhoc_task&task_id={task_id}&assignee={assignee}&target_status=complete"
+                },
+                "style": "primary",
+                "color": "#00B33C",
+                "height": "sm",
+                "flex": 0
+            }
 
         task_component = {
             "type": "box",
@@ -1071,18 +1163,7 @@ def generate_adhoc_flex(group_id, assignee, tasks_data=None):
                     "spacing": "xs",
                     "contents": task_info_contents
                 },
-                {
-                    "type": "button",
-                    "action": {
-                        "type": "postback",
-                        "label": button_label,
-                        "data": f"action=complete_adhoc_task&task_id={task_id}&assignee={assignee}&target_status={target_status_param}"
-                    },
-                    "style": "primary",
-                    "color": button_color,
-                    "height": "sm",
-                    "flex": 0
-                }
+                btn_component
             ]
         }
         task_components.append(task_component)
@@ -1410,7 +1491,7 @@ def _render_assignees_ui(assignees_list, indent_px="0px"):
         comp_rows = [
             {
                 "type": "text",
-                "text": f"✅ Đã xong ({len(completed_list)}/{len(assignees_list)}) — chạm tên nếu muốn hủy:",
+                "text": f"✅ Đã xong ({len(completed_list)}/{len(assignees_list)}):",
                 "size": "xxs",
                 "weight": "bold",
                 "color": "#166534"
@@ -2091,22 +2172,20 @@ def build_work_carousel(checklist_bubble, adhoc_bubble):
 
 
 def generate_combined_work_flex(group_id, shift_type=None, adhoc_hash=None, adhoc_mode=None):
+    """
+    Gộp Checklist Kho (Ca sáng / Chiều) và Bảng công việc giao thêm thành Carousel 2 Card đẹp mắt.
+    """
+    if not shift_type:
+        tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
+        current_hour = datetime.now(tz_vietnam).hour
+        shift_type = 'sang' if current_hour < 15 else 'chieu'
+
+    checklist_bubble = generate_checklist_flex(group_id, shift_type)
     adhoc_bubble = generate_today_adhoc_flex(group_id)
 
-    if str(group_id).strip() == str(MAIN_CHECKLIST_GROUP_ID).strip():
-        if not shift_type:
-            tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
-            current_hour = datetime.now(tz_vietnam).hour
-            shift_type = 'sang' if current_hour < 15 else 'chieu'
-
-        checklist_bubble = generate_checklist_flex(group_id, shift_type)
+    if checklist_bubble and adhoc_bubble:
         return build_work_carousel(checklist_bubble, adhoc_bubble)
-
-    if adhoc_bubble:
-        return adhoc_bubble
-    if shift_type:
-        return generate_checklist_flex(group_id, shift_type)
-    return None
+    return adhoc_bubble or checklist_bubble
 
 
 # ============================================================================
