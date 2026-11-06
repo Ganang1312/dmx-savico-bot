@@ -86,6 +86,47 @@ def normalize_person_key(name):
     return re.sub(r"\s+", " ", s).strip()
 
 
+def match_staff_name(n1, n2):
+    """
+    So khớp thông minh giữa tên nhân sự trên hệ thống và tên nhận từ nút bấm / tin nhắn.
+    Hỗ trợ chuẩn hóa dấu tiếng Việt NFC/NFD, loại bỏ ký tự đặc biệt (*, ERP, GH1, GH2, emoji),
+    so khớp theo mã số nhân viên (4-8 chữ số), và so khớp bao hàm tên an toàn.
+    """
+    if not n1 or not n2:
+        return False
+    s1, s2 = str(n1).strip(), str(n2).strip()
+    if s1.lower() == s2.lower():
+        return True
+    if normalize_text(s1) == normalize_text(s2):
+        return True
+
+    k1 = normalize_person_key(s1)
+    k2 = normalize_person_key(s2)
+    if k1 and k2 and k1 == k2:
+        return True
+
+    # So khớp theo mã số nhân viên (4 đến 8 chữ số liên tiếp)
+    codes1 = re.findall(r"\b\d{4,8}\b", s1) or re.findall(r"\d{4,8}", s1)
+    codes2 = re.findall(r"\b\d{4,8}\b", s2) or re.findall(r"\d{4,8}", s2)
+    if codes1 and codes2:
+        if set(codes1) & set(codes2):
+            return True
+        # Nếu cả hai bên đều có mã NV nhưng mã lại khác nhau thì chắc chắn không phải cùng người
+        return False
+
+    if k1 and k2:
+        alpha1 = re.sub(r"\d+", "", k1).strip()
+        alpha2 = re.sub(r"\d+", "", k2).strip()
+        if alpha1 and alpha2 and alpha1 == alpha2:
+            return True
+        if len(k1) >= 4 and k1 in k2:
+            return True
+        if len(k2) >= 4 and k2 in k1:
+            return True
+
+    return False
+
+
 def get_daily_roster(day_str=None):
     """
     Danh sách người làm hôm nay lấy từ sheet `schedules` (có RAM Cache), đã khử trùng.
@@ -286,14 +327,12 @@ def sync_meal_sheet(group_id, session_type):
         if not all_values:
             all_values = [list(MEAL_HEADERS)]
 
-        first_data_date = None
-        if len(all_values) > 1 and len(all_values[1]) > 1:
-            first_data_date = str(all_values[1][1]).strip()
-
+        # Dọn dẹp dữ liệu ngày cũ, chỉ giữ lại header và các dòng của ngày hôm nay
+        today_rows = [r for r in all_values[1:] if len(r) > 1 and str(r[1]).strip() == today_str]
         need_clear_sheet = False
-        if first_data_date and first_data_date != today_str:
-            print(f"Ngày mới! Xóa dữ liệu meal cũ ({first_data_date})...")
-            all_values = [list(MEAL_HEADERS)]
+        if len(all_values) > 1 and len(today_rows) < (len(all_values) - 1):
+            print(f"Ngày mới! Dọn dẹp dữ liệu meal ngày cũ...")
+            all_values = [list(MEAL_HEADERS)] + today_rows
             set_cached_values(WORKSHEET_MEAL_TRACKER_NAME, all_values)
             need_clear_sheet = True
 
@@ -301,11 +340,16 @@ def sync_meal_sheet(group_id, session_type):
 
         existing_entries = {}
         for row in all_records:
-            key_name = normalize_text(row.get('name'))
-            if (str(row.get('group_id')) == str(group_id) and 
-                str(row.get('date')) == today_str and 
-                str(row.get('session')) == session_type):
-                existing_entries[key_name] = row
+            r_date = str(row.get('date')).strip()
+            r_session = str(row.get('session')).strip()
+            r_name = str(row.get('name', '')).strip()
+            if r_date == today_str and r_session == session_type:
+                k_norm = normalize_text(r_name)
+                k_key = normalize_person_key(r_name)
+                if k_norm and (k_norm not in existing_entries or row.get('status') == 'done'):
+                    existing_entries[k_norm] = row
+                if k_key and (k_key not in existing_entries or row.get('status') == 'done'):
+                    existing_entries[k_key] = row
 
         staff_lists = get_working_staff(session_type)
         final_data = [] 
@@ -314,8 +358,10 @@ def sync_meal_sheet(group_id, session_type):
         for s_type in ['NV', 'PG']:
             for name in staff_lists.get(s_type, []):
                 norm_name = normalize_text(name)
-                if norm_name in existing_entries:
-                    final_data.append(existing_entries[norm_name])
+                person_key = normalize_person_key(name)
+                existing = existing_entries.get(norm_name) or existing_entries.get(person_key)
+                if existing:
+                    final_data.append(existing)
                 else:
                     entry = {
                         'group_id': group_id, 'date': today_str, 'session': session_type,
@@ -325,6 +371,8 @@ def sync_meal_sheet(group_id, session_type):
                     new_rows.append(new_row)
                     all_values.append(new_row)
                     final_data.append(entry)
+                    if norm_name: existing_entries[norm_name] = entry
+                    if person_key: existing_entries[person_key] = entry
         
         if need_clear_sheet or new_rows:
             set_cached_values(WORKSHEET_MEAL_TRACKER_NAME, all_values)
@@ -350,39 +398,72 @@ def sync_meal_sheet(group_id, session_type):
 def update_meal_status(group_id, session_type, staff_name, clicker_name, target_status='done'):
     """
     Cập nhật trạng thái ăn uống tức thì trong RAM Cache và đẩy lệnh ghi Google Sheets chạy ngầm.
+    Tự động đồng bộ nếu ca/ngày hôm nay chưa có dòng trong bảng, so khớp thông minh bằng match_staff_name
+    và tự động bổ sung dòng hoàn tất cứu hộ nếu dữ liệu lịch bị thiếu sót.
     """
     try:
-        all_values = get_cached_values(WORKSHEET_MEAL_TRACKER_NAME, ttl=60, create_headers=MEAL_HEADERS)
-        if not all_values or len(all_values) <= 1:
-            sync_meal_sheet(group_id, session_type)
-            all_values = get_cached_values(WORKSHEET_MEAL_TRACKER_NAME, ttl=60, create_headers=MEAL_HEADERS)
-
         tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
         today_str = datetime.now(tz_vietnam).strftime('%Y-%m-%d')
         time_now = datetime.now(tz_vietnam).strftime('%H:%M') if target_status == 'done' else ''
 
-        target_name_norm = normalize_text(staff_name)
-        target_group_id = str(group_id).strip()
+        all_values = get_cached_values(WORKSHEET_MEAL_TRACKER_NAME, ttl=60, create_headers=MEAL_HEADERS)
+        
+        # 1. Tự động kiểm tra xem ngày hôm nay và ca này đã được khởi tạo trong cache chưa
+        has_session_today = False
+        if all_values and len(all_values) > 1:
+            for r in all_values[1:]:
+                if len(r) > 2 and str(r[1]).strip() == today_str and str(r[2]).strip() == session_type:
+                    has_session_today = True
+                    break
+
+        if not has_session_today:
+            sync_meal_sheet(group_id, session_type)
+            all_values = get_cached_values(WORKSHEET_MEAL_TRACKER_NAME, ttl=60, create_headers=MEAL_HEADERS)
+            if not all_values:
+                all_values = [list(MEAL_HEADERS)]
 
         row_index = -1
         current_status = None
-        for i, row in enumerate(all_values[1:], start=2):
-            if len(row) < 5:
-                continue
-            row_group = str(row[0]).strip()
-            row_date = str(row[1]).strip()
-            row_session = str(row[2]).strip()
-            row_name_norm = normalize_text(row[4])
+        target_gid = str(group_id or '').strip()
 
-            if (row_group == target_group_id and 
-                row_date == today_str and 
-                row_session == session_type and 
-                row_name_norm == target_name_norm):
-                row_index = i
-                if len(row) >= 6:
-                    current_status = row[5].strip()
-                break
-        
+        # Bước 1: Khớp chính xác hôm nay + đúng ca + tên khớp + cùng group_id
+        if target_gid and target_gid != 'default':
+            for i, row in enumerate(all_values[1:], start=2):
+                if len(row) < 5: continue
+                r_group = str(row[0]).strip()
+                r_date = str(row[1]).strip()
+                r_session = str(row[2]).strip()
+                r_name = str(row[4]).strip()
+                if r_date == today_str and r_session == session_type and r_group == target_gid:
+                    if match_staff_name(r_name, staff_name):
+                        row_index = i
+                        if len(row) >= 6: current_status = row[5].strip()
+                        break
+
+        # Bước 2: Khớp hôm nay + đúng ca + tên khớp (bỏ qua group_id nếu bấm chéo nhóm hoặc từ Web App)
+        if row_index == -1:
+            for i, row in enumerate(all_values[1:], start=2):
+                if len(row) < 5: continue
+                r_date = str(row[1]).strip()
+                r_session = str(row[2]).strip()
+                r_name = str(row[4]).strip()
+                if r_date == today_str and r_session == session_type:
+                    if match_staff_name(r_name, staff_name):
+                        row_index = i
+                        if len(row) >= 6: current_status = row[5].strip()
+                        break
+
+        # Bước 3: Khớp hôm nay + tên khớp (bất kỳ ca nào)
+        if row_index == -1:
+            for i, row in enumerate(all_values[1:], start=2):
+                if len(row) < 5: continue
+                r_date = str(row[1]).strip()
+                r_name = str(row[4]).strip()
+                if r_date == today_str and match_staff_name(r_name, staff_name):
+                    row_index = i
+                    if len(row) >= 6: current_status = row[5].strip()
+                    break
+
         if row_index != -1:
             if current_status == target_status:
                 return "already", None
@@ -410,9 +491,29 @@ def update_meal_status(group_id, session_type, staff_name, clicker_name, target_
                 ws.update_cells(cells)
             run_bg_sheet_task(_bg_update_meal, row_index, target_status, time_now, clicked_user, desc="update_meal_status")
             return True, time_now
-        
-        print(f"Không tìm thấy dòng khớp cho: {staff_name}")
-        return False, None
+
+        # Bước 4: Fallback cứu hộ an toàn tuyệt đối (Không bao giờ báo lỗi cho người dùng)
+        clicked_user = clicker_name if target_status == 'done' else ''
+        new_row = [
+            str(group_id or 'default'),
+            today_str,
+            session_type,
+            'NV',
+            staff_name,
+            target_status,
+            time_now,
+            clicked_user
+        ]
+        all_values.append(new_row)
+        set_cached_values(WORKSHEET_MEAL_TRACKER_NAME, all_values)
+
+        def _bg_append_meal(to_append):
+            ws = get_worksheet_cached_obj(WORKSHEET_MEAL_TRACKER_NAME, create_headers=MEAL_HEADERS)
+            if ws:
+                ws.append_rows([to_append], value_input_option='USER_ENTERED')
+        run_bg_sheet_task(_bg_append_meal, new_row, desc=f"fallback_add_meal_{staff_name}")
+        return True, time_now
+
     except Exception as e:
         print(f"Lỗi update meal status: {e}")
         return False, None

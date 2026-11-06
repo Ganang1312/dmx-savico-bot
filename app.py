@@ -1570,11 +1570,9 @@ def handle_postback(event):
         session_type = data.get('session')
         staff_name = data.get('name')
         target_status = data.get('target_status', 'done')
-        group_id = event_group_id
-        
-        if not group_id: return
+        group_id = event_group_id or data.get('group_id') or os.environ.get('EMPLOYEE_GROUP_ID') or MAIN_CHECKLIST_GROUP_ID or 'default'
 
-        clicker_name = get_cached_user_display_name(group_id, user_id, fallback="Unknown")
+        clicker_name = get_cached_user_display_name(group_id, user_id, fallback="Nhân viên")
         status_code, time_str = update_meal_status(group_id, session_type, staff_name, clicker_name, target_status)
         
         if status_code is True:
@@ -1596,11 +1594,9 @@ def handle_postback(event):
         session_type = data.get('session')
         staff_name = data.get('name')
         target_status = data.get('target_status', 'done')
-        group_id = event_group_id
-        
-        if not group_id: return
+        group_id = event_group_id or data.get('group_id') or os.environ.get('EMPLOYEE_GROUP_ID') or MAIN_CHECKLIST_GROUP_ID or 'default'
 
-        clicker_name = get_cached_user_display_name(group_id, user_id, fallback="Unknown")
+        clicker_name = get_cached_user_display_name(group_id, user_id, fallback="Nhân viên")
         status_code, time_str = update_vesinh_status(group_id, session_type, staff_name, clicker_name, target_status)
         
         if status_code is True:

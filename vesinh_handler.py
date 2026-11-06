@@ -12,7 +12,10 @@ from config import (
     get_spreadsheet, get_cached_values, get_cached_records,
     set_cached_values, run_bg_sheet_task, get_worksheet_cached_obj, values_to_records
 )
-from meal_handler import get_working_staff, normalize_text
+from meal_handler import (
+    get_working_staff, normalize_text, match_staff_name,
+    clean_person_name, normalize_person_key
+)
 
 VESINH_HEADERS = ['group_id', 'date', 'session', 'type', 'name', 'zone', 'status', 'time_clicked', 'clicked_by']
 
@@ -255,14 +258,12 @@ def sync_vesinh_sheet(group_id, session_type):
     if not all_values:
         all_values = [list(VESINH_HEADERS)]
 
-    first_data_date = None
-    if len(all_values) > 1 and len(all_values[1]) > 1:
-        first_data_date = str(all_values[1][1]).strip()
-
+    # Dọn dẹp dữ liệu ngày cũ, chỉ giữ lại header và các dòng của ngày hôm nay
+    today_rows = [r for r in all_values[1:] if len(r) > 1 and str(r[1]).strip() == today_str]
     need_clear_sheet = False
-    if first_data_date and first_data_date != today_str:
-        print(f"Ngày mới! Xóa dữ liệu vệ sinh cũ ({first_data_date})...")
-        all_values = [list(VESINH_HEADERS)]
+    if len(all_values) > 1 and len(today_rows) < (len(all_values) - 1):
+        print(f"Ngày mới! Dọn dẹp dữ liệu vệ sinh cũ...")
+        all_values = [list(VESINH_HEADERS)] + today_rows
         set_cached_values(WORKSHEET_VESINH_TRACKER_NAME, all_values)
         need_clear_sheet = True
 
@@ -270,12 +271,16 @@ def sync_vesinh_sheet(group_id, session_type):
 
     existing_entries = {}
     for row in all_records:
-        key_name = normalize_text(row.get('name'))
-        if (str(row.get('group_id')) == str(group_id) and 
-            str(row.get('date')) == today_str and 
-            str(row.get('session')) == session_type):
-            if key_name not in existing_entries or row.get('status') == 'done':
-                existing_entries[key_name] = row
+        r_date = str(row.get('date')).strip()
+        r_session = str(row.get('session')).strip()
+        r_name = str(row.get('name', '')).strip()
+        if r_date == today_str and r_session == session_type:
+            k_norm = normalize_text(r_name)
+            k_key = normalize_person_key(r_name)
+            if k_norm and (k_norm not in existing_entries or row.get('status') == 'done'):
+                existing_entries[k_norm] = row
+            if k_key and (k_key not in existing_entries or row.get('status') == 'done'):
+                existing_entries[k_key] = row
 
     staff_lists = get_working_staff_vesinh(session_type)
     raw_nv_list = staff_lists.get('NV', [])
@@ -309,12 +314,15 @@ def sync_vesinh_sheet(group_id, session_type):
         name = assign['name']
         zone_desc = assign['zone_desc']
         norm_name = normalize_text(name)
-        if norm_name in processed_names:
+        person_key = normalize_person_key(name)
+        if norm_name in processed_names or person_key in processed_names:
             continue
         processed_names.add(norm_name)
+        processed_names.add(person_key)
         
-        if norm_name in existing_entries:
-            item = dict(existing_entries[norm_name])
+        existing = existing_entries.get(norm_name) or existing_entries.get(person_key)
+        if existing:
+            item = dict(existing)
             item['zone'] = zone_desc
             final_data.append(item)
         else:
@@ -327,16 +335,20 @@ def sync_vesinh_sheet(group_id, session_type):
             new_rows.append(new_row)
             all_values.append(new_row)
             existing_entries[norm_name] = entry
+            if person_key: existing_entries[person_key] = entry
             final_data.append(entry)
 
     for name in pg_kho_list:
         norm_name = normalize_text(name)
-        if norm_name in processed_names:
+        person_key = normalize_person_key(name)
+        if norm_name in processed_names or person_key in processed_names:
             continue
         processed_names.add(norm_name)
+        processed_names.add(person_key)
         zone_desc = "Vệ sinh kho"
-        if norm_name in existing_entries:
-            final_data.append(existing_entries[norm_name])
+        existing = existing_entries.get(norm_name) or existing_entries.get(person_key)
+        if existing:
+            final_data.append(existing)
         else:
             entry = {
                 'group_id': group_id, 'date': today_str, 'session': session_type,
@@ -347,16 +359,20 @@ def sync_vesinh_sheet(group_id, session_type):
             new_rows.append(new_row)
             all_values.append(new_row)
             existing_entries[norm_name] = entry
+            if person_key: existing_entries[person_key] = entry
             final_data.append(entry)
 
     for name in pg_list:
         norm_name = normalize_text(name)
-        if norm_name in processed_names:
+        person_key = normalize_person_key(name)
+        if norm_name in processed_names or person_key in processed_names:
             continue
         processed_names.add(norm_name)
+        processed_names.add(person_key)
         zone_desc = "Vệ sinh gian hàng PG"
-        if norm_name in existing_entries:
-            final_data.append(existing_entries[norm_name])
+        existing = existing_entries.get(norm_name) or existing_entries.get(person_key)
+        if existing:
+            final_data.append(existing)
         else:
             entry = {
                 'group_id': group_id, 'date': today_str, 'session': session_type,
@@ -367,6 +383,7 @@ def sync_vesinh_sheet(group_id, session_type):
             new_rows.append(new_row)
             all_values.append(new_row)
             existing_entries[norm_name] = entry
+            if person_key: existing_entries[person_key] = entry
             final_data.append(entry)
 
     if need_clear_sheet or new_rows:
@@ -388,43 +405,78 @@ def sync_vesinh_sheet(group_id, session_type):
 def update_vesinh_status(group_id, session_type, staff_name, clicker_name, target_status='done'):
     """
     Cập nhật trạng thái hoàn thành vệ sinh tức thì trong RAM Cache và đẩy ghi Sheet chạy ngầm.
+    Tự động đồng bộ nếu ca/ngày hôm nay chưa có dòng trong bảng, so khớp thông minh bằng match_staff_name
+    và tự động bổ sung dòng hoàn tất cứu hộ nếu dữ liệu lịch bị thiếu sót.
     """
     try:
-        all_values = get_cached_values(WORKSHEET_VESINH_TRACKER_NAME, ttl=60, create_headers=VESINH_HEADERS)
-        if not all_values or len(all_values) <= 1:
-            sync_vesinh_sheet(group_id, session_type)
-            all_values = get_cached_values(WORKSHEET_VESINH_TRACKER_NAME, ttl=60, create_headers=VESINH_HEADERS)
-        
         tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
         today_str = datetime.now(tz_vietnam).strftime('%Y-%m-%d')
         time_now = datetime.now(tz_vietnam).strftime('%H:%M') if target_status == 'done' else ''
 
-        target_name_norm = normalize_text(staff_name)
-        target_group_id = str(group_id).strip()
+        all_values = get_cached_values(WORKSHEET_VESINH_TRACKER_NAME, ttl=60, create_headers=VESINH_HEADERS)
+        
+        # 1. Tự động kiểm tra xem ngày hôm nay và ca này đã được khởi tạo trong cache chưa
+        has_session_today = False
+        if all_values and len(all_values) > 1:
+            for r in all_values[1:]:
+                if len(r) > 2 and str(r[1]).strip() == today_str and str(r[2]).strip() == session_type:
+                    has_session_today = True
+                    break
+
+        if not has_session_today:
+            sync_vesinh_sheet(group_id, session_type)
+            all_values = get_cached_values(WORKSHEET_VESINH_TRACKER_NAME, ttl=60, create_headers=VESINH_HEADERS)
+            if not all_values:
+                all_values = [list(VESINH_HEADERS)]
 
         matching_rows = []
         already_done = True
-        for i, row in enumerate(all_values[1:], start=2):
-            if len(row) < 5: continue
-            
-            row_group = str(row[0]).strip()
-            row_date = str(row[1]).strip()
-            row_session = str(row[2]).strip()
-            row_name_norm = normalize_text(row[4])
+        target_gid = str(group_id or '').strip()
 
-            if (row_group == target_group_id and 
-                row_date == today_str and 
-                row_session == session_type and 
-                row_name_norm == target_name_norm):
-                matching_rows.append((i, row))
-                if len(row) < 7 or row[6].strip() != target_status:
-                    already_done = False
-        
+        # Bước 1: Khớp chính xác hôm nay + đúng ca + tên khớp + cùng group_id
+        if target_gid and target_gid != 'default':
+            for i, row in enumerate(all_values[1:], start=2):
+                if len(row) < 5: continue
+                r_group = str(row[0]).strip()
+                r_date = str(row[1]).strip()
+                r_session = str(row[2]).strip()
+                r_name = str(row[4]).strip()
+                if r_date == today_str and r_session == session_type and r_group == target_gid:
+                    if match_staff_name(r_name, staff_name):
+                        matching_rows.append((i, row))
+                        if len(row) < 7 or row[6].strip() != target_status:
+                            already_done = False
+
+        # Bước 2: Khớp hôm nay + đúng ca + tên khớp (bỏ qua group_id nếu bấm chéo nhóm hoặc từ Web App)
+        if not matching_rows:
+            for i, row in enumerate(all_values[1:], start=2):
+                if len(row) < 5: continue
+                r_date = str(row[1]).strip()
+                r_session = str(row[2]).strip()
+                r_name = str(row[4]).strip()
+                if r_date == today_str and r_session == session_type:
+                    if match_staff_name(r_name, staff_name):
+                        matching_rows.append((i, row))
+                        if len(row) < 7 or row[6].strip() != target_status:
+                            already_done = False
+
+        # Bước 3: Khớp hôm nay + tên khớp (bất kỳ ca nào)
+        if not matching_rows:
+            for i, row in enumerate(all_values[1:], start=2):
+                if len(row) < 5: continue
+                r_date = str(row[1]).strip()
+                r_name = str(row[4]).strip()
+                if r_date == today_str and match_staff_name(r_name, staff_name):
+                    matching_rows.append((i, row))
+                    if len(row) < 7 or row[6].strip() != target_status:
+                        already_done = False
+
+        if matching_rows and already_done:
+            return "already", None
+
+        clicked_user = clicker_name if target_status == 'done' else ''
+
         if matching_rows:
-            if already_done:
-                return "already", None
-
-            clicked_user = clicker_name if target_status == 'done' else ''
             row_indices_for_bg = []
             for row_index, _ in matching_rows:
                 mem_row = all_values[row_index - 1]
@@ -451,8 +503,29 @@ def update_vesinh_status(group_id, session_type, staff_name, clicker_name, targe
                 ws.update_cells(cells)
             run_bg_sheet_task(_bg_update_vesinh, row_indices_for_bg, target_status, time_now, clicked_user, desc="update_vesinh_status")
             return True, time_now
-        
-        return False, None
+
+        # Bước 4: Fallback cứu hộ an toàn tuyệt đối (Không bao giờ báo lỗi cho người dùng)
+        new_row = [
+            str(group_id or 'default'),
+            today_str,
+            session_type,
+            'NV',
+            staff_name,
+            'Vệ sinh bổ sung',
+            target_status,
+            time_now,
+            clicked_user
+        ]
+        all_values.append(new_row)
+        set_cached_values(WORKSHEET_VESINH_TRACKER_NAME, all_values)
+
+        def _bg_append_vesinh(to_append):
+            ws = get_worksheet_cached_obj(WORKSHEET_VESINH_TRACKER_NAME, create_headers=VESINH_HEADERS, rows=100, cols=10)
+            if ws:
+                ws.append_rows([to_append], value_input_option='USER_ENTERED')
+        run_bg_sheet_task(_bg_append_vesinh, new_row, desc=f"fallback_add_vesinh_{staff_name}")
+        return True, time_now
+
     except Exception as e:
         print(f"Lỗi update vesinh status: {e}")
         return False, None
