@@ -42,12 +42,30 @@ WORKSHEET_MEAL_TRACKER_NAME = 'meal_tracker'
 WORKSHEET_ADHOC_TASKS = 'adhoc_tasks'
 WORKSHEET_VESINH_TRACKER_NAME = 'vesinh_tracker'
 
-# Nhóm duy nhất được phép gộp Checklist ca và Công việc giao thêm
+# Nhóm Kho / Nhân viên chính được phép gộp Checklist Kho và Công việc giao thêm
 MAIN_CHECKLIST_GROUP_ID = (
     os.environ.get('MAIN_CHECKLIST_GROUP_ID')
     or os.environ.get('CHECKLIST_GROUP_ID')
+    or os.environ.get('EMPLOYEE_GROUP_ID')
     or 'C37e48216804398593d8c79fe3edacdc7'
 )
+
+
+def get_kho_group_ids():
+    """Tập hợp các group_id thuộc Nhóm Kho / Nhân viên được phép gộp Checklist Kho."""
+    ids = {str(MAIN_CHECKLIST_GROUP_ID).strip()}
+    for env_key in ('MAIN_CHECKLIST_GROUP_ID', 'CHECKLIST_GROUP_ID', 'EMPLOYEE_GROUP_ID'):
+        val = (os.environ.get(env_key) or '').strip()
+        if val:
+            ids.add(val)
+    ids.discard('')
+    return ids
+
+
+def is_kho_checklist_group(group_id):
+    """Kiểm tra xem group_id có phải là Nhóm Kho / Nhân viên vận hành chính hay không."""
+    gid = str(group_id or '').strip()
+    return bool(gid) and gid in get_kho_group_ids()
 
 # URL của LINE LIFF hoặc Web App nội bộ trên Render
 def get_liff_url():
@@ -115,7 +133,7 @@ _TRACKER_MONOTONIC_SPECS = {
         'done_val': 'complete',
         'min_len': 7,
         'extra_cols': [6],
-        'key_fn': lambda r: str(r[2]).strip().lower() if len(r) > 2 else ''
+        'key_fn': lambda r: f"{str(r[0]).strip()}|{str(r[2]).strip().lower()}" if len(r) > 2 else ''
     },
     WORKSHEET_MEAL_TRACKER_NAME: {
         'date_col': 1,
@@ -139,7 +157,7 @@ _TRACKER_MONOTONIC_SPECS = {
         'done_val': 'complete',
         'min_len': 9,
         'extra_cols': [6, 7],
-        'key_fn': lambda r: str(r[3]).strip().lower() if len(r) > 3 else ''
+        'key_fn': lambda r: f"{str(r[0]).strip()}|{str(r[3]).strip().lower()}" if len(r) > 3 else ''
     }
 }
 

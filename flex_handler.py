@@ -8,7 +8,7 @@ import gspread
 # Import từ file cấu hình trung tâm
 from config import (
     CLIENT, SHEET_NAME, WORKSHEET_TRACKER_NAME, WORKSHEET_ADHOC_TASKS,
-    get_spreadsheet, MAIN_CHECKLIST_GROUP_ID, get_liff_url,
+    get_spreadsheet, MAIN_CHECKLIST_GROUP_ID, is_kho_checklist_group, get_liff_url,
     get_cached_values, get_cached_records, set_cached_values,
     run_bg_sheet_task, get_worksheet_cached_obj, values_to_records,
     is_date_today, sync_table_to_sheet_bg
@@ -187,6 +187,7 @@ def initialize_daily_tasks(group_id, shift_type, force=False):
         today_rows = []
         existing_shift_tids = set()
         need_clean_old = False
+        target_gid = str(group_id or 'default').strip()
         
         if all_values:
             headers = all_values[0] if all_values[0] else list(TRACKER_HEADERS)
@@ -196,23 +197,24 @@ def initialize_daily_tasks(group_id, shift_type, force=False):
                 if len(row) < 3:
                     need_clean_old = True
                     continue
+                r_gid = str(row[0]).strip()
                 r_date = str(row[1]).strip()
                 r_task_id = str(row[2]).strip()
                 
                 if _is_date_today(r_date, today_str):
                     row_copy = list(row)
                     row_copy[1] = today_str
-                    if force and r_task_id.startswith(shift_type):
-                        need_clean_old = True
-                        continue
+                    if r_gid == target_gid:
+                        if force and r_task_id.startswith(shift_type):
+                            need_clean_old = True
+                            continue
+                        if r_task_id.startswith(shift_type):
+                            existing_shift_tids.add(r_task_id)
                     today_rows.append(row_copy)
-                    if r_task_id.startswith(shift_type):
-                        existing_shift_tids.add(r_task_id)
                 else:
                     need_clean_old = True
         
         tasks_to_add = []
-        target_gid = str(group_id or 'default').strip()
         for task in TASKS.get(shift_type, []):
             if task['id'] not in existing_shift_tids:
                 new_row = [target_gid, today_str, task['id'], task['name'], task['time'], 'incomplete', '']
@@ -254,7 +256,7 @@ def update_shift_task_status(group_id, task_id, shift_type, target_status, user_
     clean_tid = str(task_id or '').strip()
 
     matched_row_nums = []
-    # 1. Tìm dòng khớp group_id, date, task_id
+    # Tìm dòng khớp chính xác group_id, date, task_id (cô lập hoàn toàn giữa các nhóm)
     for idx in range(1, len(all_values)):
         row = all_values[idx]
         if len(row) < 3:
@@ -264,18 +266,6 @@ def update_shift_task_status(group_id, task_id, shift_type, target_status, user_
         r_tid = str(row[2]).strip()
         if _is_date_today(r_date, today_str) and r_tid == clean_tid and (not target_gid or r_gid == target_gid):
             matched_row_nums.append(idx + 1)  # 1-based sheet row
-
-    # 2. Fallback nếu lệch group_id
-    if not matched_row_nums:
-        for idx in range(1, len(all_values)):
-            row = all_values[idx]
-            if len(row) < 3:
-                continue
-            r_date = str(row[1]).strip()
-            r_tid = str(row[2]).strip()
-            if _is_date_today(r_date, today_str) and r_tid == clean_tid:
-                matched_row_nums.append(idx + 1)
-                target_gid = str(row[0]).strip()
 
     if matched_row_nums:
         # Nếu task đã hoàn tất trước đó rồi, không gửi lại tin nhắn mới
@@ -339,17 +329,6 @@ def get_tasks_status_from_sheet(group_id, shift_type, all_records=None):
                         'user_name': str(record.get('user_name', '')).strip()
                     }
 
-        # Fallback an toàn: nếu không tìm thấy theo target_gid (do lệch group_id giữa các môi trường), lấy theo ngày hôm nay
-        if not task_statuses:
-            for record in all_records:
-                r_date = str(record.get('date', '')).strip()
-                if _is_date_today(r_date, today_str):
-                    task_id = str(record.get('task_id', '')).strip()
-                    if task_id and task_id.startswith(shift_type):
-                        task_statuses[task_id] = {
-                            'status': str(record.get('status', 'incomplete')).strip(),
-                            'user_name': str(record.get('user_name', '')).strip()
-                        }
         return task_statuses
     except Exception as e:
         print(f"Lỗi khi lấy trạng thái công việc: {e}")
@@ -796,24 +775,6 @@ def get_adhoc_tasks_for_group_today(group_id):
                     'created_at': str(row[i_created_at]).strip() if len(row) > i_created_at else ''
                 })
 
-        # Fallback an toàn nếu lệch group_id
-        if not filtered_tasks and target_gid:
-            for row in all_values[1:]:
-                if len(row) <= max(i_gid, i_date):
-                    continue
-                row_date = str(row[i_date]).strip()
-                if _is_date_today(row_date, today_str):
-                    filtered_tasks.append({
-                        'group_id': str(row[i_gid]).strip(),
-                        'date': row_date,
-                        'assignee': str(row[i_assignee]).strip() if len(row) > i_assignee else '',
-                        'task_id': str(row[i_tid]).strip() if len(row) > i_tid else '',
-                        'task_name': str(row[i_name]).strip() if len(row) > i_name else '',
-                        'status': str(row[i_status]).strip() if len(row) > i_status else 'incomplete',
-                        'completed_by': str(row[i_comp_by]).strip() if len(row) > i_comp_by else '',
-                        'completed_at': str(row[i_comp_at]).strip() if len(row) > i_comp_at else '',
-                        'created_at': str(row[i_created_at]).strip() if len(row) > i_created_at else ''
-                    })
         return filtered_tasks
     except Exception as e:
         print(f"Lỗi khi lấy adhoc tasks của nhóm hôm nay: {e}")
@@ -956,19 +917,6 @@ def update_adhoc_task_status(group_id, task_id, target_status, completed_by):
                     parts = clean_tid.split('_')
                     if len(parts) >= 3:
                         task_group_hash = parts[1]
-
-        if not row_indices:
-            for i, row in enumerate(all_values[1:], start=2):
-                if len(row) <= i_tid:
-                    continue
-                r_tid = str(row[i_tid]).strip()
-                if r_tid == clean_tid:
-                    row_indices.append(i)
-                    assignee = str(row[i_assignee]).strip() if len(row) > i_assignee else ''
-                    if clean_tid.startswith('all_') or clean_tid.startswith('multi_'):
-                        parts = clean_tid.split('_')
-                        if len(parts) >= 3:
-                            task_group_hash = parts[1]
 
         if row_indices:
             # Nếu công việc này đã hoàn tất trước đó rồi, không gửi lại tin nhắn mới
@@ -2136,16 +2084,65 @@ def build_work_carousel(checklist_bubble, adhoc_bubble):
     return None
 
 
-def generate_combined_work_flex(group_id, shift_type=None, adhoc_hash=None, adhoc_mode=None):
+def get_active_group_checklist_shift(group_id, all_records=None):
     """
-    Gộp Checklist Kho (Ca sáng / Chiều) và Bảng công việc giao thêm thành Carousel 2 Card đẹp mắt.
+    Xác định thẻ Checklist định kỳ thuộc về riêng `group_id` trong ngày hôm nay:
+      - Nhóm Kho / Nhân viên chính (`is_kho_checklist_group`): trả về 'sang' (<15h) hoặc 'chieu' (>=15h)
+        và đảm bảo ca đó đã được khởi tạo cho nhóm Kho.
+      - Các nhóm khác (ví dụ SAVICO- HÌNH ẢNH, nhóm PG, nhóm Cụm...):
+        TUYỆT ĐỐI KHÔNG tự ý lôi Checklist Kho ('sang'/'chieu') vào gộp khi giao việc.
+        Chỉ trả về 'vs' nếu trong ngày hôm nay chính `group_id` đó đã mở Checklist Hình ảnh ('vs');
+        ngược lại trả về None để chỉ hiển thị Bảng công việc giao thêm của riêng nhóm đó.
     """
-    if not shift_type:
-        tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
-        current_hour = datetime.now(tz_vietnam).hour
-        shift_type = 'sang' if current_hour < 15 else 'chieu'
+    target_gid = str(group_id or '').strip()
+    if not target_gid:
+        return None
 
-    checklist_bubble = generate_checklist_flex(group_id, shift_type)
+    tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
+    current_hour = datetime.now(tz_vietnam).hour
+    today_str = datetime.now(tz_vietnam).strftime('%Y-%m-%d')
+
+    if is_kho_checklist_group(target_gid):
+        shift = 'sang' if current_hour < 15 else 'chieu'
+        initialize_daily_tasks(target_gid, shift)
+        return shift
+
+    try:
+        if all_records is None:
+            all_values = get_cached_values(WORKSHEET_TRACKER_NAME, ttl=60, create_headers=TRACKER_HEADERS)
+            for row in (all_values[1:] if all_values and len(all_values) > 1 else []):
+                if len(row) < 3:
+                    continue
+                if str(row[0]).strip() == target_gid and _is_date_today(row[1], today_str):
+                    if str(row[2]).strip().startswith('vs'):
+                        return 'vs'
+        else:
+            if all_records and isinstance(all_records[0], list):
+                all_records = values_to_records(all_records)
+            for rec in (all_records or []):
+                if str(rec.get('group_id', '')).strip() == target_gid and _is_date_today(rec.get('date', ''), today_str):
+                    if str(rec.get('task_id', '')).strip().startswith('vs'):
+                        return 'vs'
+    except Exception as e:
+        print(f"Lỗi kiểm tra checklist đang hoạt động của nhóm {target_gid}: {e}")
+
+    return None
+
+
+def generate_combined_work_flex(group_id, shift_type=None, adhoc_hash=None, adhoc_mode=None, all_records_prefetched=None):
+    """
+    Gộp công việc của nhóm theo đúng phạm vi nhóm (`group_id`):
+      - Nhóm Kho: gộp [Checklist Kho (Sáng/Chiều), Bảng công việc giao thêm của nhóm Kho].
+      - Nhóm Hình ảnh / nhóm khác: chỉ gộp với thẻ Checklist thuộc đúng nhóm đó (ví dụ 'vs' nếu đã mở trong ngày),
+        nếu không có thì chỉ hiển thị Bảng công việc giao thêm của riêng nhóm đó.
+    """
+    effective_shift = shift_type or get_active_group_checklist_shift(
+        group_id, all_records=all_records_prefetched
+    )
+    checklist_bubble = (
+        generate_checklist_flex(group_id, effective_shift, all_records_prefetched=all_records_prefetched)
+        if effective_shift else None
+    )
     adhoc_bubble = generate_today_adhoc_flex(group_id)
 
     if checklist_bubble and adhoc_bubble:
@@ -2165,7 +2162,7 @@ def get_checklist_message(shift_type, group_id):
             print("Lỗi: Không có Group ID để tạo checklist.")
             return None
         initialize_daily_tasks(group_id, shift_type)
-        if str(group_id).strip() == str(MAIN_CHECKLIST_GROUP_ID).strip():
+        if is_kho_checklist_group(group_id) or shift_type == 'vs':
             flex_content = generate_combined_work_flex(group_id, shift_type)
         else:
             flex_content = generate_checklist_flex(group_id, shift_type)

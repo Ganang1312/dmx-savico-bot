@@ -24,7 +24,7 @@ from linebot.models import (
 from config import (
     CLIENT, SHEET_NAME, WORKSHEET_NAME_USERS, WORKSHEET_NAME,
     WORKSHEET_TRACKER_NAME, WORKSHEET_SCHEDULES_NAME,
-    get_spreadsheet, MAIN_CHECKLIST_GROUP_ID,
+    get_spreadsheet, MAIN_CHECKLIST_GROUP_ID, is_kho_checklist_group,
     get_cached_values, get_cached_records, set_cached_values,
     run_bg_sheet_task, get_liff_url
 )
@@ -37,7 +37,7 @@ from flex_handler import (
     add_all_adhoc_tasks, generate_all_adhoc_flex, register_group_member,
     add_multi_adhoc_tasks, generate_multi_adhoc_flex,
     find_latest_task_token, cancel_task_group,
-    generate_combined_work_flex, generate_today_adhoc_flex,
+    get_active_group_checklist_shift, generate_combined_work_flex, generate_today_adhoc_flex,
     send_initial_checklist, get_checklist_message,
     is_work_command, parse_work_command, plan_assignments, resolve_mentions
 )
@@ -655,11 +655,15 @@ def api_liff_state():
         tz = pytz.timezone('Asia/Ho_Chi_Minh')
         now = datetime.now(tz)
         group_id = _resolve_liff_group_id(request.args.get('group_id'))
-        shift = request.args.get('shift') or ('sang' if now.hour < 15 else 'chieu')
-        if shift not in ('sang', 'chieu', 'vs'):
-            shift = 'sang'
-
-        initialize_daily_tasks(group_id, shift)
+        req_shift = request.args.get('shift')
+        if req_shift in ('sang', 'chieu', 'vs'):
+            shift = req_shift
+            initialize_daily_tasks(group_id, shift)
+        else:
+            active_shift = get_active_group_checklist_shift(group_id)
+            shift = active_shift or ('sang' if now.hour < 15 else 'chieu')
+            if active_shift:
+                initialize_daily_tasks(group_id, shift)
         statuses = get_tasks_status_from_sheet(group_id, shift)
         shift_tasks = []
         for t in TASKS.get(shift, []):
@@ -1352,7 +1356,7 @@ def handle_postback(event):
     data = dict(urllib.parse.parse_qsl(data_str))
     action = data.get('action')
     user_id = event.source.user_id
-    event_group_id = getattr(event.source, 'group_id', None)
+    event_group_id = getattr(event.source, 'group_id', None) or getattr(event.source, 'room_id', None)
 
     # 1. Gia hạn User
     if action == 'renew':
@@ -1466,15 +1470,14 @@ def handle_postback(event):
                 group_id = resolved_gid
 
             if shift_type == 'vs':
-                updated_flex_content = generate_checklist_flex(group_id, 'vs', all_records_prefetched=all_records)
-                alt_text = "Cập nhật checklist hình ảnh"
-            elif str(group_id).strip() == str(MAIN_CHECKLIST_GROUP_ID).strip():
-                checklist_bubble = generate_checklist_flex(group_id, shift_type, all_records_prefetched=all_records)
-                adhoc_bubble = generate_today_adhoc_flex(group_id)
-                if checklist_bubble and adhoc_bubble:
-                    updated_flex_content = {"type": "carousel", "contents": [checklist_bubble, adhoc_bubble]}
-                else:
-                    updated_flex_content = checklist_bubble or adhoc_bubble
+                updated_flex_content = generate_combined_work_flex(
+                    group_id, 'vs', all_records_prefetched=all_records
+                )
+                alt_text = "📸 Cập nhật checklist hình ảnh"
+            elif is_kho_checklist_group(group_id):
+                updated_flex_content = generate_combined_work_flex(
+                    group_id, shift_type, all_records_prefetched=all_records
+                )
                 alt_text = f"📋 Cập nhật checklist ca {shift_type}"
             else:
                 updated_flex_content = generate_checklist_flex(group_id, shift_type, all_records_prefetched=all_records)
@@ -1515,16 +1518,16 @@ def handle_postback(event):
             if success == "already":
                 return
             if success:
-                if not shift_type:
-                    tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
-                    current_hour = datetime.now(tz_vietnam).hour
-                    shift_type = 'sang' if current_hour < 15 else 'chieu'
-
+                explicit_shift = data.get('shift') or None
                 mode = 'all' if (task_id and str(task_id).startswith('all_')) else 'multi'
                 updated_flex_content = generate_combined_work_flex(
-                    group_id, shift_type, adhoc_hash=task_group_hash, adhoc_mode=mode
+                    group_id, shift_type=explicit_shift, adhoc_hash=task_group_hash, adhoc_mode=mode
                 )
-                alt_text = f"📋 Checklist ca {shift_type} & Cập nhật công việc giao thêm"
+                alt_text = (
+                    "📋 Checklist & Cập nhật công việc giao thêm"
+                    if isinstance(updated_flex_content, dict) and updated_flex_content.get('type') == 'carousel'
+                    else "📋 Cập nhật công việc giao thêm"
+                )
 
                 if updated_flex_content:
                     reply_with_auto_shift(
@@ -1693,7 +1696,7 @@ def handle_message(event):
     user_message = event.message.text.strip()
     user_msg_upper = user_message.upper()
     user_id = event.source.user_id
-    event_group_id = getattr(event.source, 'group_id', None)
+    event_group_id = getattr(event.source, 'group_id', None) or getattr(event.source, 'room_id', None)
     source_id = event_group_id or user_id
 
     # Tự động lưu thành viên nhóm chạy ngầm (không chặn luồng xử lý lệnh)
@@ -1734,10 +1737,6 @@ def handle_message(event):
                 reply_with_auto_shift(event.reply_token, TextSendMessage(text=msg), group_id=group_id)
                 return
 
-            tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
-            current_hour = datetime.now(tz_vietnam).hour
-            current_shift = 'sang' if current_hour < 15 else 'chieu'
-
             plan = plan_assignments(parsed)
             if plan['mode'] == 'all':
                 last_hash = add_all_adhoc_tasks(group_id, plan['names'],
@@ -1752,9 +1751,13 @@ def handle_message(event):
                 return
 
             flex_content = generate_combined_work_flex(
-                group_id, current_shift, adhoc_hash=last_hash, adhoc_mode=plan['mode']
+                group_id, shift_type=None, adhoc_hash=last_hash, adhoc_mode=plan['mode']
             )
-            alt_text = f"📋 Checklist ca {current_shift} & Công việc giao thêm"
+            alt_text = (
+                "📋 Checklist & Công việc giao thêm"
+                if isinstance(flex_content, dict) and flex_content.get('type') == 'carousel'
+                else "📋 Bảng công việc giao thêm"
+            )
 
             if flex_content:
                 reply_with_auto_shift(
@@ -2022,9 +2025,9 @@ def handle_message(event):
         group_id = event_group_id or os.environ.get('EMPLOYEE_GROUP_ID') or MAIN_CHECKLIST_GROUP_ID
         try:
             initialize_daily_tasks(group_id, 'vs')
-            flex_content = generate_checklist_flex(group_id, 'vs')
+            flex_content = generate_combined_work_flex(group_id, 'vs')
             if flex_content:
-                message = FlexSendMessage(alt_text="Checklist hình ảnh trước 10h sáng", contents=flex_content)
+                message = FlexSendMessage(alt_text="📸 Checklist hình ảnh trước 10h sáng", contents=flex_content)
                 reply_with_auto_shift(event.reply_token, message, group_id=group_id)
             else:
                 line_bot_api.reply_message(event.reply_token, TextSendMessage(text="Không thể tạo checklist hình ảnh."))
