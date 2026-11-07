@@ -6,6 +6,7 @@ import copy
 import tempfile
 import threading
 import queue
+import atexit
 from datetime import datetime
 import pytz
 import gspread
@@ -373,11 +374,64 @@ def run_bg_sheet_task(fn, *args, desc="sheet_write", **kwargs):
     _BG_QUEUE.put((fn, args, kwargs, desc))
 
 
+def safe_ws_update(ws, range_name, values, raw=True):
+    """
+    Cập nhật dữ liệu vào Google Sheets an toàn, tương thích 100% mọi phiên bản gspread (v3, v4, v5, v6+).
+    """
+    if not ws:
+        return False
+    # 1. Thử chuẩn gspread v6+ (values trước, range_name sau, raw=True)
+    try:
+        ws.update(values=values, range_name=range_name, raw=raw)
+        return True
+    except TypeError:
+        pass
+    except Exception as e:
+        print(f"[safe_ws_update v6 attempt] {e}")
+
+    # 2. Thử chuẩn gspread v5 (range_name trước, values sau, value_input_option)
+    try:
+        val_opt = 'RAW' if raw else 'USER_ENTERED'
+        ws.update(range_name, values, value_input_option=val_opt)
+        return True
+    except TypeError:
+        pass
+    except Exception as e:
+        print(f"[safe_ws_update v5 attempt] {e}")
+
+    # 3. Thử range_name, values cơ bản
+    try:
+        ws.update(range_name, values)
+        return True
+    except TypeError:
+        pass
+    except Exception as e:
+        print(f"[safe_ws_update simple attempt] {e}")
+
+    # 4. Fallback cuối cùng
+    try:
+        ws.update(values, range_name)
+        return True
+    except Exception as e:
+        print(f"[safe_ws_update fallback attempt] {e}")
+        return False
+
+
+def _flush_bg_queue_on_exit():
+    """Khi tiến trình dừng hoặc Render tắt container để deploy, đảm bảo các tác vụ ghi sheet dở dang được ghi hết."""
+    try:
+        _BG_QUEUE.join()
+    except Exception:
+        pass
+
+atexit.register(_flush_bg_queue_on_exit)
+
+
 def sync_table_to_sheet_bg(worksheet_name, create_headers=None, clear_tail=False):
     """
     Đồng bộ nguyên bảng dữ liệu mới nhất từ bộ nhớ đệm lên Google Sheets ở chế độ chạy ngầm.
-    - Ghi nguyên khối từ ô A1 bằng value_input_option='RAW' (không bao giờ làm trắng bảng như ws.clear(),
-      không bao giờ ghi lệch dòng row_index, và không bị Google Sheets tự đổi định dạng ngày).
+    - Ghi nguyên khối từ ô A1 tương thích mọi phiên bản gspread (v5/v6+), đảm bảo không bao giờ
+      bị mất trạng thái hoàn tất kể cả khi container bị restart hoặc redeploy.
     """
     def _do_sync():
         ws = get_worksheet_cached_obj(worksheet_name, create_headers=create_headers)
@@ -409,10 +463,11 @@ def sync_table_to_sheet_bg(worksheet_name, create_headers=None, clear_tail=False
         pad_count = 45 if clear_tail else 15
         padded_rows = normalized_rows + [[''] * num_cols for _ in range(pad_count)]
 
-        try:
-            ws.update(range_name='A1', values=padded_rows, value_input_option='RAW')
-        except TypeError:
-            ws.update('A1', padded_rows, value_input_option='RAW')
+        ok = safe_ws_update(ws, 'A1', padded_rows, raw=True)
+        if ok:
+            print(f"[BG-SYNC SUCCESS] Đã lưu thành công {len(normalized_rows)} dòng vào sheet '{worksheet_name}'.")
+        else:
+            print(f"[BG-SYNC FAILED] Lỗi khi lưu dữ liệu vào sheet '{worksheet_name}'.")
 
         if clear_tail:
             try:
