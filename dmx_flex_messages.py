@@ -2938,42 +2938,37 @@ def build_realtime_flex(detail_limit=None):
 
     has_rt_detail = len(staff_realtime_agg) > 0
 
-    # Kiểm tra xem Data_Realtime_NV có phải dữ liệu chuẩn 1 ngày từ BI gốc (revenue-consolidated-get GROUPBY=STAFF) không
-    is_valid_official_rt_nv = False
-    is_cum_data = False
-    if data_rt_nv and isinstance(data_rt_nv, list) and len(data_rt_nv) > 0:
-        sample_first = data_rt_nv[0]
-        numday_win = int(parse_number(sample_first.get("numday_window", 0)))
-        total_check_qd = 0.0
-        total_check_thuc = 0.0
+    # Chốt chặn an toàn (đồng bộ 100% với baocao_realtime.js): Data_Realtime_NV có bị ô nhiễm bởi số lũy kế cả tháng không
+    is_rt_nv_polluted_by_cum = False
+    if data_rt_nv and isinstance(data_rt_nv, list):
         for r in data_rt_nv:
-            q_val = parse_number(get_key_val(r, "doanh thu quy đổi", "revenue_kfactor", "dt quy đổi", "Doanh thu Quy đổi", default=0))
-            t_val = parse_number(get_key_val(r, "doanh thu thực", "doanh thu", "revenue", default=0))
-            total_check_qd += (q_val / 1000000.0 if abs(q_val) >= 1000000 else q_val)
-            total_check_thuc += (t_val / 1000000.0 if abs(t_val) >= 1000000 else t_val)
+            num_days = parse_number(get_key_val(r, "numday_cum", "numday_window", default=0))
+            cum_date = r.get("cum_as_of_date_key") if isinstance(r, dict) else None
+            dt_val_raw = parse_number(get_key_val(r, "doanh thu quy đổi", "doanh thu quy doi", "revenue_kfactor", "doanh thu", "revenue", default=0))
+            dt_val = dt_val_raw / 1000000.0 if abs(dt_val_raw) >= 1000000 else dt_val_raw
+            if num_days > 1 or cum_date or dt_val > 250:
+                is_rt_nv_polluted_by_cum = True
+                break
 
-        if numday_win > 1 or (rt_total > 0 and total_check_qd > rt_total * 2.2):
-            is_cum_data = True
-        elif numday_win == 1 or (abs(total_check_qd - total_check_thuc) > 0.01 and (rt_total <= 0 or abs(total_check_qd - rt_total) <= max(15.0, rt_total * 0.25))):
-            is_valid_official_rt_nv = True
-
+    # Ưu tiên nguồn dữ liệu (đồng bộ 100% với dashboard baocao_realtime.js):
+    # 1. Có chi tiết đơn hàng realtime -> LUÔN tổng hợp từ Data_Realtime_NV_NganhHang x K-Factor,
+    #    bỏ qua Data_Realtime_NV (sheet này thường là dữ liệu dán thủ công từ BI, dễ cũ/sai thời điểm hơn chi tiết tự động đồng bộ)
+    # 2. Không có chi tiết -> chỉ dùng Data_Realtime_NV khi không bị ô nhiễm lũy kế
     source_nv_rows = []
     used_fallback_agg = False
-    if is_valid_official_rt_nv:
-        source_nv_rows = data_rt_nv
-    elif has_rt_detail:
+    if has_rt_detail:
         source_nv_rows = list(staff_realtime_agg.values())
         used_fallback_agg = True
-    elif not is_cum_data and data_rt_nv:
+    elif not is_rt_nv_polluted_by_cum and data_rt_nv:
         source_nv_rows = data_rt_nv
 
     parsed_nv_rt = []
     if source_nv_rows and isinstance(source_nv_rows, list) and len(source_nv_rows) > 0:
         for row in source_nv_rows:
-            m_nv = str(get_key_val(row, "mã nv", "ma_nv", "user", "rowcode", default="")).strip()
+            m_nv = str(get_key_val(row, "mã nv", "ma_nv", "ma nv", "user", "rowcode", "staffuser", "employeeid", default="")).strip()
             if not m_nv or m_nv.lower() == "online" or m_nv == "18001060":
                 continue
-            t_nv = get_key_val(row, "tên nhân viên", "tên nv", "ten_nv", "rowname", "employeeName", default="") or ""
+            t_nv = get_key_val(row, "tên nhân viên", "tên nv", "ten_nv", "ten nv", "ten nhan vien", "rowname", "staffname", "employeeName", "employeename", default="") or ""
 
             raw_dt = parse_number(get_key_val(row, "doanh thu quy đổi", "revenue_kfactor", "dt quy đổi", "Doanh thu Quy đổi", default=0))
             if abs(raw_dt) >= 1000000:
@@ -2988,6 +2983,9 @@ def build_realtime_flex(detail_limit=None):
                 dt_thuc_nv = raw_thuc
             if dt_thuc_nv == 0 and dt_nv != 0:
                 dt_thuc_nv = dt_nv
+            # Đồng bộ với dashboard: dữ liệu dán thủ công không có cột quy đổi -> lấy thực làm quy đổi
+            if dt_nv == 0 and dt_thuc_nv != 0:
+                dt_nv = dt_thuc_nv
 
             sl_nv = parse_number(get_key_val(row, "số lượng", "soluong", "quantity", "quantity_RT", default=0))
 
