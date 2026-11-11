@@ -1467,13 +1467,15 @@ def build_leaderboard_overview_bubble(emp_list, now_str):
         cl_text = f"⌛ Còn {fmt_num(con_lai_val)}" if con_lai_val > 0 else "🏆 Đạt"
         cl_color = "#dc2626" if con_lai_val > 0 else "#16a34a"
 
+        name_lines = [
+            {"type": "text", "text": first_name or "NV", "weight": "bold", "size": "xxs", "color": name_color, "wrap": True}
+        ]
+        if user_id and user_id != "NV":
+            name_lines.append({"type": "text", "text": f"ID:{user_id}", "size": "xxs", "color": "#94a3b8"})
         name_cell = {
             "type": "box",
             "layout": "vertical",
-            "contents": [
-                {"type": "text", "text": first_name, "weight": "bold", "size": "xxs", "color": name_color, "wrap": True},
-                {"type": "text", "text": f"ID:{user_id}" if user_id and user_id != "NV" else "", "size": "xxs", "color": "#94a3b8"}
-            ]
+            "contents": name_lines
         }
         dt_cell = {
             "type": "box",
@@ -1491,7 +1493,7 @@ def build_leaderboard_overview_bubble(emp_list, now_str):
         ))
         table_contents.append(mini_progress_bar(pct_val))
 
-    tot_vals = ["⭐", f"TỔNG CỘNG ({n_emp} NV)", "", "", f"{fmt_num(sum_actual)} / {fmt_num(sum_target)}", f"{total_pct:.0f}%"]
+    tot_vals = ["⭐", f"TỔNG CỘNG ({n_emp} NV)", "–", "–", f"{fmt_num(sum_actual)} / {fmt_num(sum_target)}", f"{total_pct:.0f}%"]
     table_contents.append(make_table_row(
         tot_vals, weights_lb, aligns_lb, ["#ffffff"] * len(tot_vals), bold=True, bg_color="#f59e0b"
     ))
@@ -1545,6 +1547,7 @@ def build_individual_staff_card(e, rank, total_emp=11, now_str="", thi_dua_list=
         if not user_id or user_id == "90509" or user_id == "NV":
             user_id = parts[0].strip()
         full_name = parts[-1].strip()
+    full_name = full_name or "Nhân Viên"
         
     first_name = full_name.split()[-1] if full_name else "NV"
     short_name_code = f"{first_name}-{user_id}" if user_id else first_name
@@ -1799,7 +1802,7 @@ def build_individual_staff_card(e, rank, total_emp=11, now_str="", thi_dua_list=
         td_rows.append(make_table_row(vals, weights, aligns, colors, wraps=wraps, bg_color=row_bg))
 
     td_rows.append(make_table_row(
-        ["⭐", f"{td_passed}/{td_total} nhóm dự kiến về đích", "", "", "", "", f"{td_pct:.0f}%"],
+        ["⭐", f"{td_passed}/{td_total} nhóm dự kiến về đích", "–", "–", "–", "–", f"{td_pct:.0f}%"],
         weights, aligns, ["#ffffff"] * 7, bold=True, bg_color="#0f766e"
     ))
 
