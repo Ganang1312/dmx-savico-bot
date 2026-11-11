@@ -533,46 +533,6 @@ def get_color_class(pct):
     else:
         return "#dc2626" # Red
 
-
-def hero_kpi_box(label, value, bg_color):
-    """Ô KPI nền màu đậm, chữ trắng — đồng bộ khối Hero KPI của lệnh LK1."""
-    return {
-        "type": "box",
-        "layout": "vertical",
-        "flex": 1,
-        "backgroundColor": bg_color,
-        "paddingAll": "md",
-        "cornerRadius": "md",
-        "contents": [
-            {"type": "text", "text": label, "size": "xs", "color": "#ffffff", "weight": "bold", "align": "center"},
-            {"type": "text", "text": value, "size": "sm", "color": "#ffffff", "weight": "bold", "align": "center", "margin": "xs"}
-        ]
-    }
-
-
-def mini_progress_bar(pct, height="3px", margin="xs"):
-    """Thanh tiến độ mini dưới mỗi dòng bảng — đồng bộ bảng LK1."""
-    pct = pct if isinstance(pct, (int, float)) else 0.0
-    return {
-        "type": "box",
-        "layout": "vertical",
-        "backgroundColor": "#e2e8f0",
-        "height": height,
-        "cornerRadius": "sm",
-        "margin": margin,
-        "contents": [
-            {
-                "type": "box",
-                "layout": "vertical",
-                "backgroundColor": get_color_class(pct / 100.0),
-                "height": height,
-                "cornerRadius": "sm",
-                "width": f"{min(100, max(2, round(pct)))}%",
-                "contents": [{"type": "filler"}]
-            }
-        ]
-    }
-
 def make_thidua_progress_row(idx, name, con_lai_str, ht, unit, mt_ngay_str=None):
     ht_pct = round(ht * 100)
     color = get_color_class(ht)
@@ -1358,76 +1318,26 @@ def shorten_staff_name_user(full_name, user_id=None):
 
 def build_leaderboard_overview_bubble(emp_list, now_str):
     """
-    Tin nhắn 1: Bảng Xếp Hạng Doanh Thu & Thi Đua Tất Cả Nhân Viên.
-    Giao diện đồng bộ với lệnh LK1: Hero KPI → Thẻ tiến độ → Bảng xếp hạng dạng card.
+    Tin nhắn 1: Bảng Xếp Hạng Doanh Thu & Thi Đua Tất Cả Nhân Viên (Chuẩn Ảnh 1 mới)
     """
-    n_emp = len(emp_list)
-    sum_actual = sum(float(e.get("actual", 0.0) or 0.0) for e in emp_list)
-    sum_target = sum(float(e.get("target", 0.0) or 0.0) for e in emp_list)
-    total_pct = (sum_actual / sum_target * 100.0) if sum_target > 0 else 0.0
-    cnt_done = sum(1 for e in emp_list
-                   if float(e.get("target", 0.0) or 0.0) > 0
-                   and float(e.get("actual", 0.0) or 0.0) >= float(e.get("target", 0.0) or 0.0))
-    cnt_dk = sum(1 for e in emp_list if float(e.get("du_kien_pct", 0.0) or 0.0) >= 100.0)
-    avg_dk = (sum(float(e.get("du_kien_pct", 0.0) or 0.0) for e in emp_list) / n_emp) if n_emp > 0 else 0.0
-
-    # 1. Hero KPI grid (đồng bộ LK1)
-    hero_grid = {
+    rows_contents = []
+    
+    # Header Bảng
+    rows_contents.append({
         "type": "box",
-        "layout": "vertical",
-        "margin": "md",
-        "spacing": "sm",
+        "layout": "horizontal",
+        "backgroundColor": "#1e293b",
+        "paddingAll": "xs",
+        "cornerRadius": "xs",
         "contents": [
-            {
-                "type": "box",
-                "layout": "horizontal",
-                "spacing": "sm",
-                "contents": [
-                    hero_kpi_box("💰 TỔNG DT LŨY KẾ", f"{fmt_num(sum_actual)} Tr ({total_pct:.0f}%)", "#1e40af"),
-                    hero_kpi_box("🎯 TỔNG MỤC TIÊU", f"{fmt_num(sum_target)} Tr", "#475569")
-                ]
-            },
-            {
-                "type": "box",
-                "layout": "horizontal",
-                "spacing": "sm",
-                "contents": [
-                    hero_kpi_box("🏆 ĐẠT MỤC TIÊU", f"{cnt_done}/{n_emp} NV", "#10b981"),
-                    hero_kpi_box("🔮 DỰ KIẾN BÌNH QUÂN", f"{avg_dk:.0f}%", "#f59e0b")
-                ]
-            }
+            {"type": "text", "text": "#", "size": "xxs", "color": "#ffffff", "weight": "bold", "flex": 1, "align": "center"},
+            {"type": "text", "text": "NV", "size": "xxs", "color": "#ffffff", "weight": "bold", "flex": 3, "align": "start"},
+            {"type": "text", "text": "ĐIỂM", "size": "xxs", "color": "#ffffff", "weight": "bold", "flex": 2, "align": "center"},
+            {"type": "text", "text": "TĐ", "size": "xxs", "color": "#ffffff", "weight": "bold", "flex": 2, "align": "center"},
+            {"type": "text", "text": "DOANH THU", "size": "xxs", "color": "#ffffff", "weight": "bold", "flex": 5, "align": "center"}
         ]
-    }
-
-    # 2. Thẻ tiến độ tổng (đồng bộ LK1)
-    progress_card = {
-        "type": "box",
-        "layout": "vertical",
-        "backgroundColor": "#f0f9ff",
-        "borderColor": "#bae6fd",
-        "borderWidth": "1px",
-        "paddingAll": "sm",
-        "cornerRadius": "md",
-        "margin": "md",
-        "contents": [
-            {"type": "text", "text": "📈 TIẾN ĐỘ HOÀN THÀNH THÁNG", "size": "xxs", "color": "#0f172a", "align": "center", "weight": "bold"},
-            {"type": "text", "text": f"{total_pct:.0f}%", "size": "lg", "color": get_color_class(total_pct / 100.0), "weight": "bold", "align": "center"},
-            mini_progress_bar(total_pct, height="6px", margin="xs"),
-            {"type": "text", "text": f"🏅 {cnt_done}/{n_emp} NV đạt target • 🔮 {cnt_dk}/{n_emp} NV dự kiến về đích", "size": "xxs", "color": "#d97706", "weight": "bold", "align": "center", "margin": "xs"}
-        ]
-    }
-
-    # 3. Bảng xếp hạng dạng card (đồng bộ bảng của LK1)
-    headers_lb = ["#", "NHÂN VIÊN", "ĐIỂM", "TĐ", "DTQĐ / TG", "%HT"]
-    weights_lb = [1, 4, 2, 2, 4, 2]
-    aligns_lb = ["center", "start", "center", "center", "center", "center"]
-    wraps_lb = [False, True, False, False, False, False]
-
-    table_contents = [
-        {"type": "text", "text": "📋 BẢNG XẾP HẠNG NHÂN VIÊN", "size": "xxs", "color": "#0284c7", "weight": "bold", "margin": "xs"},
-        make_table_header(headers_lb, weights_lb, aligns_lb, bg_color="#0f766e"),
-        {"type": "separator", "color": "#cbd5e1", "margin": "xs"}
-    ]
+    })
+    rows_contents.append({"type": "separator", "color": "#cbd5e1", "margin": "xs"})
 
     for idx, e in enumerate(emp_list):
         rank = idx + 1
@@ -1452,51 +1362,73 @@ def build_leaderboard_overview_bubble(emp_list, now_str):
             name_color = "#c2410c"
         else:
             rank_str = str(rank)
-            row_bg = None
+            row_bg = "#f8fafc" if rank % 2 == 0 else "#ffffff"
             score_color = "#64748b"
             name_color = "#0f172a"
 
-        actual_val = float(e.get("actual", 0.0) or 0.0)
-        target_val = float(e.get("target", 0.0) or 0.0)
+        actual_val = e.get("actual", 0.0)
+        target_val = e.get("target", 0.0)
         con_lai_val = max(0.0, target_val - actual_val)
         pct_val = (actual_val / target_val * 100.0) if target_val > 0 else 0.0
-        score_val = float(e.get("diem", 90.0 - rank * 3.5) or 0.0)
+        score_val = e.get("diem", 90.0 - rank * 3.5)
         td_passed = e.get("count_nh_du_kien", e.get("td_passed", max(1, 10 - rank)))
         td_total = e.get("td_total", 23)
 
-        cl_text = f"⌛ Còn {fmt_num(con_lai_val)}" if con_lai_val > 0 else "🏆 Đạt"
+        cl_text = f"⌛ CÒN {fmt_num(con_lai_val)}" if con_lai_val > 0 else "🏆 ĐẠT TARGET"
         cl_color = "#dc2626" if con_lai_val > 0 else "#16a34a"
 
-        name_lines = [
-            {"type": "text", "text": first_name or "NV", "weight": "bold", "size": "xxs", "color": name_color, "wrap": True}
-        ]
-        if user_id and user_id != "NV":
-            name_lines.append({"type": "text", "text": f"ID:{user_id}", "size": "xxs", "color": "#94a3b8"})
-        name_cell = {
+        row_box = {
             "type": "box",
-            "layout": "vertical",
-            "contents": name_lines
-        }
-        dt_cell = {
-            "type": "box",
-            "layout": "vertical",
+            "layout": "horizontal",
+            "paddingAll": "xs",
+            "backgroundColor": row_bg,
+            "margin": "xs",
             "contents": [
-                {"type": "text", "text": f"{fmt_num(actual_val)} / {fmt_num(target_val)}", "size": "xxs", "weight": "bold", "color": "#0284c7"},
-                {"type": "text", "text": cl_text, "size": "xxs", "color": cl_color, "weight": "bold"}
+                # STT Icon
+                {
+                    "type": "box", "layout": "vertical", "flex": 1, "align": "center",
+                    "contents": [{"type": "text", "text": rank_str, "weight": "bold", "size": "xxs", "color": score_color, "align": "center"}]
+                },
+                # Tên nhân viên
+                {
+                    "type": "box", "layout": "vertical", "flex": 3,
+                    "contents": (
+                        [
+                            {"type": "text", "text": first_name, "weight": "bold", "size": "xxs", "color": name_color},
+                            {"type": "text", "text": f"ID:{user_id}", "size": "xxs", "color": "#64748b", "margin": "xs"}
+                        ]
+                        if user_id and user_id != "NV"
+                        else [{"type": "text", "text": first_name, "weight": "bold", "size": "xxs", "color": name_color}]
+                    )
+                },
+                # Điểm số
+                {
+                    "type": "box", "layout": "vertical", "flex": 2, "align": "center",
+                    "contents": [{"type": "text", "text": f"{score_val:.1f}", "weight": "bold", "size": "xxs", "color": score_color}]
+                },
+                # Thi đua
+                {
+                    "type": "box", "layout": "vertical", "flex": 2, "align": "center",
+                    "contents": [{"type": "text", "text": f"{td_passed}/{td_total}", "weight": "bold", "size": "xxs", "color": "#0284c7"}]
+                },
+                # Doanh thu
+                {
+                    "type": "box", "layout": "vertical", "flex": 5,
+                    "contents": [
+                        {
+                            "type": "box", "layout": "horizontal",
+                            "contents": [
+                                {"type": "text", "text": f"{fmt_num(actual_val)} / {fmt_num(target_val)}", "size": "xxs", "weight": "bold", "color": "#0284c7", "flex": 3},
+                                {"type": "text", "text": f"{pct_val:.0f}%", "size": "xxs", "weight": "bold", "color": "#d97706", "align": "end", "flex": 2}
+                            ]
+                        },
+                        {"type": "text", "text": cl_text, "size": "xxs", "color": cl_color, "weight": "bold", "align": "end", "margin": "xs"}
+                    ]
+                }
             ]
         }
-
-        row_vals = [rank_str, name_cell, f"{score_val:.1f}", f"{td_passed}/{td_total}", dt_cell, f"{pct_val:.0f}%"]
-        row_colors = ["#64748b", "#0f172a", score_color, "#0284c7", "#0284c7", get_color_class(pct_val / 100.0)]
-        table_contents.append(make_table_row(
-            row_vals, weights_lb, aligns_lb, row_colors, wraps=wraps_lb, bg_color=row_bg
-        ))
-        table_contents.append(mini_progress_bar(pct_val))
-
-    tot_vals = ["⭐", f"TỔNG CỘNG ({n_emp} NV)", "–", "–", f"{fmt_num(sum_actual)} / {fmt_num(sum_target)}", f"{total_pct:.0f}%"]
-    table_contents.append(make_table_row(
-        tot_vals, weights_lb, aligns_lb, ["#ffffff"] * len(tot_vals), bold=True, bg_color="#f59e0b"
-    ))
+        rows_contents.append(row_box)
+        rows_contents.append({"type": "separator", "color": "#e2e8f0", "margin": "xs"})
 
     bubble = {
         "type": "bubble",
@@ -1508,29 +1440,15 @@ def build_leaderboard_overview_bubble(emp_list, now_str):
             "paddingAll": "md",
             "contents": [
                 {"type": "text", "text": "🏆 BÁO CÁO XẾP HẠNG\n(DOANH THU & THI ĐUA NV)", "weight": "bold", "size": "sm", "color": "#ffffff", "align": "center", "wrap": True},
-                {"type": "text", "text": f"🕒 Cập nhật: {now_str} • {n_emp} Nhân Viên", "size": "xxs", "color": "#ccfbf1", "align": "center", "margin": "xs"}
+                {"type": "text", "text": f"🕒 Cập nhật: {now_str} • {len(emp_list)} Nhân Viên", "size": "xxs", "color": "#ccfbf1", "align": "center", "margin": "xs"}
             ]
         },
         "body": {
             "type": "box",
             "layout": "vertical",
             "backgroundColor": "#ffffff",
-            "paddingAll": "md",
-            "contents": [
-                hero_grid,
-                progress_card,
-                {
-                    "type": "box",
-                    "layout": "vertical",
-                    "backgroundColor": "#ffffff",
-                    "borderColor": "#e2e8f0",
-                    "borderWidth": "1px",
-                    "cornerRadius": "md",
-                    "paddingAll": "sm",
-                    "margin": "md",
-                    "contents": table_contents
-                }
-            ]
+            "paddingAll": "sm",
+            "contents": rows_contents
         }
     }
     return bubble
@@ -1588,7 +1506,7 @@ def build_individual_staff_card(e, rank, total_emp=11, now_str="", thi_dua_list=
         rank_label = f"⚠️ TOP {rank}"
     else:
         # Hạng 4+ bỏ chữ "HẠNG #" cho gọn — badge nằm riêng 1 dòng, không còn đè tên NV
-        header_bg = "#1e40af"
+        header_bg = "#0f2b48"
         rank_badge_bg = "#e0f2fe"
         rank_badge_text = "#0369a1"
         rank_label = f"#{rank}"
@@ -1656,15 +1574,10 @@ def build_individual_staff_card(e, rank, total_emp=11, now_str="", thi_dua_list=
             "wrap": True
         }
     ]
-    sub_parts = []
     if user_id:
-        sub_parts.append(f"Mã NV: {user_id}")
-    if now_str:
-        sub_parts.append(f"🕒 {now_str}")
-    if sub_parts:
         header_rows.append({
             "type": "text",
-            "text": " • ".join(sub_parts),
+            "text": f"Mã NV: {user_id}",
             "size": "xxs",
             "color": "#e2e8f0",
             "wrap": True
@@ -1679,77 +1592,159 @@ def build_individual_staff_card(e, rank, total_emp=11, now_str="", thi_dua_list=
         "contents": header_rows
     }
 
-    # 2. Khối Tiến Độ — đồng bộ giao diện lệnh LK1
+    # 2. Khối 2 Thanh Tiến Độ thiết kế Card sang trọng
     progress_bars_box = {
         "type": "box",
         "layout": "vertical",
-        "backgroundColor": "#f0f9ff",
-        "borderColor": "#bae6fd",
-        "borderWidth": "1px",
+        "backgroundColor": "#f8fafc",
         "cornerRadius": "md",
         "paddingAll": "sm",
-        "margin": "md",
+        "margin": "sm",
         "contents": [
+            # Tiến độ Doanh thu
             {
                 "type": "box",
                 "layout": "horizontal",
                 "alignItems": "center",
                 "contents": [
-                    {"type": "text", "text": "📈 TIẾN ĐỘ DOANH THU THÁNG", "size": "xxs", "color": "#0369a1", "weight": "bold", "flex": 3},
-                    {"type": "text", "text": f"{pct_val:.1f}%", "size": "lg", "color": get_color_class(pct_val / 100.0), "weight": "bold", "align": "end", "flex": 2}
+                    {"type": "text", "text": "💰 Doanh thu:", "size": "xxs", "color": "#64748b", "weight": "bold", "flex": 4},
+                    {"type": "text", "text": f"{fmt_num(actual_val)} / {fmt_num(target_val)} TR", "size": "xxs", "color": "#0f172a", "weight": "bold", "align": "center", "flex": 5},
+                    {
+                        "type": "box",
+                        "layout": "vertical",
+                        "backgroundColor": "#fee2e2" if pct_val < 50 else ("#fef3c7" if pct_val < 100 else "#dcfce7"),
+                        "cornerRadius": "sm",
+                        "paddingStart": "xs",
+                        "paddingEnd": "xs",
+                        "alignItems": "center",
+                        "flex": 2,
+                        "contents": [
+                            {"type": "text", "text": f"{pct_val:.1f}%", "size": "xxs", "color": get_color_class(pct_val / 100.0), "weight": "bold", "align": "center"}
+                        ]
+                    }
                 ]
             },
-            mini_progress_bar(pct_val, height="6px", margin="sm"),
-            {"type": "text", "text": f"{fmt_num(actual_val)} / {fmt_num(target_val)} Tr", "size": "xxs", "color": "#0f172a", "weight": "bold", "margin": "xs"},
-            {"type": "separator", "margin": "md", "color": "#bae6fd"},
+            {
+                "type": "box",
+                "layout": "vertical",
+                "backgroundColor": "#e2e8f0",
+                "height": "8px",
+                "cornerRadius": "xxl",
+                "margin": "xs",
+                "contents": [
+                    {
+                        "type": "box",
+                        "layout": "vertical",
+                        "backgroundColor": get_color_class(pct_val / 100.0),
+                        "height": "8px",
+                        "cornerRadius": "xxl",
+                        "width": f"{max(4, min(100, round(pct_val)))}%",
+                        "contents": [{"type": "filler"}]
+                    }
+                ]
+            },
+            # Tiến độ Thi đua
             {
                 "type": "box",
                 "layout": "horizontal",
                 "alignItems": "center",
                 "margin": "md",
                 "contents": [
-                    {"type": "text", "text": "🏆 TIẾN ĐỘ THI ĐUA", "size": "xxs", "color": "#0369a1", "weight": "bold", "flex": 3},
-                    {"type": "text", "text": f"{td_pct:.0f}%", "size": "lg", "color": get_color_class(td_pct / 100.0), "weight": "bold", "align": "end", "flex": 2}
+                    {"type": "text", "text": "🎯 Thi đua đạt:", "size": "xxs", "color": "#64748b", "weight": "bold", "flex": 4},
+                    {"type": "text", "text": f"{td_passed} / {td_total} Nhóm", "size": "xxs", "color": "#0f172a", "weight": "bold", "align": "center", "flex": 5},
+                    {
+                        "type": "box",
+                        "layout": "vertical",
+                        "backgroundColor": "#fee2e2" if td_pct < 50 else ("#fef3c7" if td_pct < 100 else "#dcfce7"),
+                        "cornerRadius": "sm",
+                        "paddingStart": "xs",
+                        "paddingEnd": "xs",
+                        "alignItems": "center",
+                        "flex": 2,
+                        "contents": [
+                            {"type": "text", "text": f"{td_pct:.1f}%", "size": "xxs", "color": get_color_class(td_pct / 100.0), "weight": "bold", "align": "center"}
+                        ]
+                    }
                 ]
             },
-            mini_progress_bar(td_pct, height="6px", margin="sm"),
-            {"type": "text", "text": f"{td_passed}/{td_total} nhóm dự kiến về đích", "size": "xxs", "color": "#0f172a", "weight": "bold", "margin": "xs"},
-            {"type": "text", "text": f"🎯 Cần ~{fmt_num(m_tieu_ngay)} Tr/ngày • còn {days_left} ngày" if con_lai_val > 0 else "🏆 Đã đạt mục tiêu tháng", "size": "xxs", "color": "#d97706", "weight": "bold", "margin": "sm", "wrap": True}
+            {
+                "type": "box",
+                "layout": "vertical",
+                "backgroundColor": "#e2e8f0",
+                "height": "8px",
+                "cornerRadius": "xxl",
+                "margin": "xs",
+                "contents": [
+                    {
+                        "type": "box",
+                        "layout": "vertical",
+                        "backgroundColor": get_color_class(td_pct / 100.0),
+                        "height": "8px",
+                        "cornerRadius": "xxl",
+                        "width": f"{max(4, min(100, round(td_pct)))}%",
+                        "contents": [{"type": "filler"}]
+                    }
+                ]
+            }
         ]
     }
 
-    # 3. Khối Hero KPI 3x2 — đồng bộ giao diện lệnh LK1
-    hero_grid = {
+    # 3. Khối 5 Chỉ Số Cốt Lõi: thẻ KPI nền đậm, chữ trắng
+    pill_cards = {
         "type": "box",
         "layout": "vertical",
-        "margin": "md",
-        "spacing": "sm",
+        "margin": "sm",
+        "spacing": "xs",
         "contents": [
+            # Hàng 1: Chỉ tiêu tài chính
             {
                 "type": "box",
                 "layout": "horizontal",
-                "spacing": "sm",
+                "spacing": "xs",
                 "contents": [
-                    hero_kpi_box("💰 DOANH THU", f"{fmt_num(actual_val)} Tr ({pct_val:.1f}%)", "#1e40af"),
-                    hero_kpi_box("🎯 MỤC TIÊU", f"{fmt_num(target_val)} Tr", "#475569")
+                    {
+                        "type": "box", "layout": "vertical", "flex": 1, "backgroundColor": "#475569", "paddingAll": "xs", "cornerRadius": "md", "alignItems": "center",
+                        "contents": [
+                            {"type": "text", "text": "🎯 TARGET", "size": "xxs", "color": "#ffffff", "weight": "bold", "align": "center"},
+                            {"type": "text", "text": fmt_num(target_val), "size": "xs", "color": "#ffffff", "weight": "bold", "align": "center"}
+                        ]
+                    },
+                    {
+                        "type": "box", "layout": "vertical", "flex": 1, "backgroundColor": "#1e40af", "paddingAll": "xs", "cornerRadius": "md", "alignItems": "center",
+                        "contents": [
+                            {"type": "text", "text": "💰 LŨY KẾ", "size": "xxs", "color": "#ffffff", "weight": "bold", "align": "center"},
+                            {"type": "text", "text": fmt_num(actual_val), "size": "xs", "color": "#ffffff", "weight": "bold", "align": "center"}
+                        ]
+                    },
+                    {
+                        "type": "box", "layout": "vertical", "flex": 1, "backgroundColor": "#ef4444" if con_lai_val > 0 else "#10b981", "paddingAll": "xs", "cornerRadius": "md", "alignItems": "center",
+                        "contents": [
+                            {"type": "text", "text": "⏳ CÒN THIẾU", "size": "xxs", "color": "#ffffff", "weight": "bold", "align": "center"},
+                            {"type": "text", "text": fmt_num(con_lai_val) if con_lai_val > 0 else "🏆 ĐẠT", "size": "xs", "color": "#ffffff", "weight": "bold", "align": "center"}
+                        ]
+                    }
                 ]
             },
+            # Hàng 2: Dự kiến & Kế hoạch ngày
             {
                 "type": "box",
                 "layout": "horizontal",
-                "spacing": "sm",
+                "spacing": "xs",
                 "contents": [
-                    hero_kpi_box("📍 CÒN THIẾU" if con_lai_val > 0 else "🏆 ĐẠT MỤC TIÊU", f"{fmt_num(con_lai_val)} Tr" if con_lai_val > 0 else "Hoàn thành", "#ef4444" if con_lai_val > 0 else "#10b981"),
-                    hero_kpi_box("⚡ CẦN / NGÀY", f"{fmt_num(m_tieu_ngay)} Tr", "#f59e0b")
-                ]
-            },
-            {
-                "type": "box",
-                "layout": "horizontal",
-                "spacing": "sm",
-                "contents": [
-                    hero_kpi_box("🔮 DỰ KIẾN", f"{du_kien_pct:.1f}%", "#9333ea"),
-                    hero_kpi_box("🏆 THI ĐUA", f"{td_passed}/{td_total} Nhóm", "#10b981")
+                    {
+                        "type": "box", "layout": "horizontal", "flex": 1, "backgroundColor": "#9333ea", "paddingAll": "xs", "cornerRadius": "md", "alignItems": "center", "justifyContent": "space-between",
+                        "contents": [
+                            {"type": "text", "text": "🔮 DỰ KIẾN", "size": "xxs", "color": "#ffffff", "weight": "bold", "flex": 3},
+                            {"type": "text", "text": f"{du_kien_pct:.1f}%", "size": "xs", "color": "#ffffff", "weight": "bold", "align": "end", "flex": 2}
+                        ]
+                    },
+                    {
+                        "type": "box", "layout": "horizontal", "flex": 1, "backgroundColor": "#f59e0b", "paddingAll": "xs", "cornerRadius": "md", "alignItems": "center", "justifyContent": "space-between",
+                        "contents": [
+                            {"type": "text", "text": "⚡ CẦN / NGÀY", "size": "xxs", "color": "#ffffff", "weight": "bold", "flex": 3},
+                            {"type": "text", "text": f"{fmt_num(m_tieu_ngay)} TR", "size": "xs", "color": "#ffffff", "weight": "bold", "align": "end", "flex": 2}
+                        ]
+                    }
                 ]
             }
         ]
@@ -1760,13 +1755,12 @@ def build_individual_staff_card(e, rank, total_emp=11, now_str="", thi_dua_list=
     #    và có wrap nên tên dài xuống dòng thay vì bị LINE cắt thành "…".
     headers = ["#", "NHÓM HÀNG", "MT", "LK / TG", "CÒN", "%HT", "%DK"]
     weights = [1, 4, 1, 3, 2, 2, 2]
-    aligns = ["center", "start", "center", "center", "center", "center", "center"]
-    wraps = [False, True, False, False, False, False, False]
+    aligns = ["center", "start", "center", "center", "center", "end", "end"]
 
-    td_rows = [
-        make_table_header(headers, weights, aligns, bg_color="#0f766e"),
-        {"type": "separator", "color": "#cbd5e1", "margin": "xs"}
-    ]
+    td_rows = [{
+        "type": "box", "layout": "horizontal", "backgroundColor": "#1e293b", "paddingAll": "xs", "cornerRadius": "sm",
+        "contents": [{"type": "text", "text": h, "size": "xxs", "weight": "bold", "color": "#f8fafc", "align": a, "flex": w} for h, w, a in zip(headers, weights, aligns)]
+    }]
 
     for i, td in enumerate(thi_dua_list, 1):
         ht_val = td.get("ht", 0.0)
@@ -1795,16 +1789,31 @@ def build_individual_staff_card(e, rank, total_emp=11, now_str="", thi_dua_list=
             get_color_class(ht_val / 100.0), get_color_class(dk_val / 100.0)
         ]
 
-        row_bg = None
+        def make_staff_cell(v, w, a, c):
+            # wrap=True là CHÌA KHOÁ: tên ngành dài xuống dòng thay vì bị LINE cắt thành "…"
+            cell = {"type": "text", "text": str(v), "size": "xxs", "wrap": True}
+            if w > 1:
+                cell["flex"] = w
+            if a and a != "start":
+                cell["align"] = a
+            if c and c != "#0f172a":
+                cell["color"] = c
+            return cell
+
+        row_bg = "#ffffff" if i % 2 != 0 else "#f8fafc"
         if ht_val >= 100 or cl == "Đạt":
             row_bg = "#f0fdf4"
 
-        td_rows.append(make_table_row(vals, weights, aligns, colors, wraps=wraps, bg_color=row_bg))
+        row_contents = [make_staff_cell(v, w, a, c) for v, c, a, w in zip(vals, colors, aligns, weights)]
 
-    td_rows.append(make_table_row(
-        ["⭐", f"{td_passed}/{td_total} nhóm dự kiến về đích", "–", "–", "–", "–", f"{td_pct:.0f}%"],
-        weights, aligns, ["#ffffff"] * 7, bold=True, bg_color="#0f766e"
-    ))
+        row_box = {
+            "type": "box", "layout": "horizontal", "paddingAll": "xs", "contents": row_contents
+        }
+        if row_bg != "#ffffff":
+            row_box["backgroundColor"] = row_bg
+            row_box["cornerRadius"] = "xs"
+
+        td_rows.append(row_box)
 
     bubble = {
         "type": "bubble",
@@ -1814,23 +1823,12 @@ def build_individual_staff_card(e, rank, total_emp=11, now_str="", thi_dua_list=
             "type": "box",
             "layout": "vertical",
             "backgroundColor": "#ffffff",
-            "paddingAll": "md",
+            "paddingAll": "sm",
             "contents": [
-                hero_grid,
                 progress_bars_box,
-                {
-                    "type": "box",
-                    "layout": "vertical",
-                    "backgroundColor": "#ffffff",
-                    "borderColor": "#e2e8f0",
-                    "borderWidth": "1px",
-                    "cornerRadius": "md",
-                    "paddingAll": "sm",
-                    "margin": "md",
-                    "contents": [
-                        {"type": "text", "text": "🎯 CHI TIẾT THI ĐUA THEO NHÓM HÀNG", "size": "xxs", "color": "#0f766e", "weight": "bold", "margin": "xs"}
-                    ] + td_rows
-                }
+                pill_cards,
+                {"type": "separator", "margin": "sm", "color": "#e2e8f0"},
+                {"type": "box", "layout": "vertical", "margin": "xs", "contents": td_rows}
             ]
         }
     }
