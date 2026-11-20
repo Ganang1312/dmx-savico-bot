@@ -7,10 +7,18 @@ import tempfile
 import threading
 import queue
 import atexit
+import signal
 from datetime import datetime
 import pytz
 import gspread
-from oauth2client.service_account import ServiceAccountCredentials
+try:
+    from google.oauth2.service_account import Credentials as GoogleServiceAccountCredentials
+except ImportError:
+    GoogleServiceAccountCredentials = None
+try:
+    from oauth2client.service_account import ServiceAccountCredentials as LegacyServiceAccountCredentials
+except ImportError:
+    LegacyServiceAccountCredentials = None
 
 # --- PHẦN CẤU HÌNH GOOGLE SHEETS DÙNG CHUNG ---
 
@@ -18,18 +26,39 @@ GOOGLE_CREDS_JSON = os.environ.get('GOOGLE_CREDENTIALS_JSON')
 if not GOOGLE_CREDS_JSON:
     raise ValueError("Lỗi: Biến môi trường GOOGLE_CREDENTIALS_JSON không được thiết lập.")
 
-SCOPE = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
+SCOPE = [
+    'https://www.googleapis.com/auth/spreadsheets',
+    'https://www.googleapis.com/auth/drive'
+]
 google_creds_dict = json.loads(GOOGLE_CREDS_JSON)
-CREDS = ServiceAccountCredentials.from_json_keyfile_dict(google_creds_dict, SCOPE)
-CLIENT = gspread.authorize(CREDS)
+
+def _build_gspread_client():
+    if GoogleServiceAccountCredentials is not None:
+        creds = GoogleServiceAccountCredentials.from_service_account_info(google_creds_dict, scopes=SCOPE)
+        return gspread.authorize(creds)
+    if LegacyServiceAccountCredentials is not None:
+        creds = LegacyServiceAccountCredentials.from_json_keyfile_dict(google_creds_dict, SCOPE)
+        return gspread.authorize(creds)
+    raise ImportError("Thiếu thư viện google-auth hoặc oauth2client để kết nối Google Sheets.")
+
+CLIENT = _build_gspread_client()
 
 _SPREADSHEET = None
 _SPREADSHEET_LOCK = threading.RLock()
 
-def get_spreadsheet():
+def reset_gspread_client():
+    """Làm mới kết nối Google Sheets khi token hết hạn hoặc gặp lỗi kết nối."""
+    global CLIENT, _SPREADSHEET
+    with _SPREADSHEET_LOCK:
+        CLIENT = _build_gspread_client()
+        _SPREADSHEET = None
+    with _CACHE_LOCK:
+        _WORKSHEET_OBJ_CACHE.clear()
+
+def get_spreadsheet(force_reopen=False):
     global _SPREADSHEET
     with _SPREADSHEET_LOCK:
-        if _SPREADSHEET is None:
+        if force_reopen or _SPREADSHEET is None:
             _SPREADSHEET = CLIENT.open(SHEET_NAME)
         return _SPREADSHEET
 
@@ -42,6 +71,7 @@ WORKSHEET_SCHEDULES_NAME = 'schedules'
 WORKSHEET_MEAL_TRACKER_NAME = 'meal_tracker'
 WORKSHEET_ADHOC_TASKS = 'adhoc_tasks'
 WORKSHEET_VESINH_TRACKER_NAME = 'vesinh_tracker'
+WORKSHEET_BOT_STATE_NAME = 'bot_state'
 
 # Nhóm Kho / Nhân viên chính được phép gộp Checklist Kho và Công việc giao thêm
 MAIN_CHECKLIST_GROUP_ID = (
@@ -142,7 +172,7 @@ _TRACKER_MONOTONIC_SPECS = {
         'done_val': 'done',
         'min_len': 8,
         'extra_cols': [6, 7],
-        'key_fn': lambda r: f"{str(r[2]).strip().lower()}|{re.sub(r'\\s+', ' ', str(r[4]).strip().lower())}" if len(r) > 4 else ''
+        'key_fn': lambda r: f"{str(r[2]).strip().lower()}|{' '.join(str(r[4]).strip().lower().split())}" if len(r) > 4 else ''
     },
     WORKSHEET_VESINH_TRACKER_NAME: {
         'date_col': 1,
@@ -150,7 +180,7 @@ _TRACKER_MONOTONIC_SPECS = {
         'done_val': 'done',
         'min_len': 9,
         'extra_cols': [7, 8],
-        'key_fn': lambda r: f"{str(r[2]).strip().lower()}|{re.sub(r'\\s+', ' ', str(r[4]).strip().lower())}" if len(r) > 4 else ''
+        'key_fn': lambda r: f"{str(r[2]).strip().lower()}|{' '.join(str(r[4]).strip().lower().split())}" if len(r) > 4 else ''
     },
     WORKSHEET_ADHOC_TASKS: {
         'date_col': 1,
@@ -349,29 +379,92 @@ def _write_ipc_sheet_cache(worksheet_name, entry):
             pass
 
 
-# Hàng đợi ghi Google Sheets tuần tự chạy ngầm
+# Hàng đợi ghi Google Sheets tuần tự chạy ngầm (an toàn với Gunicorn fork + tự retry)
 _BG_QUEUE = queue.Queue()
+_BG_LOCK = threading.Lock()
+_BG_THREAD = None
+_BG_WORKER_PID = None
+_SYNC_HEALTH = {
+    'ok_count': 0,
+    'err_count': 0,
+    'last_ok_at': '',
+    'last_error': '',
+    'last_error_at': '',
+}
+
+def _record_sync_ok():
+    tz_vn = pytz.timezone('Asia/Ho_Chi_Minh')
+    _SYNC_HEALTH['ok_count'] += 1
+    _SYNC_HEALTH['last_ok_at'] = datetime.now(tz_vn).strftime('%Y-%m-%d %H:%M:%S')
+
+def _record_sync_err(desc, err):
+    tz_vn = pytz.timezone('Asia/Ho_Chi_Minh')
+    _SYNC_HEALTH['err_count'] += 1
+    _SYNC_HEALTH['last_error'] = f"{desc}: {err}"
+    _SYNC_HEALTH['last_error_at'] = datetime.now(tz_vn).strftime('%Y-%m-%d %H:%M:%S')
 
 def _bg_worker_loop():
     while True:
         item = _BG_QUEUE.get()
         if item is None:
+            _BG_QUEUE.task_done()
             break
         fn, args, kwargs, desc = item
-        try:
-            fn(*args, **kwargs)
-        except Exception as e:
-            print(f"[BG-SYNC ERROR] ({desc}): {e}")
-        finally:
-            _BG_QUEUE.task_done()
+        last_err = None
+        for attempt in range(3):
+            try:
+                fn(*args, **kwargs)
+                _record_sync_ok()
+                last_err = None
+                break
+            except Exception as e:
+                last_err = e
+                print(f"[BG-SYNC RETRY {attempt + 1}/3] ({desc}): {e}")
+                err_str = str(e).lower()
+                if any(k in err_str for k in ('401', 'unauthorized', 'invalid_grant', 'token', 'connection', 'reset', 'timeout')):
+                    try:
+                        reset_gspread_client()
+                    except Exception:
+                        pass
+                if attempt < 2:
+                    time.sleep(1.5 * (attempt + 1))
+        if last_err is not None:
+            _record_sync_err(desc, last_err)
+            print(f"[BG-SYNC FAILED AFTER 3 ATTEMPTS] ({desc}): {last_err}")
+        _BG_QUEUE.task_done()
 
-_BG_THREAD = threading.Thread(target=_bg_worker_loop, daemon=True)
-_BG_THREAD.start()
-
+def _ensure_bg_worker():
+    """Đảm bảo luồng ghi ngầm luôn sống trong đúng tiến trình worker hiện tại (chống chết luồng sau fork)."""
+    global _BG_THREAD, _BG_WORKER_PID, _BG_QUEUE
+    cur_pid = os.getpid()
+    with _BG_LOCK:
+        if _BG_WORKER_PID != cur_pid:
+            _BG_QUEUE = queue.Queue()
+            _BG_THREAD = threading.Thread(target=_bg_worker_loop, name=f"sheet-bg-{cur_pid}", daemon=False)
+            _BG_THREAD.start()
+            _BG_WORKER_PID = cur_pid
+        elif _BG_THREAD is None or not _BG_THREAD.is_alive():
+            _BG_THREAD = threading.Thread(target=_bg_worker_loop, name=f"sheet-bg-{cur_pid}", daemon=False)
+            _BG_THREAD.start()
 
 def run_bg_sheet_task(fn, *args, desc="sheet_write", **kwargs):
     """Đẩy một tác vụ ghi Google Sheets vào hàng đợi chạy ngầm để không chặn phản hồi LINE."""
+    _ensure_bg_worker()
     _BG_QUEUE.put((fn, args, kwargs, desc))
+
+def get_bot_health_stats():
+    """Trả về trạng thái đồng bộ Google Sheets và luồng ghi ngầm cho endpoint /health."""
+    return {
+        'pid': os.getpid(),
+        'bg_worker_pid': _BG_WORKER_PID,
+        'bg_worker_alive': bool(_BG_THREAD and _BG_THREAD.is_alive()),
+        'bg_queue_size': _BG_QUEUE.qsize(),
+        'sync_ok_count': _SYNC_HEALTH['ok_count'],
+        'sync_err_count': _SYNC_HEALTH['err_count'],
+        'last_ok_at': _SYNC_HEALTH['last_ok_at'],
+        'last_error': _SYNC_HEALTH['last_error'],
+        'last_error_at': _SYNC_HEALTH['last_error_at'],
+    }
 
 
 def safe_ws_update(ws, range_name, values, raw=True):
@@ -417,14 +510,38 @@ def safe_ws_update(ws, range_name, values, raw=True):
         return False
 
 
-def _flush_bg_queue_on_exit():
-    """Khi tiến trình dừng hoặc Render tắt container để deploy, đảm bảo các tác vụ ghi sheet dở dang được ghi hết."""
+def flush_bg_queue(timeout=15.0):
+    """Chờ các tác vụ ghi Google Sheets còn tồn trong hàng đợi hoàn tất trước khi tắt tiến trình."""
+    if _BG_WORKER_PID != os.getpid() or _BG_THREAD is None or not _BG_THREAD.is_alive():
+        return
+    deadline = time.time() + timeout
+    while not _BG_QUEUE.empty() and time.time() < deadline:
+        time.sleep(0.1)
     try:
-        _BG_QUEUE.join()
+        _BG_QUEUE.put(None)
+        _BG_THREAD.join(timeout=max(1.0, deadline - time.time()))
+    except Exception:
+        pass
+
+def _flush_bg_queue_on_exit():
+    try:
+        flush_bg_queue(timeout=15.0)
     except Exception:
         pass
 
 atexit.register(_flush_bg_queue_on_exit)
+
+try:
+    _prev_sigterm = signal.getsignal(signal.SIGTERM)
+    def _handle_sigterm(signum, frame):
+        flush_bg_queue(timeout=12.0)
+        if callable(_prev_sigterm):
+            _prev_sigterm(signum, frame)
+        else:
+            raise SystemExit(0)
+    signal.signal(signal.SIGTERM, _handle_sigterm)
+except Exception:
+    pass
 
 
 def sync_table_to_sheet_bg(worksheet_name, create_headers=None, clear_tail=False):
@@ -450,6 +567,9 @@ def sync_table_to_sheet_bg(worksheet_name, create_headers=None, clear_tail=False
 
         if not clean_vals:
             return
+        if len(clean_vals) <= 1 and not clear_tail:
+            print(f"[BG-SYNC SKIP] Bỏ qua ghi đè bảng rỗng cho '{worksheet_name}' để bảo vệ dữ liệu hiện có.")
+            return
 
         num_cols = max((len(r) for r in clean_vals), default=len(create_headers or []) or 9)
         normalized_rows = []
@@ -467,7 +587,7 @@ def sync_table_to_sheet_bg(worksheet_name, create_headers=None, clear_tail=False
         if ok:
             print(f"[BG-SYNC SUCCESS] Đã lưu thành công {len(normalized_rows)} dòng vào sheet '{worksheet_name}'.")
         else:
-            print(f"[BG-SYNC FAILED] Lỗi khi lưu dữ liệu vào sheet '{worksheet_name}'.")
+            raise RuntimeError(f"safe_ws_update trả về False cho sheet '{worksheet_name}'")
 
         if clear_tail:
             try:
