@@ -12,8 +12,10 @@ import re
 import os
 import pytz
 from datetime import datetime
+import time
 from config import (
-    get_worksheet_cached_obj, get_cached_values, set_cached_values, run_bg_sheet_task
+    get_worksheet_cached_obj, get_cached_values, set_cached_values, run_bg_sheet_task,
+    is_date_today, safe_ws_update, reset_gspread_client
 )
 
 COUPON_HEADERS = [
@@ -29,24 +31,29 @@ def get_or_create_coupons_worksheet():
 
 def clear_all_coupons():
     """
-    Xóa toàn bộ mã giảm giá trong sheet 'coupons', chỉ giữ lại hàng tiêu đề (header).
+    Xóa toàn bộ mã giảm giá trong sheet 'coupons' đồng bộ trực tiếp lên Google Sheets,
+    chỉ giữ lại hàng tiêu đề (header) để tránh xung đột với lệnh nạp mới ngay sau đó.
     """
-    sheet = get_or_create_coupons_worksheet()
-    if not sheet:
-        return False, "Không thể kết nối với cơ sở dữ liệu phiếu giảm giá."
-
-    try:
-        set_cached_values('coupons', [list(COUPON_HEADERS)])
-        def _bg_clear_coupons():
+    last_err = None
+    for attempt in range(2):
+        try:
             ws = get_or_create_coupons_worksheet()
-            if ws:
-                ws.clear()
-                ws.append_row(COUPON_HEADERS)
-        run_bg_sheet_task(_bg_clear_coupons, desc="clear_all_coupons")
-        return True, "🗑️ Đã xóa sạch toàn bộ mã giảm giá (GVGS) trong hệ thống!\nKho phiếu đã được làm mới, bạn có thể nạp mã mới bằng lệnh `ADD COUPON:`."
-    except Exception as e:
-        print(f"Lỗi khi xóa sạch coupons: {e}")
-        return False, f"Lỗi khi xóa mã giảm giá: {e}"
+            if not ws:
+                raise RuntimeError("Không thể kết nối worksheet 'coupons'.")
+            ws.clear()
+            ws.append_row(COUPON_HEADERS, value_input_option='RAW')
+            set_cached_values('coupons', [list(COUPON_HEADERS)], dirty_hold_seconds=15.0)
+            return True, "🗑️ Đã xóa sạch toàn bộ mã giảm giá (GVGS) trên Google Sheets!\nKho phiếu đã được làm mới, bạn có thể nạp mã mới bằng lệnh `ADD COUPON:`."
+        except Exception as e:
+            last_err = e
+            print(f"[clear_all_coupons attempt {attempt + 1}/2] {e}")
+            try:
+                reset_gspread_client()
+            except Exception:
+                pass
+            if attempt == 0:
+                time.sleep(1.0)
+    return False, f"❌ Lỗi khi xóa mã giảm giá trên Google Sheets: {last_err}"
 
 
 def detect_category(product_name):
@@ -141,7 +148,8 @@ def import_coupons_from_text(raw_text):
     created_at = datetime.now(tz_vietnam).strftime('%Y-%m-%d %H:%M:%S')
 
     try:
-        all_values = get_cached_values('coupons', ttl=60, create_headers=COUPON_HEADERS)
+        # Luôn đọc trực tiếp từ Google Sheets trước khi nạp để đảm bảo không lệch dữ liệu
+        all_values = get_cached_values('coupons', ttl=0, force_refresh=True, create_headers=COUPON_HEADERS)
         if not all_values:
             all_values = [list(COUPON_HEADERS)]
 
@@ -177,19 +185,38 @@ def import_coupons_from_text(raw_text):
             added_products.append(item['product_name'])
 
         if rows_to_add:
-            set_cached_values('coupons', all_values)
-            def _bg_import_coupons(to_add):
-                ws = get_or_create_coupons_worksheet()
-                if ws:
-                    ws.append_rows(to_add, value_input_option='USER_ENTERED')
-            run_bg_sheet_task(_bg_import_coupons, rows_to_add, desc="import_coupons")
+            # Ghi đồng bộ trực tiếp lên Google Sheets bằng RAW (tránh lỗi đổi ngày & báo thành công ảo)
+            last_err = None
+            saved_ok = False
+            for attempt in range(2):
+                try:
+                    ws = get_or_create_coupons_worksheet()
+                    if not ws:
+                        raise RuntimeError("Không thể kết nối worksheet 'coupons'.")
+                    ws.append_rows(rows_to_add, value_input_option='RAW')
+                    saved_ok = True
+                    break
+                except Exception as e:
+                    last_err = e
+                    print(f"[import_coupons attempt {attempt + 1}/2] {e}")
+                    try:
+                        reset_gspread_client()
+                    except Exception:
+                        pass
+                    if attempt == 0:
+                        time.sleep(1.0)
+
+            if not saved_ok:
+                return -1, [str(last_err)], dup_count
+
+            set_cached_values('coupons', all_values, dirty_hold_seconds=15.0)
             unique_products = list(dict.fromkeys(added_products))
             return len(rows_to_add), unique_products, dup_count
 
         return 0, [], dup_count
     except Exception as e:
         print(f"Lỗi khi nạp coupons vào sheet: {e}")
-        return 0, [], 0
+        return -1, [str(e)], 0
 
 
 def get_available_coupons_today(target_date_str=None):
@@ -213,7 +240,7 @@ def get_available_coupons_today(target_date_str=None):
             r_code = str(row[3]).strip()
             r_status = str(row[4]).strip().lower()
 
-            if r_status == 'available' and (r_date == target_date_str or not r_date):
+            if r_status == 'available' and (is_date_today(r_date, target_date_str) or not r_date):
                 valid.append({
                     'date': r_date,
                     'category': r_cat,
@@ -301,7 +328,7 @@ def claim_coupon_for_user(product_name, user_display_name, target_date_str=None)
             if r_prod == target_p:
                 if not category_found:
                     category_found = r_cat
-                if r_status == 'available' and (r_date == target_date_str or not r_date):
+                if r_status == 'available' and (is_date_today(r_date, target_date_str) or not r_date):
                     available_indices.append((row_idx, r_code))
 
         if not available_indices:
@@ -336,18 +363,30 @@ def claim_coupon_for_user(product_name, user_display_name, target_date_str=None)
         mem_row[6] = time_str
         set_cached_values('coupons', all_values)
 
-        def _bg_claim_coupon(r_idx, usr, tm):
+        def _bg_claim_coupon(code_str, fallback_r_idx, usr, tm):
             ws = get_or_create_coupons_worksheet()
             if not ws:
-                return
-            range_update = f'E{r_idx}:G{r_idx}'
-            vals = [['used', usr, tm]]
+                raise RuntimeError("Không thể kết nối worksheet 'coupons' khi cấp mã.")
+            real_row_idx = None
             try:
-                ws.update(range_name=range_update, values=vals)
-            except TypeError:
-                ws.update(range_update, vals)
+                col_codes = ws.col_values(4)
+                code_upper = str(code_str).strip().upper()
+                for idx_1, val in enumerate(col_codes, start=1):
+                    if idx_1 == 1:
+                        continue
+                    if str(val).strip().upper() == code_upper:
+                        real_row_idx = idx_1
+                        break
+            except Exception as e:
+                print(f"[claim_coupon lookup fallback] {e}")
+            if real_row_idx is None:
+                real_row_idx = fallback_r_idx
+            range_update = f'E{real_row_idx}:G{real_row_idx}'
+            vals = [['used', usr, tm]]
+            if not safe_ws_update(ws, range_update, vals, raw=True):
+                raise RuntimeError(f"Không thể cập nhật trạng thái mã {code_str} tại {range_update}")
 
-        run_bg_sheet_task(_bg_claim_coupon, target_row_idx, user_display_name, time_str, desc=f"claim_coupon_{chosen_code}")
+        run_bg_sheet_task(_bg_claim_coupon, chosen_code, target_row_idx, user_display_name, time_str, desc=f"claim_coupon_{chosen_code}")
         return True, chosen_code, remaining_count, category_found
     except Exception as e:
         print(f"Lỗi khi cấp coupon: {e}")

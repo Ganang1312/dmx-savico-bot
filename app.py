@@ -26,7 +26,8 @@ from config import (
     WORKSHEET_TRACKER_NAME, WORKSHEET_SCHEDULES_NAME,
     get_spreadsheet, MAIN_CHECKLIST_GROUP_ID, is_kho_checklist_group,
     get_cached_values, get_cached_records, set_cached_values,
-    run_bg_sheet_task, get_liff_url
+    run_bg_sheet_task, get_liff_url,
+    WORKSHEET_BOT_STATE_NAME, get_bot_health_stats, sync_table_to_sheet_bg
 )
 from schedule_handler import send_daily_schedule
 from flex_handler import (
@@ -125,6 +126,40 @@ _SHIFT_BROADCAST_STATE = {
 }
 
 
+_BOT_STATE_HEADERS = ['key', 'date', 'value', 'updated_at']
+_BOT_STATE_LOADED_DATE = ''
+
+def _load_broadcast_state_from_sheet(today_str):
+    global _BOT_STATE_LOADED_DATE
+    if _BOT_STATE_LOADED_DATE == today_str:
+        return
+    try:
+        rows = get_cached_values(WORKSHEET_BOT_STATE_NAME, ttl=120, create_headers=_BOT_STATE_HEADERS)
+        for r in rows[1:]:
+            if len(r) < 3:
+                continue
+            k, d, v = str(r[0]).strip(), str(r[1]).strip(), str(r[2]).strip()
+            if d == today_str and k.startswith('shift_sent:'):
+                parts = k.split(':', 2)
+                if len(parts) == 3 and parts[1] in ('sang', 'chieu') and v == '1':
+                    _SHIFT_BROADCAST_STATE[parts[1]].add(parts[2])
+        _BOT_STATE_LOADED_DATE = today_str
+    except Exception as e:
+        print(f"[bot_state load warning] {e}")
+
+def _persist_broadcast_state(today_str):
+    try:
+        tz_vn = pytz.timezone('Asia/Ho_Chi_Minh')
+        now_s = datetime.now(tz_vn).strftime('%Y-%m-%d %H:%M:%S')
+        rows = [list(_BOT_STATE_HEADERS)]
+        for st in ('sang', 'chieu'):
+            for gid in sorted(_SHIFT_BROADCAST_STATE[st]):
+                rows.append([f'shift_sent:{st}:{gid}', today_str, '1', now_s])
+        set_cached_values(WORKSHEET_BOT_STATE_NAME, rows, dirty_hold_seconds=30.0)
+        sync_table_to_sheet_bg(WORKSHEET_BOT_STATE_NAME, create_headers=_BOT_STATE_HEADERS, clear_tail=True)
+    except Exception as e:
+        print(f"[bot_state persist warning] {e}")
+
 def _sync_broadcast_date():
     tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
     today_str = datetime.now(tz_vietnam).strftime('%Y-%m-%d')
@@ -133,15 +168,19 @@ def _sync_broadcast_date():
             _SHIFT_BROADCAST_STATE['date'] = today_str
             _SHIFT_BROADCAST_STATE['sang'] = set()
             _SHIFT_BROADCAST_STATE['chieu'] = set()
+        _load_broadcast_state_from_sheet(today_str)
     return today_str
 
 
 def mark_shift_broadcast_sent(group_id, shift_type):
     if not group_id or shift_type not in ('sang', 'chieu'):
         return
-    _sync_broadcast_date()
+    today_str = _sync_broadcast_date()
+    gid = str(group_id).strip()
     with _SHIFT_BROADCAST_LOCK:
-        _SHIFT_BROADCAST_STATE[shift_type].add(str(group_id).strip())
+        if gid not in _SHIFT_BROADCAST_STATE[shift_type]:
+            _SHIFT_BROADCAST_STATE[shift_type].add(gid)
+            _persist_broadcast_state(today_str)
 
 
 def is_shift_broadcast_sent(group_id, shift_type):
@@ -354,8 +393,7 @@ def load_allowed_ids():
             except ValueError: continue
         allowed_ids_cache = new_allowed_ids
     except Exception as e:
-        print(f"Lỗi tải danh sách ID: {e}")
-        allowed_ids_cache = set()
+        print(f"Lỗi tải danh sách ID (giữ nguyên danh sách cache cũ): {e}")
 
 def keep_alive():
     ping_url = os.environ.get("RENDER_EXTERNAL_URL")
@@ -631,6 +669,13 @@ def callback():
 @app.route("/ping")
 def ping():
     return "OK", 200
+
+@app.route("/health")
+def health_check():
+    return jsonify({
+        'status': 'ok',
+        'sheets_sync': get_bot_health_stats()
+    }), 200
 
 
 # ============================================================================
@@ -1819,11 +1864,14 @@ def handle_message(event):
         content_after = re.sub(r'^(?:ADD|THEM|THÊM|NẠP|NAP)\s+COUPON\s*:?', '', user_message, flags=re.IGNORECASE).strip()
         if content_after:
             count, prods, dup_count = import_coupons_from_text(content_after)
-            if count > 0:
+            if count == -1:
+                err_detail = prods[0] if prods else "Không rõ nguyên nhân"
+                reply = f"❌ Lỗi khi lưu mã giảm giá lên Google Sheets (chưa được lưu):\n{err_detail}\n\nVui lòng thử lại sau vài giây hoặc kiểm tra kết nối Google Sheets."
+            elif count > 0:
                 p_sample = ", ".join(prods[:4])
                 if len(prods) > 4:
                     p_sample += f" và {len(prods) - 4} model khác"
-                reply = f"✅ Đã nạp thành công thêm {count} mã giảm giá vào hệ thống!\n📦 Áp dụng cho: {p_sample}."
+                reply = f"✅ Đã lưu thành công {count} mã giảm giá lên Google Sheets!\n📦 Áp dụng cho: {p_sample}."
                 if dup_count > 0:
                     reply += f"\nℹ️ Đã tự động bỏ qua {dup_count} mã bị trùng lặp."
                 reply += "\n\n👉 Nhân viên có thể gõ `gvgs` để nhận mã."
@@ -2500,6 +2548,18 @@ def handle_message(event):
 
     except Exception as e:
         print(f"!!! GẶP LỖI NGHIÊM TRỌNG KHI XỬ LÝ BÁO CÁO: {repr(e)}")
+
+    # 9. Auto-Trigger mở ca miễn phí (0 tốn Push) khi có tin nhắn thường đầu tiên trong nhóm
+    if event_group_id:
+        try:
+            pending_msgs, pending_shift = get_pending_auto_shift_messages(event_group_id)
+            if pending_msgs and pending_shift:
+                line_bot_api.reply_message(event.reply_token, pending_msgs[:LINE_MAX_MESSAGES])
+                mark_shift_broadcast_sent(event_group_id, pending_shift)
+                print(f"[AUTO-SHIFT] Đã tự động phát bản tin mở ca '{pending_shift}' cho nhóm {event_group_id} qua reply_token miễn phí.")
+                return
+        except Exception as e_auto:
+            print(f"Lỗi Auto-Trigger mở ca cho nhóm {event_group_id}: {e_auto}")
 
 
 # ============================================================================
