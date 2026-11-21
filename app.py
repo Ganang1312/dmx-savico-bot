@@ -2728,6 +2728,42 @@ def api_bridge_on_shift_staff():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
+<<<<<<< HEAD
+=======
+@app.route("/api/bot-bridge/push-line", methods=["POST"])
+def api_bridge_push_line():
+    """Nhận lệnh từ nút bấm Telegram trên SavicoBot để đẩy thẻ số liệu / vinh danh / nhắc nhở sang nhóm LINE."""
+    incoming_secret = request.headers.get("X-Cron-Secret")
+    if not CRON_SECRET_KEY or incoming_secret != CRON_SECRET_KEY:
+        abort(403)
+    try:
+        body = request.get_json(force=True) or {}
+        mode = str(body.get("mode") or "text").strip().lower()
+        text = str(body.get("text") or "").strip()
+        target = str(body.get("target_group") or "employee").strip().lower()
+
+        if target == "pg":
+            group_id = (os.environ.get("PG_GROUP_ID") or "").strip()
+        else:
+            group_id = (os.environ.get("EMPLOYEE_GROUP_ID") or MAIN_CHECKLIST_GROUP_ID or "").strip()
+
+        if not group_id:
+            return jsonify({"ok": False, "error": "Chưa cấu hình EMPLOYEE_GROUP_ID trên Render."}), 400
+
+        if mode == "realtime_flex":
+            rt_messages, _ = build_realtime_messages(max_messages=LINE_MAX_MESSAGES)
+            if not rt_messages:
+                return jsonify({"ok": False, "error": "Không có dữ liệu Realtime để tạo thẻ."}), 404
+            line_bot_api.push_message(group_id, rt_messages[:5])
+            return jsonify({"ok": True, "mode": "realtime_flex", "sent": len(rt_messages[:5])}), 200
+
+        if not text:
+            return jsonify({"ok": False, "error": "Thiếu nội dung tin nhắn cần đẩy sang LINE."}), 400
+        line_bot_api.push_message(group_id, TextSendMessage(text=text[:4500]))
+        return jsonify({"ok": True, "mode": mode, "sent": 1}), 200
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+>>>>>>> d4513a8e6d748a18dd7344f5bfa95a55e0338fa4
 
 
 if __name__ == "__main__":
