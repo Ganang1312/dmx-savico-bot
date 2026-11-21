@@ -2664,6 +2664,105 @@ def trigger_afternoon_tasks():
         return "Error", 500
 
 
+
+
+# ============================================================================
+# CẦU NỐI AN TOÀN GIỮA SAVICOBOT (TELEGRAM) VÀ BOT LINE (RENDER)
+# ============================================================================
+@app.route("/api/bot-bridge/on-shift-staff", methods=["GET"])
+def api_bridge_on_shift_staff():
+    """Trả về danh sách nhân viên đang trực Ca Sáng / Ca Chiều hôm nay (loại người nghỉ)."""
+    incoming_secret = request.headers.get("X-Cron-Secret") or request.args.get("secret")
+    if not CRON_SECRET_KEY or incoming_secret != CRON_SECRET_KEY:
+        abort(403)
+    try:
+        from schedule_handler import parse_schedule_text, _PREFIX_RE
+        from config import WORKSHEET_SCHEDULES_NAME, get_cached_records, get_vietnamese_day_of_week, clean_staff_name
+
+        tz = pytz.timezone("Asia/Ho_Chi_Minh")
+        now = datetime.now(tz)
+        today_vn = get_vietnamese_day_of_week()
+        records = get_cached_records(WORKSHEET_SCHEDULES_NAME)
+
+        raw_text = ""
+        for row in records:
+            r_type = str(row.get("type") or row.get("loai") or "").strip().lower()
+            r_day = str(row.get("day") or row.get("thu") or row.get("ngay") or "").strip().lower()
+            if r_type in ("employee", "nv", "nhanvien", "nhân viên") and today_vn.lower() in r_day:
+                raw_text = str(row.get("schedule") or row.get("content") or row.get("noi_dung") or "")
+                break
+
+        ca_sang, ca_chieu, nghi = [], [], []
+        if raw_text:
+            for part in parse_schedule_text(raw_text):
+                sh = part.get("shift", "")
+                clean = _PREFIX_RE.sub("", part.get("staff", ""))
+                names = [
+                    clean_staff_name(re.sub(r"\([^)]*\)", "", s).strip())
+                    for s in re.split(r"[,\n]+", clean)
+                    if s.strip() and not s.strip().isdigit()
+                ]
+                names = [n for n in names if n]
+                if sh == "Ca Sáng":
+                    ca_sang.extend(names)
+                elif sh == "Ca Chiều":
+                    ca_chieu.extend(names)
+                elif sh == "Nghỉ":
+                    nghi.extend(names)
+
+        cur_hour = now.hour
+        active_now = list(dict.fromkeys(ca_sang if cur_hour < 14 else (ca_chieu if cur_hour >= 15 else (ca_sang + ca_chieu))))
+        all_on_shift = list(dict.fromkeys(ca_sang + ca_chieu))
+        return jsonify({
+            "ok": True,
+            "date": now.strftime("%Y-%m-%d"),
+            "day_of_week": today_vn,
+            "current_shift": "Ca Sáng" if cur_hour < 14 else ("Giao ca" if cur_hour < 15 else "Ca Chiều"),
+            "ca_sang": ca_sang,
+            "ca_chieu": ca_chieu,
+            "active_now": active_now,
+            "all_on_shift": all_on_shift,
+            "off_duty": nghi
+        }), 200
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/bot-bridge/push-line", methods=["POST"])
+def api_bridge_push_line():
+    """Nhận lệnh từ nút bấm Telegram trên SavicoBot để đẩy thẻ số liệu / vinh danh / nhắc nhở sang nhóm LINE."""
+    incoming_secret = request.headers.get("X-Cron-Secret")
+    if not CRON_SECRET_KEY or incoming_secret != CRON_SECRET_KEY:
+        abort(403)
+    try:
+        body = request.get_json(force=True) or {}
+        mode = str(body.get("mode") or "text").strip().lower()
+        text = str(body.get("text") or "").strip()
+        target = str(body.get("target_group") or "employee").strip().lower()
+
+        if target == "pg":
+            group_id = (os.environ.get("PG_GROUP_ID") or "").strip()
+        else:
+            group_id = (os.environ.get("EMPLOYEE_GROUP_ID") or MAIN_CHECKLIST_GROUP_ID or "").strip()
+
+        if not group_id:
+            return jsonify({"ok": False, "error": "Chưa cấu hình EMPLOYEE_GROUP_ID trên Render."}), 400
+
+        if mode == "realtime_flex":
+            rt_messages, _ = build_realtime_messages(max_messages=LINE_MAX_MESSAGES)
+            if not rt_messages:
+                return jsonify({"ok": False, "error": "Không có dữ liệu Realtime để tạo thẻ."}), 404
+            line_bot_api.push_message(group_id, rt_messages[:5])
+            return jsonify({"ok": True, "mode": "realtime_flex", "sent": len(rt_messages[:5])}), 200
+
+        if not text:
+            return jsonify({"ok": False, "error": "Thiếu nội dung tin nhắn cần đẩy sang LINE."}), 400
+        line_bot_api.push_message(group_id, TextSendMessage(text=text[:4500]))
+        return jsonify({"ok": True, "mode": mode, "sent": 1}), 200
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port)

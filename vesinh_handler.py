@@ -162,10 +162,7 @@ def allocate_cleaning_zones(nv_list):
 
     return assignments
 
-def clean_staff_name(name):
-    name = re.sub(r'^\(\d+.*?\):?\s*', '', name)
-    name = re.sub(r'^[•\-\+:\.]\s*', '', name)
-    return name.strip()
+from config import clean_staff_name
 
 def parse_staff_from_raw(raw_text, target_shift):
     if not raw_text:

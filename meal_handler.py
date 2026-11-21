@@ -25,16 +25,7 @@ def normalize_text(text):
     text = text.strip().lower()
     return unicodedata.normalize('NFC', text)
 
-def get_vietnamese_day_of_week():
-    tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
-    weekday = datetime.now(tz_vietnam).weekday()
-    days = ["Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ Bảy", "Chủ Nhật"]
-    return days[weekday]
-
-def clean_staff_name(name):
-    name = re.sub(r'^\(\d+.*?\):?\s*', '', name)
-    name = re.sub(r'^[•\-\+:\.]\s*', '', name)
-    return name.strip()
+from config import get_vietnamese_day_of_week, clean_staff_name
 
 
 SCHEDULE_KEYWORDS = ["Ca Sáng", "Ca Chiều", "Nghỉ", "Vệ Sinh Kho", "Vệ Sinh"]

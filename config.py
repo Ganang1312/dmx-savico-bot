@@ -763,3 +763,18 @@ def get_cached_records(worksheet_name, ttl=60, force_refresh=False, create_heade
     """Đọc danh sách dict (get_all_records) trực tiếp từ RAM Cache."""
     vals = get_cached_values(worksheet_name, ttl=ttl, force_refresh=force_refresh, create_headers=create_headers)
     return values_to_records(vals)
+
+
+# --- HÀM TIỆN ÍCH DÙNG CHUNG (GOM TỪ meal_handler / schedule_handler / vesinh_handler) ---
+def get_vietnamese_day_of_week():
+    """Lấy tên ngày trong tuần bằng tiếng Việt theo giờ Việt Nam."""
+    tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
+    weekday = datetime.now(tz_vietnam).weekday()
+    days = ["Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ Bảy", "Chủ Nhật"]
+    return days[weekday]
+
+def clean_staff_name(name):
+    """Chuẩn hóa tên nhân viên (bỏ mã số/ký tự đầu dòng)."""
+    name = re.sub(r'^\(\d+.*?\):?\s*', '', str(name or ''))
+    name = re.sub(r'^[•\-\+:\.]\s*', '', name)
+    return name.strip()
