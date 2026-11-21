@@ -269,7 +269,7 @@ def determine_is_sl(comp_type, nganh_clean, sl=0.0, dt=0.0, tg=0.0, config_obj=N
     clean = str(nganh_clean).lower().strip()
     
     is_sl = False
-    if comp_type_num in (2, 6) or any(k in clean for k in ['sim', 'camera', 'nạp rút', 'thẻ tín dụng']):
+    if comp_type_num in (2, 6) or any(k in clean for k in ['sim', 'camera', 'nạp rút', 'thẻ tín dụng', 'mở thẻ', 'vay tiền', 'bảo hiểm']):
         is_sl = True
     elif comp_type_num in (1, 3, 4, 5):
         is_sl = False
@@ -2621,13 +2621,13 @@ def build_realtime_flex(detail_limit=None):
             parse_number(get_key_val(r, "quantity_KFactor", "quantity_kfactor", default=0.0)),
             parse_number(get_key_val(r, "số lượng", "quantity", default=0.0))
         )
-        target_day = parse_number(get_key_val(r, "target_Day", "target_day", "mục tiêu ngày", default=0.0))
+        target_day = parse_number(get_key_val(r, "Target (QĐ)", "target (qđ)", "Target", "target", "target_Day", "target_day", "mục tiêu ngày", default=0.0))
         target_effective = target_day if target_day > 0 else lk_info["mt_ngay"]
         
         comp_type_rt = get_key_val(r, "competitiontype", "competitionType", "phân loại", "loại", default=None)
-        is_sl_rt = lk_info.get("is_sl")
-        if is_sl_rt is None:
-            is_sl_rt = determine_is_sl(comp_type_rt, nganh_clean, sl=rt_sl, dt=rt_dt, tg=target_effective, config_obj=c_obj)
+        is_sl_rt = determine_is_sl(comp_type_rt, nganh_clean, sl=rt_sl, dt=rt_dt, tg=target_effective, config_obj=c_obj)
+        if not is_sl_rt and lk_info.get("is_sl") is True:
+            is_sl_rt = True
                 
         actual = rt_sl if is_sl_rt else rt_dt
         ht_target = actual / target_effective if target_effective > 0 else (1.0 if actual > 0 else 0.0)

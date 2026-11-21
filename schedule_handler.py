@@ -18,12 +18,7 @@ if not CHANNEL_ACCESS_TOKEN:
 
 line_bot_api = LineBotApi(CHANNEL_ACCESS_TOKEN) if CHANNEL_ACCESS_TOKEN else None
 
-def get_vietnamese_day_of_week():
-    """Lấy tên ngày trong tuần bằng tiếng Việt cho ngày hiện tại."""
-    tz_vietnam = pytz.timezone('Asia/Ho_Chi_Minh')
-    weekday = datetime.now(tz_vietnam).weekday()
-    days = ["Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ Bảy", "Chủ Nhật"]
-    return days[weekday]
+from config import get_vietnamese_day_of_week
 
 def parse_schedule_text(schedule_text):
     """Phân tích văn bản lịch làm việc thành các ca và nhân viên."""
